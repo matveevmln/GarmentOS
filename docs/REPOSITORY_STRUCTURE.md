@@ -63,8 +63,8 @@ packages/domain/
 ├── identity/                  # пользователи, роли, компании
 ├── catalog/                   # модели, SKU
 ├── procurement/                # материалы, поставщики, закупки
-├── bom-tech-specs/             # спецификации, техкарты
-├── production/                 # производственные заказы, этапы
+├── bom/                        # спецификации расхода материалов (tech_specs удалена, см. docs/DATABASE_SCHEMA.md п.0)
+├── contract-manufacturing/     # цеха-подрядчики, заказы пошива (не собственное производство — см. docs/DATABASE_SCHEMA.md п.0)
 ├── warehouse/                  # склад, остатки, движения
 ├── sales/                      # заказы всех каналов
 ├── marketplace-integration/    # оркестрация коннекторов (использует packages/connectors)

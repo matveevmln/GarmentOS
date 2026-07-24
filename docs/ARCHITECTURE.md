@@ -59,8 +59,8 @@ flowchart TB
 | **Identity & Access** | Пользователи, роли, права, компании (tenants) | `User`, `Role`, `Permission`, `Company` |
 | **Catalog** | Модели одежды, SKU-матрица (размер × цвет) | `Product`, `ProductVariant` |
 | **Materials & Procurement** | Материалы, поставщики, закупки | `Material`, `Supplier`, `PurchaseOrder` |
-| **BOM & Tech Specs** | Спецификации расхода, техкарты | `Bom`, `BomItem`, `TechSpec` |
-| **Production** | Производственные заказы и этапы | `ProductionOrder`, `ProductionBatch`, `ProductionStage` |
+| **BOM** | Спецификации расхода материалов | `Bom`, `BomItem` |
+| **Contract Manufacturing** (переименован из «Production» по итогам аудита бизнес-модели, см. `DATABASE_SCHEMA.md` п.0) | Заказы пошива у независимых подрядных цехов и контроль их исполнения — **не собственное производство** | `Workshop`, `ProductionOrder`, `ProductionOrderVariant` |
 | **Warehouse & Inventory** | Остатки, приёмки, отгрузки, инвентаризации | `Warehouse`, `StockItem`, `StockMovement` |
 | **Sales & Orders** | Унифицированные заказы всех каналов | `Order`, `OrderItem`, `SalesChannel` |
 | **Marketplace Integration** | Адаптеры к внешним площадкам | `MarketplaceAccount`, `MarketplaceListing`, connector-интерфейс |
@@ -99,15 +99,17 @@ sequenceDiagram
     SALES-->>WB: подтверждение (при необходимости API)
 ```
 
-### 4.2. От закупки ткани до готового SKU на складе
+### 4.2. От закупки ткани до готового SKU на складе (через подрядный цех)
+
+> Мы не производим — мы размещаем заказ у независимого швейного цеха (`workshops`) и контролируем исполнение. Этапы кроя/пошива/ОТК происходят внутри цеха и нам операционно не видны — мы отслеживаем факт и срок исполнения заказа, а не внутренние стадии (см. `DATABASE_SCHEMA.md` п.0 и п.7).
 
 ```mermaid
 flowchart LR
-    A[Заявка на закупку] --> B[Приёмка материала на склад]
-    B --> C[Производственный заказ на модель]
-    C --> D["Списание материалов по BOM"]
-    D --> E["Этапы: крой → пошив → ОТК → упаковка"]
-    E --> F["Приёмка готовой продукции (SKU) на склад"]
+    A[Заявка на закупку] --> B[Приёмка материала на собственный склад]
+    B --> C["Заказ пошива у цеха (production_orders, workshop_id, agreed_unit_price)"]
+    C --> D["Передача материалов цеху (stock_movements: transfer на склад-у-цеха)"]
+    D --> E["Цех шьёт самостоятельно — статус заказа: in_progress → ready_for_pickup"]
+    E --> F["Приёмка готовой продукции (SKU) на собственный склад + списание материалов на складе-у-цеха"]
     F --> G["Получение и привязка кодов «Честный Знак»"]
 ```
 
