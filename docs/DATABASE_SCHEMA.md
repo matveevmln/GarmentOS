@@ -40,6 +40,22 @@
 
 Остальные найденные в аудите пробелы (№1-3, №7) — read-model'ы и use case'ы, не требующие изменения схемы; см. таблицу решений в `USER_JOURNEY_AUDIT.md`.
 
+## 0d. Дополнение: «черновики» вместо чистых предложений (2026-07-24, обратная связь по Inbox)
+
+После представления архитектуры Inbox (п.0c) владелец проекта уточнил: Inbox должен быть не просто загрузкой файлов, а единой точкой входа для любого источника (включая CSV/ZIP/пересланные сообщения/облачные ссылки — см. `INBOX_ARCHITECTURE.md`, раздел 1), и там, где это безопасно, AI должен сразу создавать реальный черновик, а не только предложение, — «ты ничего не потерял», даже если не отреагировал сразу. Изменения в схеме:
+
+| Изменение | Было | Стало | Почему |
+|---|---|---|---|
+| `production_order_status` получил значение `draft` | `placed/in_progress/ready_for_pickup/received/cancelled` | + `draft` (первое значение) | Черновик заказа в цех, созданный Inbox из входящего сообщения, виден в обычном списке заказов сразу, не только в разделе «Входящие» (`INBOX_ARCHITECTURE.md`, раздел 2.1) |
+| Добавлен `suppliers.status` | — (не было статуса) | `partner_status`: `draft/active/archived` | AI встречает незнакомого поставщика в счёте → создаёт черновик поставщика, не блокируя черновик закупки, которая на него ссылается |
+| `workshops.is_active` (boolean) заменён на `workshops.status` | `is_active: boolean` | `partner_status`: `draft/active/archived` | Единообразие с `suppliers` — тот же паттерн черновика для нового цеха, ранее замеченного в сообщении |
+
+`partner_status` — общий enum для `suppliers`/`workshops` (не дублируется по одному на таблицу — обе сущности концептуально одинаковы: контрагент, который может быть черновиком/активным/архивным).
+
+**Важно**: черновик — это не вторая копия данных для Inbox, а настоящая строка в `purchase_orders`/`production_orders`/`suppliers`/`workshops` со `status='draft'`, видимая в обычных списках приложения. `inbox_suggestions.suggested_entity_id` в этом случае указывает на только что созданный черновик, а не только на найденную существующую сущность (см. `INBOX_ARCHITECTURE.md`, раздел 2.1, таблица «что становится черновиком сразу»).
+
+Миграция сгенерирована и применена к реальному Postgres (44 таблицы, 24 enum-типа, 89 внешних ключей); сценарий «Inbox создаёт черновик закупки и черновика поставщика → пользователь подтверждает → оба переходят в активный статус» проверен сквозным smoke-тестом.
+
 ## 1. Сквозные конвенции
 
 - **Именование таблиц**: `snake_case`, множественное число (`products`, `stock_items`).
@@ -188,7 +204,7 @@ flowchart TD
 | Таблица | Ключевые поля | Комментарий |
 |---|---|---|
 | `materials` | `id`, `company_id`, `name`, `type` (`fabric/trim/packaging/accessory`), `unit` (`m/kg/pcs`), `reorder_point` | Ткани, фурнитура, упаковка и прочие материалы. `packaging` добавлен в этом проходе |
-| `suppliers` | `id`, `company_id`, `name`, `type` (`fabric/trim/packaging/logistics`), `inn`, `contact_info` | Поставщики — теперь явно категоризированы, включая транспортные компании (`logistics`, используются как `shipments.carrier_id`). Один поставщик = одна основная категория для MVP; поставщик нескольких категорий заводится отдельными строками при необходимости (не усложняем до реальной необходимости) |
+| `suppliers` | `id`, `company_id`, `name`, `type` (`fabric/trim/packaging/logistics`), `status` (`draft/active/archived`), `inn`, `contact_info` | Поставщики — явно категоризированы, включая транспортные компании (`logistics`, используются как `shipments.carrier_id`). `status=draft` — создан автоматически Inbox из входящего документа, ещё не подтверждён (см. п.0d). Один поставщик = одна основная категория для MVP; поставщик нескольких категорий заводится отдельными строками при необходимости (не усложняем до реальной необходимости) |
 | `purchase_orders` | `id`, `company_id`, `supplier_id`, `status` (`draft/sent/partially_received/received/cancelled`), `ordered_at`, `expected_date` | Заявка/заказ поставщику материалов. `ordered_at` — дата фактического размещения заказа (бизнес-дата, отдельно от `created_at`) — основа для истории цен |
 | `purchase_order_items` | `id`, `purchase_order_id`, `material_id`, `quantity`, `unit_price` | Позиции заказа. **История закупочных цен по материалу** — не отдельная таблица, а отчёт/представление: `unit_price` этой таблицы + `ordered_at`/`supplier_id` родительского `purchase_orders`, сгруппированные по `material_id` (см. п.0b) |
 
@@ -207,8 +223,8 @@ flowchart TD
 
 | Таблица | Ключевые поля | Комментарий |
 |---|---|---|
-| `workshops` | `id`, `company_id`, `name`, `inn`, `contact_info`, `specialization`, `is_active` | Независимый подрядный швейный цех — поставщик услуги пошива, не материалов |
-| `production_orders` | `id`, `company_id`, `product_id`, `bom_id`, `workshop_id`, `planned_quantity`, `agreed_unit_price`, `materials_provided_by_us` (bool), `status` (`placed/in_progress/ready_for_pickup/received/cancelled`), `due_date`, `received_at NULL` | Заказ пошива у конкретного цеха по согласованной цене за единицу. `status` — простое поле вместо отдельной таблицы стадий. `received_at` (добавлено по итогам `USER_JOURNEY_AUDIT.md`, пробел №5) — фактическая дата завершения, без которой невозможно сравнить план (`due_date`) и факт для рейтинга цеха и алертов о просрочке |
+| `workshops` | `id`, `company_id`, `name`, `inn`, `contact_info`, `specialization`, `status` (`draft/active/archived`) | Независимый подрядный швейный цех — поставщик услуги пошива, не материалов. `status` заменил булев `is_active` (см. п.0d) — единообразно с `suppliers`, поддерживает черновик от Inbox |
+| `production_orders` | `id`, `company_id`, `product_id`, `bom_id`, `workshop_id`, `planned_quantity`, `agreed_unit_price`, `materials_provided_by_us` (bool), `status` (`draft/placed/in_progress/ready_for_pickup/received/cancelled`), `due_date`, `received_at NULL` | Заказ пошива у конкретного цеха по согласованной цене за единицу. `status=draft` — создан автоматически Inbox, ещё не подтверждён (п.0d); `status` в остальном — простое поле вместо отдельной таблицы стадий. `received_at` — фактическая дата завершения, без которой невозможно сравнить план (`due_date`) и факт для рейтинга цеха и алертов о просрочке (`USER_JOURNEY_AUDIT.md`, пробел №5) |
 | `production_order_variants` | `production_order_id`, `product_variant_id`, `quantity` | Разбивка заказа по размеру/цвету (SKU). Фактически принятое количество по SKU — не отдельная колонка, а read-model: сумма `stock_movements` типа `receipt` со ссылкой на этот заказ (`reference_type='production_order'`), сгруппированная по `product_variant_id` — см. `USER_JOURNEY_AUDIT.md`, шаг 7 |
 
 **Не в MVP, возможно в Future**: `production_batches` — если появится потребность дробить один заказ на несколько независимо отслеживаемых партий поставки.
@@ -282,7 +298,7 @@ flowchart TD
 |---|---|---|
 | `inbox_channels` | `id`, `company_id`, `type` (`telegram/whatsapp/wechat/email/upload`), `external_identifier` (bot chat id / email-алиас), `is_active` | Подключённый канал, через который в компанию поступают сообщения. MVP: `telegram`, `upload` (см. `INBOX_ARCHITECTURE.md`, раздел 4) |
 | `inbox_items` | `id`, `company_id`, `inbox_channel_id`, `source_identifier` (кто прислал — телефон/Telegram-хэндл), `raw_text NULL`, `file_url NULL` (через `StorageAdapter`), `received_at`, `status` (`new/processing/suggested/confirmed/rejected/ignored`) | Сырое входящее сообщение — фото/PDF/Excel/голос (транскрибированный в текст)/обычный текст. Ничего не пишет в доменные таблицы напрямую |
-| `inbox_suggestions` | `id`, `inbox_item_id`, `suggestion_type` (`create_purchase_order/attach_document/update_production_order_status/record_transaction/update_material_prices/create_note/...`), `extracted_data` (jsonb), `suggested_entity_type NULL`, `suggested_entity_id NULL`, `confidence` (numeric 0-1), `status` (`pending/accepted/rejected/edited_and_accepted`), `reviewed_by NULL`, `reviewed_at NULL` | Результат AI-классификации одного `inbox_item`. Подтверждение (`accepted`/`edited_and_accepted`) вызывает обычный application service соответствующего домена (`INBOX_ARCHITECTURE.md`, раздел 1) — эта таблица никогда не является источником истины для доменного состояния, только предложением |
+| `inbox_suggestions` | `id`, `inbox_item_id`, `suggestion_type` (`create_purchase_order/create_production_order/create_supplier/create_workshop/attach_document/update_production_order_status/record_transaction/update_material_prices/create_note/...`), `extracted_data` (jsonb), `suggested_entity_type NULL`, `suggested_entity_id NULL`, `confidence` (numeric 0-1), `status` (`pending/accepted/rejected/edited_and_accepted`), `reviewed_by NULL`, `reviewed_at NULL` | Результат AI-классификации одного `inbox_item`. Для типов `create_*` с безопасным черновым статусом (п.0d) — `suggested_entity_id` уже указывает на реально созданный черновик (`status='draft'`), подтверждение лишь переводит его в активный статус. Для остальных типов — ничего не создано, подтверждение (`accepted`/`edited_and_accepted`) вызывает application service (`INBOX_ARCHITECTURE.md`, раздел 2). Эта таблица никогда не является источником истины для доменного состояния — только предложением/ссылкой на черновик |
 
 `suggestion_type` — не жёсткий enum в БД, как и `documents.doc_type` (раздел 1): валидируется на уровне application layer, чтобы новые типы предложений добавлялись без миграции (`INBOX_ARCHITECTURE.md`, раздел 5).
 

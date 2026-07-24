@@ -47,6 +47,9 @@ const EXPECTED_TABLES = [
   "notifications",
   "documents",
   "notes",
+  "inbox_channels",
+  "inbox_items",
+  "inbox_suggestions",
 ];
 
 function collectTables(): Record<string, unknown> {
@@ -95,6 +98,7 @@ describe("schema", () => {
       "marketplace_listings",
       "marketplace_sync_logs",
       "marking_code_events",
+      "inbox_suggestions",
     ]);
 
     for (const [key, table] of Object.entries(tables)) {

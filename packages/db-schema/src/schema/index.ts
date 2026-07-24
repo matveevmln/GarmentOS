@@ -10,3 +10,4 @@ export * from "./marketplace";
 export * from "./honest-sign";
 export * from "./finance";
 export * from "./common";
+export * from "./inbox";

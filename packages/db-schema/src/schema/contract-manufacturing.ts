@@ -1,8 +1,9 @@
-import { boolean, date, numeric, pgEnum, pgTable, text, uuid } from "drizzle-orm/pg-core";
+import { boolean, date, numeric, pgEnum, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 import { auditColumns, id, softDelete } from "./_shared";
 import { companies, users } from "./identity";
 import { products, productVariants } from "./catalog";
 import { boms } from "./bom";
+import { partnerStatusEnum } from "./procurement";
 
 // docs/DATABASE_SCHEMA.md, раздел 8 (Contract Manufacturing).
 // Мы не производим — размещаем и контролируем заказы у независимых
@@ -10,6 +11,9 @@ import { boms } from "./bom";
 // (крой/пошив/ОТК) — операционка чужого цеха, нам недоступна и не нужна.
 
 export const productionOrderStatusEnum = pgEnum("production_order_status", [
+  // draft — создан автоматически Inbox из входящего сообщения, ещё не
+  // подтверждён пользователем (docs/INBOX_ARCHITECTURE.md, раздел 2.1).
+  "draft",
   "placed",
   "in_progress",
   "ready_for_pickup",
@@ -26,7 +30,10 @@ export const workshops = pgTable("workshops", {
   inn: text("inn"),
   contactInfo: text("contact_info"),
   specialization: text("specialization"),
-  isActive: boolean("is_active").notNull().default(true),
+  // status вместо булева is_active — единообразно с suppliers, и поддерживает
+  // черновик, создаваемый Inbox при первом упоминании незнакомого цеха
+  // (docs/INBOX_ARCHITECTURE.md, раздел 2.1).
+  status: partnerStatusEnum("status").notNull().default("active"),
   createdBy: uuid("created_by").references(() => users.id),
   ...auditColumns,
   ...softDelete,
@@ -51,6 +58,9 @@ export const productionOrders = pgTable("production_orders", {
   materialsProvidedByUs: boolean("materials_provided_by_us").notNull().default(true),
   status: productionOrderStatusEnum("status").notNull().default("placed"),
   dueDate: date("due_date"),
+  // Фактическая дата завершения — без неё нельзя сравнить план (due_date) и
+  // факт для рейтинга цеха и алертов о просрочке (USER_JOURNEY_AUDIT.md, пробел №5).
+  receivedAt: timestamp("received_at", { withTimezone: true }),
   createdBy: uuid("created_by").references(() => users.id),
   ...auditColumns,
 });

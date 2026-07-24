@@ -28,6 +28,11 @@ export const purchaseOrderStatusEnum = pgEnum("purchase_order_status", [
   "cancelled",
 ]);
 
+// Общий статус для партнёров (suppliers/workshops) — draft создаётся Inbox
+// при первом упоминании незнакомого контрагента в документе, не требует
+// подтверждения для появления в списке (docs/INBOX_ARCHITECTURE.md, раздел 2.1).
+export const partnerStatusEnum = pgEnum("partner_status", ["draft", "active", "archived"]);
+
 export const materials = pgTable(
   "materials",
   {
@@ -55,6 +60,7 @@ export const suppliers = pgTable("suppliers", {
     .references(() => companies.id),
   name: text("name").notNull(),
   type: supplierTypeEnum("type").notNull(),
+  status: partnerStatusEnum("status").notNull().default("active"),
   inn: text("inn"),
   contactInfo: text("contact_info"),
   createdBy: uuid("created_by").references(() => users.id),
