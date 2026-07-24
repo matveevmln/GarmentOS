@@ -46,6 +46,7 @@ const EXPECTED_TABLES = [
   "audit_log",
   "notifications",
   "documents",
+  "document_links",
   "notes",
   "inbox_channels",
   "inbox_items",

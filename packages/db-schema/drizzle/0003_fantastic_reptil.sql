@@ -1,0 +1,2 @@
+CREATE INDEX "document_links_entity_idx" ON "document_links" USING btree ("entity_type","entity_id");--> statement-breakpoint
+CREATE INDEX "document_links_document_idx" ON "document_links" USING btree ("document_id");

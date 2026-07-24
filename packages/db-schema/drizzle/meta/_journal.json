@@ -15,6 +15,20 @@
       "when": 1784911364033,
       "tag": "0001_melted_mordo",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1784912461899,
+      "tag": "0002_magenta_lifeguard",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1784912691994,
+      "tag": "0003_fantastic_reptil",
+      "breakpoints": true
     }
   ]
 }

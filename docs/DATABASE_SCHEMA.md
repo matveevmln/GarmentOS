@@ -56,6 +56,22 @@
 
 Миграция сгенерирована и применена к реальному Postgres (44 таблицы, 24 enum-типа, 89 внешних ключей); сценарий «Inbox создаёт черновик закупки и черновика поставщика → пользователь подтверждает → оба переходят в активный статус» проверен сквозным smoke-тестом.
 
+## 0e. Дополнение: документ относится не к одной сущности, а ко многим (2026-07-24)
+
+Владелец проекта уточнил главный принцип Inbox (`docs/PRINCIPLES.md`, принцип 18): документ или сообщение почти никогда не относится к одной сущности. Инвойс поставщика ткани — одновременно про поставщика, материал и закупку; фото партии — про производственный заказ, модель и конкретные SKU. Карточка модели должна показывать **всю** историю документов, связанных с ней, включая пересланные мимоходом в Telegram.
+
+| Изменение | Было | Стало | Почему |
+|---|---|---|---|
+| `documents.entity_type`/`entity_id` удалены | Один документ = одна связь (один-к-одному) | — | Не позволяло одному документу относиться сразу к нескольким объектам |
+| Добавлена `document_links` (раздел 16) | — | Новая many-to-many таблица: документ ↔ сущность, с `confidence` и `source` (`ai`/`manual`) | Один и тот же файл появляется на страницах материала, поставщика и закупки одновременно — без дублирования файла |
+| `inbox_suggestions.suggestion_type` дополнен `link_document` | Одно предложение = одно действие | Одно входящее сообщение может породить **несколько** предложений `link_document` — по одному на каждую вероятную сущность, каждое со своей `confidence` | Высокая уверенность по конкретной сущности → готово к подтверждению; остальные — дополнительные варианты. Это не взаимоисключающий выбор («какой из этих один») — несколько связей могут быть верны одновременно |
+
+**`notes` не меняется** — остаётся один-к-одному (`entity_type`/`entity_id` прямо на таблице): комментарий пользователя написан в контексте одной конкретной сущности, даже если упоминает другие, в отличие от документа, который самостоятельно относится сразу к нескольким объектам бизнеса.
+
+**Ручное связывание** — не только через Inbox: с карточки любой сущности можно прикрепить существующий документ, создав строку в `document_links` напрямую (`source='manual'`, `confidence=NULL`, `linked_by`=пользователь). AI и человек создают связи одной и той же таблицей — нет отдельной «ручной» модели данных.
+
+Миграция сгенерирована и применена к реальному Postgres (45 таблиц, 25 enum-типов); сценарий «одно фото ткани одновременно привязано к материалу (AI, 0.93), закупке (AI, 0.81) и вручную — к цеху» проверен сквозным smoke-тестом: запрос по `(entity_type, entity_id)` материала корректно возвращает документ независимо от того, к скольким ещё сущностям он привязан.
+
 ## 1. Сквозные конвенции
 
 - **Именование таблиц**: `snake_case`, множественное число (`products`, `stock_items`).
@@ -67,7 +83,8 @@
 - **Деньги**: тип `numeric(14,2)` (никогда `float`), валюта фиксируется на уровне компании (мультивалютность — вне скоупа MVP).
 - **Количества (SKU)**: `numeric(12,3)` — учитывает как штучный товар, так и материалы, которые могут измеряться в метрах/килограммах с дробной частью.
 - **Внешние ID** (ID заказа в WB, ID SKU в Ozon и т.д.) хранятся рядом с нашим ID как `external_id text`, не заменяют собственный PK.
-- **Полиморфные связи** (`documents`, `notes`): `entity_type text` + `entity_id UUID` вместо отдельной таблицы/FK на каждую комбинацию. Осознанный компромисс — теряется ссылочная целостность на уровне БД (нельзя `REFERENCES` на переменную таблицу), проверка `entity_type`/существования `entity_id` — на уровне application layer. Выбрано, чтобы не плодить `production_order_documents`, `purchase_order_documents`, `shipment_documents`, ... — по одной таблице на каждую пару. Пересмотреть, если реальные проблемы с целостностью данных проявятся на практике (принцип эволюционной архитектуры, `PRINCIPLES.md` №3).
+- **Полиморфные связи** (`document_links`, `notes`, `audit_log`): `entity_type text` + `entity_id UUID` вместо отдельной таблицы/FK на каждую комбинацию. Осознанный компромисс — теряется ссылочная целостность на уровне БД (нельзя `REFERENCES` на переменную таблицу), проверка `entity_type`/существования `entity_id` — на уровне application layer. Выбрано, чтобы не плодить `production_order_documents`, `purchase_order_documents`, `shipment_documents`, ... — по одной таблице на каждую пару. Пересмотреть, если реальные проблемы с целостностью данных проявятся на практике (принцип эволюционной архитектуры, `PRINCIPLES.md` №3).
+- **Документы — многие-ко-многим, не полиморфная пара на самом файле** (`docs/PRINCIPLES.md`, принцип 18): `documents` хранит только файл и метаданные; связи с сущностями — в отдельной `document_links` (документ ↔ сущность, с `confidence`/`source`), потому что один файл обычно относится сразу к нескольким объектам (инвойс — к поставщику, материалу и закупке одновременно). `notes` и `audit_log` остаются один-к-одному — комментарий/лог всегда в контексте ровно одной операции/сущности.
 
 ## 2. ER-диаграмма (укрупнённо)
 
@@ -118,9 +135,13 @@ erDiagram
     ORDERS ||--o{ COST_ENTRIES : generates
     PRODUCTION_ORDERS ||--o{ COST_ENTRIES : generates
 
-    PRODUCTION_ORDERS ||--o{ DOCUMENTS : "инвойс/накладная/фото/сертификаты"
-    PURCHASE_ORDERS ||--o{ DOCUMENTS : "инвойс/договор"
-    SHIPMENTS ||--o{ DOCUMENTS : "CMR/накладная/декларация"
+    DOCUMENTS ||--o{ DOCUMENT_LINKS : "многие-ко-многим"
+    PRODUCTION_ORDERS ||--o{ DOCUMENT_LINKS : "инвойс/накладная/фото"
+    PURCHASE_ORDERS ||--o{ DOCUMENT_LINKS : "инвойс/договор"
+    MATERIALS ||--o{ DOCUMENT_LINKS : "фото/сертификаты"
+    SUPPLIERS ||--o{ DOCUMENT_LINKS : "договор/переписка"
+    SHIPMENTS ||--o{ DOCUMENT_LINKS : "CMR/накладная/декларация"
+    PRODUCTS ||--o{ DOCUMENT_LINKS : "техпак/фото модели"
     PRODUCTION_ORDERS ||--o{ NOTES : comments
 
     COMPANIES ||--o{ INBOX_CHANNELS : has
@@ -298,9 +319,9 @@ flowchart TD
 |---|---|---|
 | `inbox_channels` | `id`, `company_id`, `type` (`telegram/whatsapp/wechat/email/upload`), `external_identifier` (bot chat id / email-алиас), `is_active` | Подключённый канал, через который в компанию поступают сообщения. MVP: `telegram`, `upload` (см. `INBOX_ARCHITECTURE.md`, раздел 4) |
 | `inbox_items` | `id`, `company_id`, `inbox_channel_id`, `source_identifier` (кто прислал — телефон/Telegram-хэндл), `raw_text NULL`, `file_url NULL` (через `StorageAdapter`), `received_at`, `status` (`new/processing/suggested/confirmed/rejected/ignored`) | Сырое входящее сообщение — фото/PDF/Excel/голос (транскрибированный в текст)/обычный текст. Ничего не пишет в доменные таблицы напрямую |
-| `inbox_suggestions` | `id`, `inbox_item_id`, `suggestion_type` (`create_purchase_order/create_production_order/create_supplier/create_workshop/attach_document/update_production_order_status/record_transaction/update_material_prices/create_note/...`), `extracted_data` (jsonb), `suggested_entity_type NULL`, `suggested_entity_id NULL`, `confidence` (numeric 0-1), `status` (`pending/accepted/rejected/edited_and_accepted`), `reviewed_by NULL`, `reviewed_at NULL` | Результат AI-классификации одного `inbox_item`. Для типов `create_*` с безопасным черновым статусом (п.0d) — `suggested_entity_id` уже указывает на реально созданный черновик (`status='draft'`), подтверждение лишь переводит его в активный статус. Для остальных типов — ничего не создано, подтверждение (`accepted`/`edited_and_accepted`) вызывает application service (`INBOX_ARCHITECTURE.md`, раздел 2). Эта таблица никогда не является источником истины для доменного состояния — только предложением/ссылкой на черновик |
+| `inbox_suggestions` | `id`, `inbox_item_id`, `suggestion_type` (`create_purchase_order/create_production_order/create_supplier/create_workshop/link_document/update_production_order_status/record_transaction/update_material_prices/create_note/...`), `extracted_data` (jsonb), `suggested_entity_type NULL`, `suggested_entity_id NULL`, `confidence` (numeric 0-1), `status` (`pending/accepted/rejected/edited_and_accepted`), `reviewed_by NULL`, `reviewed_at NULL` | Результат AI-классификации одного `inbox_item`. Для типов `create_*` с безопасным черновым статусом (п.0d) — `suggested_entity_id` уже указывает на реально созданный черновик (`status='draft'`), подтверждение лишь переводит его в активный статус. Для `link_document` — **одно входящее сообщение может породить несколько строк** `inbox_suggestions`, по одной на каждую вероятную сущность (материал, закупка, модель…), каждая со своей `confidence`; подтверждение создаёт строку в `document_links` (раздел 16), не взаимоисключающий выбор — несколько связей могут быть подтверждены одновременно (п.0e). Для остальных типов — ничего не создано, подтверждение (`accepted`/`edited_and_accepted`) вызывает application service (`INBOX_ARCHITECTURE.md`, раздел 2). Эта таблица никогда не является источником истины для доменного состояния — только предложением/ссылкой на черновик |
 
-`suggestion_type` — не жёсткий enum в БД, как и `documents.doc_type` (раздел 1): валидируется на уровне application layer, чтобы новые типы предложений добавлялись без миграции (`INBOX_ARCHITECTURE.md`, раздел 5).
+`suggestion_type` — не жёсткий enum в БД, как и `documents.doc_type` (раздел 16): валидируется на уровне application layer, чтобы новые типы предложений добавлялись без миграции (`INBOX_ARCHITECTURE.md`, раздел 5).
 
 ## 16. Общие/сквозные
 
@@ -308,8 +329,9 @@ flowchart TD
 |---|---|---|
 | `audit_log` | `id`, `company_id`, `user_id`, `entity_type`, `entity_id`, `action`, `before_json`, `after_json`, `occurred_at` | Системный аудит критичных операций (см. `ARCHITECTURE.md` п.7) — **не путать** с `notes` ниже: это автоматический след изменений полей, не текст от пользователя |
 | `notifications` | `id`, `company_id`, `user_id`, `type`, `payload_json`, `read_at` | Уведомления (низкий остаток, срыв срока заказа у цеха и т.д.) |
-| `documents` | `id`, `company_id`, `entity_type` (`production_order/purchase_order/shipment/bom/workshop/supplier`), `entity_id`, `doc_type` (`invoice/contract/waybill/photo/certificate/specification/declaration/addendum/other`), `file_url`, `title NULL`, `issued_at NULL`, `uploaded_by` | **Новая сущность.** Открыть заказ/партию/отгрузку и увидеть инвойс, договор, накладную (в т.ч. международную), фотографии, сертификаты, декларацию, доп. соглашение к спецификации. `file_url` — через `StorageAdapter` (см. `INFRASTRUCTURE.md` п.2.3) |
-| `notes` | `id`, `company_id`, `entity_type`, `entity_id`, `author_id` (FK `users`), `body`, `created_at` | **Новая сущность.** Свободный текстовый комментарий к любой сущности («цех попросил перенести срок на 3 дня») — в отличие от `documents` (файл) и `audit_log` (автоматический след) |
+| `documents` | `id`, `company_id`, `doc_type` (`invoice/contract/waybill/photo/certificate/specification/declaration/addendum/other`), `file_url`, `title NULL`, `issued_at NULL`, `uploaded_by` | Только файл и его метаданные — **без** привязки к сущности (см. п.0e/`document_links` ниже). `file_url` — через `StorageAdapter` (см. `INFRASTRUCTURE.md` п.2.3) |
+| `document_links` | `id`, `company_id`, `document_id`, `entity_type` (`product/product_variant/collection/material/supplier/purchase_order/workshop/production_order/shipment/warehouse`), `entity_id`, `confidence NULL` (0-1, NULL для ручных связей), `source` (`ai`/`manual`), `linked_by NULL`, `linked_at` | **Новая сущность (п.0e).** Многие-ко-многим: один документ — много сущностей, одна сущность — много документов. Открыть карточку модели/материала/закупки/цеха/отгрузки — увидеть все привязанные документы через `WHERE entity_type=... AND entity_id=...`, независимо от того, к скольким ещё сущностям привязан тот же файл. `company_id` продублирован намеренно — единственная защита от межтенантной утечки для полиморфной пары, для которой нет FK на конкретную таблицу |
+| `notes` | `id`, `company_id`, `entity_type`, `entity_id`, `author_id` (FK `users`), `body`, `created_at` | Свободный текстовый комментарий к одной конкретной сущности («цех попросил перенести срок на 3 дня») — один-к-одному, в отличие от `documents`/`document_links` (файл может относиться сразу к нескольким) и `audit_log` (автоматический след) |
 
 ## 17. Индексация — базовые правила
 
@@ -321,7 +343,8 @@ flowchart TD
 - `warehouses`: `workshop_id` обязателен, когда `type = 'workshop'`, и NULL иначе (проверяется на уровне application layer или CHECK-constraint).
 - `purchase_orders`: индекс `(supplier_id, ordered_at)` — основа отчёта истории цен (п.0b, 6).
 - `purchase_order_items`: индекс `(material_id)` — для отчёта истории цен в разрезе материала.
-- `documents`, `notes`: индекс `(company_id, entity_type, entity_id)` — быстрая выборка «всё по этому заказу/отгрузке».
+- `notes`: индекс `(company_id, entity_type, entity_id)` — быстрая выборка «всё по этому заказу/отгрузке».
+- `document_links`: индекс `(entity_type, entity_id)` — главный запрос «все документы этой сущности» (карточка модели/материала/закупки); индекс `(document_id)` — «ко всем сущностям привязан этот файл».
 - `shipments`: индекс `(company_id, status)`, `(destination_warehouse_id)`.
 - `collections`: уникальный индекс `(company_id, name)`.
 - `inbox_items`: индекс `(company_id, status)` — очередь необработанных/неподтверждённых сообщений — главный экран Inbox.
