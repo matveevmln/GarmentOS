@@ -44,7 +44,7 @@
 
 | № | Итерация | Содержание | UX/AI Review применимы? |
 |---|---|---|---|
-| 1 | Инфраструктурный скелет | Monorepo (pnpm/Turborepo), Docker Compose (Postgres/Redis/MinIO), CI-скелет, tsconfig/eslint — без бизнес-логики | Нет / Нет |
+| 1 ✅ | Инфраструктурный скелет | Monorepo (pnpm/Turborepo), Docker Compose (Postgres/Redis/MinIO), CI-скелет, tsconfig/eslint, `apps/api` с health-check — без бизнес-логики. Завершена: lint/typecheck/test/build проходят чисто, health-check проверен вручную (собранный `dist/main.js` отвечает на `/health`) | Нет / Нет |
 | 2 | Схема базы данных | Drizzle-схема и миграции по `docs/DATABASE_SCHEMA.md`: Identity, Catalog, Materials, BOM, Production, Warehouse, Sales, Marketplace Integration, Honest Sign, Finance, audit_log | Нет / Нет |
 | 3 | Доменная модель | `packages/domain/*` — сущности, инварианты, use cases (application services) для модулей Фазы 1, без HTTP-слоя | Нет / Да |
 | 4 | API | `apps/api` (NestJS) — REST-контроллеры поверх доменных use cases, OpenAPI-контракт | Нет / Да |

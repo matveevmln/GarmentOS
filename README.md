@@ -6,7 +6,7 @@
 
 Закупка тканей → спецификации и техкарты → производство → склад → маркетплейсы и опт → «Честный Знак» → финансы — в едином цифровом контуре.
 
-🚧 **Стадия проекта: Фундамент.** Архитектура и планирование в процессе, исполняемого кода пока нет. См. [`docs/ROADMAP.md`](./docs/ROADMAP.md).
+🚧 **Стадия проекта: Фаза 1 — MVP в разработке.** Фундамент (архитектура, стек, roadmap) закрыт, идёт итеративная реализация ядра системы — данные и домен впереди интерфейса. См. [`docs/ROADMAP.md`](./docs/ROADMAP.md).
 
 [Видение проекта](./PROJECT_VISION.md) ·
 [Архитектура](./docs/ARCHITECTURE.md) ·
@@ -98,13 +98,27 @@ flowchart LR
 
 ## Быстрый старт
 
-> ⚠️ Проект находится в фазе архитектурного планирования — исполняемого кода ещё нет. Как только появится Фаза 1 (см. [`docs/ROADMAP.md`](./docs/ROADMAP.md)), этот раздел будет заменён на реальные команды `pnpm install && pnpm dev`.
+> ⚠️ Итерация 1 из Фазы 1 (`docs/ROADMAP.md`) — инфраструктурный скелет и `apps/api` с health-check. Доменные модули, схема БД, аутентификация и `apps/web` появятся по мере следующих итераций.
 
-Пока доступно:
 ```bash
 git clone <repo-url>
 cd GarmentOS
-# см. docs/ — вся структура и архитектура уже спроектированы
+cp .env.example .env
+pnpm install
+
+# lint / typecheck / test / build всего монорепозитория (Turborepo)
+pnpm lint
+pnpm typecheck
+pnpm test
+pnpm build
+
+# локальный запуск API (health-check на /health)
+pnpm --filter @garmentos/api dev
+```
+
+Локальная инфраструктура (Postgres/Redis/MinIO) — cloud-agnostic Docker Compose стек, подробности в [`docs/INFRASTRUCTURE.md`](./docs/INFRASTRUCTURE.md):
+```bash
+docker compose -f infra/docker-compose.yml up -d
 ```
 
 ## Структура репозитория
