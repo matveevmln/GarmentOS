@@ -45,7 +45,7 @@
 | № | Итерация | Содержание | UX/AI Review применимы? |
 |---|---|---|---|
 | 1 ✅ | Инфраструктурный скелет | Monorepo (pnpm/Turborepo), Docker Compose (Postgres/Redis/MinIO), CI-скелет, tsconfig/eslint, `apps/api` с health-check — без бизнес-логики. Завершена: lint/typecheck/test/build проходят чисто, health-check проверен вручную (собранный `dist/main.js` отвечает на `/health`) | Нет / Нет |
-| 2 | Схема базы данных | Drizzle-схема и миграции по `docs/DATABASE_SCHEMA.md`: Identity, Catalog, Materials, BOM, Contract Manufacturing (`workshops`, `production_orders`), Warehouse, Sales, Marketplace Integration, Honest Sign, Finance, audit_log | Нет / Нет |
+| 2 ✅ | Схема базы данных | Drizzle-схема и миграции по `docs/DATABASE_SCHEMA.md` (`packages/db-schema`): 41 таблица, 20 enum-типов, 84 внешних ключа по всем модулям (Identity, Catalog+Collections, Materials, BOM, Contract Manufacturing, Warehouse, Logistics/Shipments, Sales, Marketplace Integration, Honest Sign, Finance, Documents/Notes). Завершена: миграция сгенерирована и применена к реальному Postgres, проверена идемпотентность повторного запуска, сквозной smoke-тест всей цепочки (коллекция → SKU → закупка → BOM → цех → заказ → склад → документы/заметки) и запрос истории цен прошли успешно; unit-тест схемы (состав таблиц + мультитенантность корневых таблиц) в CI | Нет / Нет |
 | 3 | Доменная модель | `packages/domain/*` — сущности, инварианты, use cases (application services) для модулей Фазы 1, без HTTP-слоя | Нет / Да |
 | 4 | API | `apps/api` (NestJS) — REST-контроллеры поверх доменных use cases, OpenAPI-контракт | Нет / Да |
 | 5 | Роли и права (RBAC) | Полная матрица permissions по 6 персонам × 12 модулям (см. `docs/ARCHITECTURE_SELF_REVIEW.md`, улучшение №3) | Нет / Нет |
