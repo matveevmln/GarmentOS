@@ -40,7 +40,8 @@ Fashion-бренды и селлеры, работающие с подрядны
 
 ## Ключевые возможности (целевое состояние)
 
-- **Каталог и SKU-матрица** — модели одежды с вариантами по размеру и цвету.
+- **Universal Inbox** — пересылаешь в Telegram фото, PDF, голосовое или Excel, AI распознаёт и предлагает готовое действие (создать закупку, обновить статус заказа, прикрепить документ) — подтверждение одним нажатием, без ручного перепечатывания (см. `docs/INBOX_ARCHITECTURE.md`).
+- **Каталог и SKU-матрица** — модели одежды, сгруппированные в коллекции, с вариантами по размеру и цвету.
 - **Спецификации (BOM)** — нормы расхода материалов на модель.
 - **Заказы у подрядных цехов** — от размещения заказа до приёмки готовой продукции на склад.
 - **Мультискладской учёт** — остатки, приёмки, отгрузки, инвентаризации по SKU (включая материалы у цехов-подрядчиков).
@@ -146,6 +147,8 @@ GarmentOS/
 | 📁 [`docs/REPOSITORY_STRUCTURE.md`](./docs/REPOSITORY_STRUCTURE.md) | Структура репозитория |
 | 🗄️ [`docs/DATABASE_SCHEMA.md`](./docs/DATABASE_SCHEMA.md) | Структура базы данных |
 | ☁️ [`docs/INFRASTRUCTURE.md`](./docs/INFRASTRUCTURE.md) | Cloud-agnostic инфраструктура: Start Lean, Scale Smart |
+| 📬 [`docs/INBOX_ARCHITECTURE.md`](./docs/INBOX_ARCHITECTURE.md) | Universal Inbox — AI-классификация входящих, Zero Input |
+| 🕵️ [`docs/USER_JOURNEY_AUDIT.md`](./docs/USER_JOURNEY_AUDIT.md) | Аудит дня владельца бизнеса в системе |
 | 🗺️ [`docs/ROADMAP.md`](./docs/ROADMAP.md) | Дорожная карта |
 | ⚙️ [`docs/PRINCIPLES.md`](./docs/PRINCIPLES.md) | Принципы разработки |
 | ✅ [`docs/QUALITY_STANDARDS.md`](./docs/QUALITY_STANDARDS.md) | Стандарты качества |

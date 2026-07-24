@@ -27,6 +27,19 @@
 
 Все остальные таблицы прошли повторную проверку без изменений.
 
+## 0c. Дополнение: аудит с точки зрения пользователя и Universal Inbox (2026-07-24, третий проход)
+
+Владелец проекта попросил перед продолжением разработки пройти день владельца бизнеса в системе (11 шагов — от закупки ткани до анализа прибыли) и спроектировать максимально быстрый ввод данных, предполагая, что пользователь работает преимущественно с телефона через Telegram/WhatsApp/WeChat/email/фото/голос. Полный разбор — [`USER_JOURNEY_AUDIT.md`](./USER_JOURNEY_AUDIT.md), архитектура решения — [`INBOX_ARCHITECTURE.md`](./INBOX_ARCHITECTURE.md). Изменения в схеме:
+
+| Изменение | Было | Стало | Почему |
+|---|---|---|---|
+| Добавлено `production_orders.received_at` | Только `status`, без фактической даты завершения | `received_at NULL` (timestamp) | Без фактической даты невозможно сравнить план (`due_date`) и факт для рейтинга цеха и алертов о просрочке (`USER_JOURNEY_AUDIT.md`, пробел №5) |
+| Добавлены `inbox_channels`, `inbox_items`, `inbox_suggestions` (раздел 15) | — | Новые сущности | Главный найденный пробел: весь ручной ввод (закупки, заказы в цех, приёмка, отгрузка) требовал заполнения форм — нарушало принцип «Zero Input» (`docs/PRINCIPLES.md`, №17). AI распознаёт входящее сообщение/фото/голос и предлагает готовое действие, пользователь подтверждает одним нажатием — исполняет тот же application service, что и ручное создание (`INBOX_ARCHITECTURE.md`, раздел 1) |
+| Задокументированы доменные инварианты (не новые таблицы) | — | «BOM должен быть approved перед production_order», «нельзя transfer/dispatch при недостатке остатка» (раздел 8) | Найдены как пробелы в аудите (№4, №6), закрываются в Итерации 3 тестами, не миграцией |
+| Задокументирован read-model «заказы без cost_entries» (раздел 14) | — | — | Предупреждает об искажённой марже до того, как владелец увидит неверный отчёт (пробел №8) |
+
+Остальные найденные в аудите пробелы (№1-3, №7) — read-model'ы и use case'ы, не требующие изменения схемы; см. таблицу решений в `USER_JOURNEY_AUDIT.md`.
+
 ## 1. Сквозные конвенции
 
 - **Именование таблиц**: `snake_case`, множественное число (`products`, `stock_items`).
@@ -93,6 +106,10 @@ erDiagram
     PURCHASE_ORDERS ||--o{ DOCUMENTS : "инвойс/договор"
     SHIPMENTS ||--o{ DOCUMENTS : "CMR/накладная/декларация"
     PRODUCTION_ORDERS ||--o{ NOTES : comments
+
+    COMPANIES ||--o{ INBOX_CHANNELS : has
+    INBOX_CHANNELS ||--o{ INBOX_ITEMS : receives
+    INBOX_ITEMS ||--o{ INBOX_SUGGESTIONS : "AI-классификация"
 ```
 
 ## 3. Жизненный цикл товара (процесс) — от коллекции до прибыли
@@ -163,7 +180,7 @@ flowchart TD
 | Таблица | Ключевые поля | Комментарий |
 |---|---|---|
 | `collections` | `id`, `company_id`, `name` (например, «Осень 2026»), `season` (`spring/summer/autumn/winter` NULL), `year`, `status` (`planning/active/archived`) | **Новая сущность.** Сезонная коллекция — единица планирования ассортимента, группирует модели |
-| `products` | `id`, `company_id`, `collection_id NULL`, `name`, `code` (артикул модели), `category`, `season`, `status` (`draft/active/discontinued`), `tech_pack_url` | Модель одежды на уровне абстракции, без размера/цвета. `collection_id` — nullable: не каждая модель обязана входить в формальную коллекцию. `tech_pack_url` — ссылка на текущий файл спецификации (через `StorageAdapter`); архив версий/доп. соглашений — через `documents` (см. п.15) |
+| `products` | `id`, `company_id`, `collection_id NULL`, `name`, `code` (артикул модели), `category`, `season`, `status` (`draft/active/discontinued`), `tech_pack_url` | Модель одежды на уровне абстракции, без размера/цвета. `collection_id` — nullable: не каждая модель обязана входить в формальную коллекцию. `tech_pack_url` — ссылка на текущий файл спецификации (через `StorageAdapter`); архив версий/доп. соглашений — через `documents` (см. п.16) |
 | `product_variants` | `id`, `product_id`, `size`, `color`, `sku_code` (уникальный внутри компании), `barcode` (EAN/GTIN) | Конкретный SKU — единица учёта остатков и продаж |
 
 ## 6. Materials & Procurement
@@ -191,12 +208,16 @@ flowchart TD
 | Таблица | Ключевые поля | Комментарий |
 |---|---|---|
 | `workshops` | `id`, `company_id`, `name`, `inn`, `contact_info`, `specialization`, `is_active` | Независимый подрядный швейный цех — поставщик услуги пошива, не материалов |
-| `production_orders` | `id`, `company_id`, `product_id`, `bom_id`, `workshop_id`, `planned_quantity`, `agreed_unit_price`, `materials_provided_by_us` (bool), `status` (`placed/in_progress/ready_for_pickup/received/cancelled`), `due_date` | Заказ пошива у конкретного цеха по согласованной цене за единицу. `status` — простое поле вместо отдельной таблицы стадий |
-| `production_order_variants` | `production_order_id`, `product_variant_id`, `quantity` | Разбивка заказа по размеру/цвету (SKU) |
+| `production_orders` | `id`, `company_id`, `product_id`, `bom_id`, `workshop_id`, `planned_quantity`, `agreed_unit_price`, `materials_provided_by_us` (bool), `status` (`placed/in_progress/ready_for_pickup/received/cancelled`), `due_date`, `received_at NULL` | Заказ пошива у конкретного цеха по согласованной цене за единицу. `status` — простое поле вместо отдельной таблицы стадий. `received_at` (добавлено по итогам `USER_JOURNEY_AUDIT.md`, пробел №5) — фактическая дата завершения, без которой невозможно сравнить план (`due_date`) и факт для рейтинга цеха и алертов о просрочке |
+| `production_order_variants` | `production_order_id`, `product_variant_id`, `quantity` | Разбивка заказа по размеру/цвету (SKU). Фактически принятое количество по SKU — не отдельная колонка, а read-model: сумма `stock_movements` типа `receipt` со ссылкой на этот заказ (`reference_type='production_order'`), сгруппированная по `product_variant_id` — см. `USER_JOURNEY_AUDIT.md`, шаг 7 |
 
 **Не в MVP, возможно в Future**: `production_batches` — если появится потребность дробить один заказ на несколько независимо отслеживаемых партий поставки.
 
-**Не проектируется вовсе**: детальная стадийность («крой», «пошив», «ОТК») с привязкой к ответственному сотруднику — операционная модель штатного цеха, которого нет.
+**Не проектируется вовсе**: детальная стадийность («крой», «пошив», «ОТК») с привязкой к ответственному сотруднику — операционная модель штатного цеха, которого нет. Вместо неё — Inbox (раздел 15): цех сообщает о готовности в Telegram, AI предлагает обновить статус, эскалация при отсутствии обновлений (`USER_JOURNEY_AUDIT.md`, шаг 6).
+
+**Доменные инварианты, обязательные к реализации в Итерации 3** (не влияют на схему таблиц, но должны быть закреплены тестами use case'ов — см. `USER_JOURNEY_AUDIT.md`, пробелы №4 и №6):
+- Нельзя создать `production_order`, пока `bom.status != 'approved'`.
+- Нельзя выполнить `stock_movement` типа `transfer`/`dispatch`, если `quantity_on_hand − quantity_reserved` источника меньше запрашиваемого количества.
 
 ## 9. Warehouse & Inventory
 
@@ -210,7 +231,7 @@ flowchart TD
 
 ## 10. Logistics & Export (отгрузки)
 
-> Часть модуля Warehouse & Inventory (не отдельный bounded context — экспорт технически является перемещением между складами с дополнительными логистическими атрибутами). По явному решению владельца — **простая сущность отгрузки для MVP, не полноценный таможенный модуль**: декларации и прочие таможенные документы прикрепляются как файлы через `documents` (п.15), а не моделируются структурированными полями.
+> Часть модуля Warehouse & Inventory (не отдельный bounded context — экспорт технически является перемещением между складами с дополнительными логистическими атрибутами). По явному решению владельца — **простая сущность отгрузки для MVP, не полноценный таможенный модуль**: декларации и прочие таможенные документы прикрепляются как файлы через `documents` (п.16), а не моделируются структурированными полями.
 
 | Таблица | Ключевые поля | Комментарий |
 |---|---|---|
@@ -251,7 +272,21 @@ flowchart TD
 
 **Прибыль/маржа** — не хранится: вычисляется как `orders.total_amount` (выручка) минус связанные `cost_entries` минус прочие расходы периода. Это read-model Reporting/BI, не таблица (см. п.0b).
 
-## 15. Общие/сквозные
+**Read-model «заказы без рассчитанной себестоимости»** (`USER_JOURNEY_AUDIT.md`, пробел №8): `production_orders.status = 'received'`, для которых нет ни одной строки `cost_entries` — предупреждает, что P&L занижен/искажён, не даёт узнать об этом постфактум из неверного отчёта.
+
+## 15. Inbox (Universal Inbox)
+
+> Добавлен 2026-07-24 по итогам `USER_JOURNEY_AUDIT.md` (главный найденный пробел — весь ручной ввод в шагах 1-4, 7, 9 требовал формы; см. также `docs/PRINCIPLES.md` принцип 17 «Zero Input»). Полная архитектура pipeline — [`INBOX_ARCHITECTURE.md`](./INBOX_ARCHITECTURE.md). Здесь — только структура данных.
+
+| Таблица | Ключевые поля | Комментарий |
+|---|---|---|
+| `inbox_channels` | `id`, `company_id`, `type` (`telegram/whatsapp/wechat/email/upload`), `external_identifier` (bot chat id / email-алиас), `is_active` | Подключённый канал, через который в компанию поступают сообщения. MVP: `telegram`, `upload` (см. `INBOX_ARCHITECTURE.md`, раздел 4) |
+| `inbox_items` | `id`, `company_id`, `inbox_channel_id`, `source_identifier` (кто прислал — телефон/Telegram-хэндл), `raw_text NULL`, `file_url NULL` (через `StorageAdapter`), `received_at`, `status` (`new/processing/suggested/confirmed/rejected/ignored`) | Сырое входящее сообщение — фото/PDF/Excel/голос (транскрибированный в текст)/обычный текст. Ничего не пишет в доменные таблицы напрямую |
+| `inbox_suggestions` | `id`, `inbox_item_id`, `suggestion_type` (`create_purchase_order/attach_document/update_production_order_status/record_transaction/update_material_prices/create_note/...`), `extracted_data` (jsonb), `suggested_entity_type NULL`, `suggested_entity_id NULL`, `confidence` (numeric 0-1), `status` (`pending/accepted/rejected/edited_and_accepted`), `reviewed_by NULL`, `reviewed_at NULL` | Результат AI-классификации одного `inbox_item`. Подтверждение (`accepted`/`edited_and_accepted`) вызывает обычный application service соответствующего домена (`INBOX_ARCHITECTURE.md`, раздел 1) — эта таблица никогда не является источником истины для доменного состояния, только предложением |
+
+`suggestion_type` — не жёсткий enum в БД, как и `documents.doc_type` (раздел 1): валидируется на уровне application layer, чтобы новые типы предложений добавлялись без миграции (`INBOX_ARCHITECTURE.md`, раздел 5).
+
+## 16. Общие/сквозные
 
 | Таблица | Ключевые поля | Комментарий |
 |---|---|---|
@@ -260,7 +295,7 @@ flowchart TD
 | `documents` | `id`, `company_id`, `entity_type` (`production_order/purchase_order/shipment/bom/workshop/supplier`), `entity_id`, `doc_type` (`invoice/contract/waybill/photo/certificate/specification/declaration/addendum/other`), `file_url`, `title NULL`, `issued_at NULL`, `uploaded_by` | **Новая сущность.** Открыть заказ/партию/отгрузку и увидеть инвойс, договор, накладную (в т.ч. международную), фотографии, сертификаты, декларацию, доп. соглашение к спецификации. `file_url` — через `StorageAdapter` (см. `INFRASTRUCTURE.md` п.2.3) |
 | `notes` | `id`, `company_id`, `entity_type`, `entity_id`, `author_id` (FK `users`), `body`, `created_at` | **Новая сущность.** Свободный текстовый комментарий к любой сущности («цех попросил перенести срок на 3 дня») — в отличие от `documents` (файл) и `audit_log` (автоматический след) |
 
-## 16. Индексация — базовые правила
+## 17. Индексация — базовые правила
 
 - Композитный индекс `(company_id, id)` или включение `company_id` первым полем в любой составной индекс — так как фильтрация по тенанту присутствует в каждом запросе.
 - `stock_items`: уникальный индекс `(warehouse_id, product_variant_id)`.
@@ -273,16 +308,21 @@ flowchart TD
 - `documents`, `notes`: индекс `(company_id, entity_type, entity_id)` — быстрая выборка «всё по этому заказу/отгрузке».
 - `shipments`: индекс `(company_id, status)`, `(destination_warehouse_id)`.
 - `collections`: уникальный индекс `(company_id, name)`.
+- `inbox_items`: индекс `(company_id, status)` — очередь необработанных/неподтверждённых сообщений — главный экран Inbox.
+- `inbox_suggestions`: индекс `(inbox_item_id)`, `(suggested_entity_type, suggested_entity_id)` — «все предложения по этому заказу/закупке».
+- `production_orders`: индекс `(company_id, status, due_date)` — «заказы с риском просрочки» (`USER_JOURNEY_AUDIT.md`, шаг 6).
 
-## 17. Миграции
+## 18. Миграции
 
 - Управляются через Drizzle Kit, миграции — часть `packages/db-schema`, версионируются в git, применяются в CI перед деплоем (см. `QUALITY_STANDARDS.md`).
 - Правило: миграция, ломающая обратную совместимость (удаление колонки, NOT NULL без дефолта на непустой таблице), разбивается на два релиза (expand → migrate data → contract), а не выполняется одним шагом на проде.
 
-## 18. Открытые вопросы по схеме
+## 19. Открытые вопросы по схеме
 
 Вынесены в [`ARCHITECTURE_SELF_REVIEW.md`](./ARCHITECTURE_SELF_REVIEW.md): партиционирование `stock_movements`/`marking_code_events` по мере роста, стратегия RLS вместо application-level фильтрации по `company_id`, схема хранения `api_credentials_encrypted` (KMS vs application-level шифрование).
 
 **Закрыт этим проходом**: моделирование экспорта — решено как простая сущность `shipments` (п.10), не таможенный модуль.
 
 **Новый вопрос (не блокирует Итерацию 2)**: если один поставщик реально продаёт материалы нескольких категорий (например, ткань и фурнитуру одновременно), заводить ли его несколькими строками в `suppliers` или переходить на `supplier_categories` (многие-ко-многим)? Для MVP — несколько строк (проще); пересмотреть, если на практике это создаст путаницу в отчётах.
+
+**Риски Inbox (не блокируют Итерацию 3, см. `INBOX_ARCHITECTURE.md` раздел 8)**: стоимость AI-классификации на входящее сообщение (Cost-First, `docs/TECH_STACK.md`), точность сопоставления с существующей сущностью при низкой уверенности, выбор конкретного провайдера LLM/OCR/распознавания речи за `AIClassifier`-адаптером — решается в Итерации 3/9, не на уровне схемы.
