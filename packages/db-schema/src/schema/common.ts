@@ -1,4 +1,15 @@
-import { index, jsonb, numeric, pgEnum, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import {
+  boolean,
+  index,
+  jsonb,
+  numeric,
+  pgEnum,
+  pgTable,
+  text,
+  timestamp,
+  uuid,
+  type AnyPgColumn,
+} from "drizzle-orm/pg-core";
 import { auditColumns, id } from "./_shared";
 import { companies, users } from "./identity";
 
@@ -38,18 +49,75 @@ export const notifications = pgTable("notifications", {
 // И к материалу), поэтому связи вынесены в отдельную many-to-many таблицу
 // document_links ниже, а не хранятся как одна пара entity_type/entity_id
 // на самом документе.
-export const documents = pgTable("documents", {
-  id: id(),
-  companyId: uuid("company_id")
-    .notNull()
-    .references(() => companies.id),
-  docType: text("doc_type").notNull(),
-  fileUrl: text("file_url").notNull(),
-  title: text("title"),
-  issuedAt: timestamp("issued_at", { withTimezone: true }),
-  uploadedBy: uuid("uploaded_by").references(() => users.id),
-  ...auditColumns,
-});
+//
+// Immutable Original (docs/PRINCIPLES.md, принцип 19): file_url этой строки
+// никогда не изменяется после создания — это гарантируется на уровне БД
+// триггером (см. drizzle/0005_document_immutability_trigger.sql, написан
+// вручную — drizzle-kit не умеет генерировать триггеры). Новая версия
+// файла — это НОВАЯ строка documents со ссылкой на предыдущую через
+// supersedesDocumentId, а не UPDATE существующей.
+export const documents = pgTable(
+  "documents",
+  {
+    id: id(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id),
+    docType: text("doc_type").notNull(),
+    fileUrl: text("file_url").notNull(),
+    title: text("title"),
+    issuedAt: timestamp("issued_at", { withTimezone: true }),
+    uploadedBy: uuid("uploaded_by").references(() => users.id),
+    // Версионность (docs/PRINCIPLES.md, принцип 19; docs/DATABASE_SCHEMA.md, п.0f):
+    // Price_v1.xlsx → Price_final.xlsx → Price_final_NEW.xlsx — три файла, но
+    // одна логическая история. supersedesDocumentId указывает на предыдущую
+    // версию; isCurrentVersion — денормализованный флаг для быстрого «покажи
+    // актуальный вариант» без обхода цепочки.
+    supersedesDocumentId: uuid("supersedes_document_id").references(
+      (): AnyPgColumn => documents.id,
+    ),
+    isCurrentVersion: boolean("is_current_version").notNull().default(true),
+    ...auditColumns,
+  },
+  (table) => [
+    index("documents_company_current_idx").on(table.companyId, table.isCurrentVersion),
+    index("documents_supersedes_idx").on(table.supersedesDocumentId),
+  ],
+);
+
+// Производные данные (docs/PRINCIPLES.md, принцип 19): "Original document is
+// the source of truth. AI only creates derived data." OCR/перевод/структурное
+// извлечение/AI-саммари — отдельные строки, ссылающиеся на неизменяемый
+// оригинал, а не перезапись documents.file_url. Реобработка (например, более
+// точный OCR) создаёт НОВУЮ строку, не обновляет старую — та же философия
+// append-only, хоть и не защищена триггером так строго, как сам оригинал.
+export const documentDerivativeTypeEnum = pgEnum("document_derivative_type", [
+  "ocr_text",
+  "translation",
+  "structured_data",
+  "ai_summary",
+]);
+
+export const documentDerivatives = pgTable(
+  "document_derivatives",
+  {
+    id: id(),
+    documentId: uuid("document_id")
+      .notNull()
+      .references(() => documents.id),
+    type: documentDerivativeTypeEnum("type").notNull(),
+    // Текст (ocr_text/translation/ai_summary) — {"text": "..."}; структурные
+    // поля (structured_data) — сам объект извлечённых полей.
+    content: jsonb("content").notNull(),
+    // Язык результата — осмыслен для translation, NULL для остальных типов.
+    language: text("language"),
+    // Какая модель/сервис произвели этот результат — важно для доверия при
+    // спорных ситуациях ("это AI перевёл неточно, вот исходная версия").
+    generatedBy: text("generated_by"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("document_derivatives_document_idx").on(table.documentId)],
+);
 
 export const documentLinkSourceEnum = pgEnum("document_link_source", ["ai", "manual"]);
 

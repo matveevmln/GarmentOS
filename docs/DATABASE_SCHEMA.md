@@ -72,6 +72,23 @@
 
 Миграция сгенерирована и применена к реальному Postgres (45 таблиц, 25 enum-типов); сценарий «одно фото ткани одновременно привязано к материалу (AI, 0.93), закупке (AI, 0.81) и вручную — к цеху» проверен сквозным smoke-тестом: запрос по `(entity_type, entity_id)` материала корректно возвращает документ независимо от того, к скольким ещё сущностям он привязан.
 
+## 0f. Дополнение: версионность и неизменность документов (2026-07-24, финальное ревью Inbox)
+
+Владелец проекта утвердил архитектуру Universal Inbox и потребовал зафиксировать до Итерации 3 ещё один пробел: `document_links` (п.0e) решает «к скольким сущностям относится документ», но не отвечает на вопрос «это тот же документ, что и вчера, только новая редакция, или другой файл» (пример: `Price_v1.xlsx` → `Price_final.xlsx` → `Price_final_NEW.xlsx`, или исправленный поставщиком инвойс) — и не гарантирует, что AI-обработка (OCR, перевод) не подменит исходный файл. Закрыто как принцип 19 `PRINCIPLES.md` («Immutable Original»); здесь — схемные изменения.
+
+| Изменение | Было | Стало | Почему |
+|---|---|---|---|
+| `documents.supersedes_document_id` (self-FK, nullable) | — | Ссылка на предыдущую версию того же логического документа | v1→v2→v3 — цепочка версий, а не независимые файлы |
+| `documents.is_current_version` (boolean, default true) | — | Денормализованный флаг актуальной версии | «Покажи актуальный прайс» без обхода всей цепочки на каждый запрос |
+| Триггер `documents_file_url_immutable` на `documents` | — | `BEFORE UPDATE` блокирует изменение `file_url` с явной ошибкой | Гарантия на уровне БД, а не только на уровне приложения/соглашения — оригинал нельзя переписать по ошибке или по недосмотру в новом коде |
+| Новая таблица `document_derivatives` | — | `id`, `document_id` (FK `documents`), `type` (`ocr_text`/`translation`/`structured_data`/`ai_summary`), `content` (jsonb), `language NULL`, `generated_by NULL`, `created_at` | OCR/перевод/структурные данные/AI-саммари — производные строки, ссылающиеся на неизменяемый оригинал, а не перезапись `documents.file_url` |
+
+Триггер — единственный в схеме и написан вручную (`packages/db-schema/drizzle/0005_document_immutability_trigger.sql`, зарегистрирован в `drizzle/meta/_journal.json` вручную), потому что `drizzle-kit` не генерирует DDL для триггеров/функций из декларативной TS-схемы — это осознанное разовое исключение, отмеченное комментарием в файле миграции.
+
+Проверено на реальном Postgres: цепочка `v1→v2→v3` (recursive CTE) возвращает версии в правильном порядке; `document_derivatives` остаются привязаны к неизменному оригиналу; `UPDATE documents SET file_url = ...` блокируется триггером с ожидаемым сообщением; `UPDATE documents SET title = ...` проходит без ошибки (неизменность касается только файла, не всей строки).
+
+**Entity Timeline и Document Graph** (два других пункта финального ревью) не потребовали изменений схемы — оба реализуются как read-model/запросы поверх уже существующих таблиц (`document_links`, `notes`, `audit_log`, `inbox_suggestions` + существующие FK), без новых сущностей. Подробности — `PRINCIPLES.md`, принцип 18, пп.5-6; технический план запроса — `INBOX_ARCHITECTURE.md`, раздел 7.5-7.6.
+
 ## 1. Сквозные конвенции
 
 - **Именование таблиц**: `snake_case`, множественное число (`products`, `stock_items`).
@@ -136,6 +153,8 @@ erDiagram
     PRODUCTION_ORDERS ||--o{ COST_ENTRIES : generates
 
     DOCUMENTS ||--o{ DOCUMENT_LINKS : "многие-ко-многим"
+    DOCUMENTS ||--o{ DOCUMENT_DERIVATIVES : "OCR/перевод/AI-саммари"
+    DOCUMENTS |o--o| DOCUMENTS : "supersedes (версии v1→v2→v3)"
     PRODUCTION_ORDERS ||--o{ DOCUMENT_LINKS : "инвойс/накладная/фото"
     PURCHASE_ORDERS ||--o{ DOCUMENT_LINKS : "инвойс/договор"
     MATERIALS ||--o{ DOCUMENT_LINKS : "фото/сертификаты"
@@ -329,7 +348,8 @@ flowchart TD
 |---|---|---|
 | `audit_log` | `id`, `company_id`, `user_id`, `entity_type`, `entity_id`, `action`, `before_json`, `after_json`, `occurred_at` | Системный аудит критичных операций (см. `ARCHITECTURE.md` п.7) — **не путать** с `notes` ниже: это автоматический след изменений полей, не текст от пользователя |
 | `notifications` | `id`, `company_id`, `user_id`, `type`, `payload_json`, `read_at` | Уведомления (низкий остаток, срыв срока заказа у цеха и т.д.) |
-| `documents` | `id`, `company_id`, `doc_type` (`invoice/contract/waybill/photo/certificate/specification/declaration/addendum/other`), `file_url`, `title NULL`, `issued_at NULL`, `uploaded_by` | Только файл и его метаданные — **без** привязки к сущности (см. п.0e/`document_links` ниже). `file_url` — через `StorageAdapter` (см. `INFRASTRUCTURE.md` п.2.3) |
+| `documents` | `id`, `company_id`, `doc_type` (`invoice/contract/waybill/photo/certificate/specification/declaration/addendum/other`), `file_url`, `title NULL`, `issued_at NULL`, `uploaded_by`, `supersedes_document_id NULL` (self-FK), `is_current_version` (default true) | Только файл и его метаданные — **без** привязки к сущности (см. п.0e/`document_links` ниже). `file_url` — через `StorageAdapter` (см. `INFRASTRUCTURE.md` п.2.3), **неизменяем после создания** — защищено триггером `documents_file_url_immutable` (п.0f, `PRINCIPLES.md` принцип 19). Новая версия файла (`Price_v1.xlsx` → `Price_final.xlsx`) — новая строка с `supersedes_document_id`, не `UPDATE` существующей |
+| `document_derivatives` | `id`, `document_id` (FK `documents`), `type` (`ocr_text/translation/structured_data/ai_summary`), `content` (jsonb), `language NULL`, `generated_by NULL`, `created_at` | **Новая сущность (п.0f).** Производные данные оригинала (распознанный текст, перевод, структурные поля, AI-саммари) — отдельные строки, ссылающиеся на неизменяемый `documents.id`, а не перезапись оригинала. Переобработка (более точный OCR) добавляет новую строку, старая не удаляется |
 | `document_links` | `id`, `company_id`, `document_id`, `entity_type` (`product/product_variant/collection/material/supplier/purchase_order/workshop/production_order/shipment/warehouse`), `entity_id`, `confidence NULL` (0-1, NULL для ручных связей), `source` (`ai`/`manual`), `linked_by NULL`, `linked_at` | **Новая сущность (п.0e).** Многие-ко-многим: один документ — много сущностей, одна сущность — много документов. Открыть карточку модели/материала/закупки/цеха/отгрузки — увидеть все привязанные документы через `WHERE entity_type=... AND entity_id=...`, независимо от того, к скольким ещё сущностям привязан тот же файл. `company_id` продублирован намеренно — единственная защита от межтенантной утечки для полиморфной пары, для которой нет FK на конкретную таблицу |
 | `notes` | `id`, `company_id`, `entity_type`, `entity_id`, `author_id` (FK `users`), `body`, `created_at` | Свободный текстовый комментарий к одной конкретной сущности («цех попросил перенести срок на 3 дня») — один-к-одному, в отличие от `documents`/`document_links` (файл может относиться сразу к нескольким) и `audit_log` (автоматический след) |
 
@@ -345,6 +365,8 @@ flowchart TD
 - `purchase_order_items`: индекс `(material_id)` — для отчёта истории цен в разрезе материала.
 - `notes`: индекс `(company_id, entity_type, entity_id)` — быстрая выборка «всё по этому заказу/отгрузке».
 - `document_links`: индекс `(entity_type, entity_id)` — главный запрос «все документы этой сущности» (карточка модели/материала/закупки); индекс `(document_id)` — «ко всем сущностям привязан этот файл».
+- `documents`: индекс `(company_id, is_current_version)` — «покажи только актуальные версии документов компании»; индекс `(supersedes_document_id)` — обход цепочки версий в обе стороны.
+- `document_derivatives`: индекс `(document_id)` — «все производные данные этого оригинала» (OCR/перевод/AI-саммари).
 - `shipments`: индекс `(company_id, status)`, `(destination_warehouse_id)`.
 - `collections`: уникальный индекс `(company_id, name)`.
 - `inbox_items`: индекс `(company_id, status)` — очередь необработанных/неподтверждённых сообщений — главный экран Inbox.
@@ -361,6 +383,8 @@ flowchart TD
 Вынесены в [`ARCHITECTURE_SELF_REVIEW.md`](./ARCHITECTURE_SELF_REVIEW.md): партиционирование `stock_movements`/`marking_code_events` по мере роста, стратегия RLS вместо application-level фильтрации по `company_id`, схема хранения `api_credentials_encrypted` (KMS vs application-level шифрование).
 
 **Закрыт этим проходом**: моделирование экспорта — решено как простая сущность `shipments` (п.10), не таможенный модуль.
+
+**Закрыт финальным ревью Inbox (2026-07-24, п.0f)**: версионность и неизменность документов — `supersedes_document_id`/`is_current_version` + триггер `documents_file_url_immutable` + `document_derivatives`. Entity Timeline и Document Graph закрыты как read-model/запросы без изменения схемы (`PRINCIPLES.md`, принцип 18, пп.5-6).
 
 **Новый вопрос (не блокирует Итерацию 2)**: если один поставщик реально продаёт материалы нескольких категорий (например, ткань и фурнитуру одновременно), заводить ли его несколькими строками в `suppliers` или переходить на `supplier_categories` (многие-ко-многим)? Для MVP — несколько строк (проще); пересмотреть, если на практике это создаст путаницу в отчётах.
 

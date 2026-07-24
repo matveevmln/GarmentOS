@@ -47,6 +47,7 @@ const EXPECTED_TABLES = [
   "notifications",
   "documents",
   "document_links",
+  "document_derivatives",
   "notes",
   "inbox_channels",
   "inbox_items",
@@ -100,6 +101,7 @@ describe("schema", () => {
       "marketplace_sync_logs",
       "marking_code_events",
       "inbox_suggestions",
+      "document_derivatives",
     ]);
 
     for (const [key, table] of Object.entries(tables)) {

@@ -29,6 +29,20 @@
       "when": 1784912691994,
       "tag": "0003_fantastic_reptil",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1784913929407,
+      "tag": "0004_serious_iron_patriot",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1784914000000,
+      "tag": "0005_document_immutability_trigger",
+      "breakpoints": true
     }
   ]
 }
