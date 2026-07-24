@@ -92,9 +92,9 @@ flowchart LR
 | База данных | PostgreSQL, Drizzle ORM |
 | Кэш / очереди | Redis, BullMQ |
 | Хранилище файлов | S3-совместимое (фото, техкарты) |
-| Инфраструктура | Docker, GitHub Actions, Turborepo/pnpm workspaces |
+| Инфраструктура | Docker, GitHub Actions, Turborepo/pnpm workspaces — **cloud-agnostic**, без привязки к провайдеру |
 
-Полное обоснование выбора — [`docs/TECH_STACK.md`](./docs/TECH_STACK.md).
+Полное обоснование выбора — [`docs/TECH_STACK.md`](./docs/TECH_STACK.md) и [`docs/INFRASTRUCTURE.md`](./docs/INFRASTRUCTURE.md).
 
 ## Быстрый старт
 
@@ -131,6 +131,7 @@ GarmentOS/
 | 🧱 [`docs/TECH_STACK.md`](./docs/TECH_STACK.md) | Технологический стек и обоснование |
 | 📁 [`docs/REPOSITORY_STRUCTURE.md`](./docs/REPOSITORY_STRUCTURE.md) | Структура репозитория |
 | 🗄️ [`docs/DATABASE_SCHEMA.md`](./docs/DATABASE_SCHEMA.md) | Структура базы данных |
+| ☁️ [`docs/INFRASTRUCTURE.md`](./docs/INFRASTRUCTURE.md) | Cloud-agnostic инфраструктура: Start Lean, Scale Smart |
 | 🗺️ [`docs/ROADMAP.md`](./docs/ROADMAP.md) | Дорожная карта |
 | ⚙️ [`docs/PRINCIPLES.md`](./docs/PRINCIPLES.md) | Принципы разработки |
 | ✅ [`docs/QUALITY_STANDARDS.md`](./docs/QUALITY_STANDARDS.md) | Стандарты качества |

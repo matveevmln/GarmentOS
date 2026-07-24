@@ -22,6 +22,7 @@
 | [`docs/TECH_STACK.md`](./docs/TECH_STACK.md) | Технологический стек и обоснование каждого выбора |
 | [`docs/REPOSITORY_STRUCTURE.md`](./docs/REPOSITORY_STRUCTURE.md) | Структура монорепозитория, назначение каждой директории |
 | [`docs/DATABASE_SCHEMA.md`](./docs/DATABASE_SCHEMA.md) | Структура базы данных, ER-диаграмма, конвенции |
+| [`docs/INFRASTRUCTURE.md`](./docs/INFRASTRUCTURE.md) | Cloud-agnostic инфраструктура: Start Lean Scale Smart, эталонный стек, поэтапный план роста |
 | [`docs/ROADMAP.md`](./docs/ROADMAP.md) | Дорожная карта разработки по фазам |
 | [`docs/PRINCIPLES.md`](./docs/PRINCIPLES.md) | Принципы разработки (инженерные и продуктовые) |
 | [`docs/QUALITY_STANDARDS.md`](./docs/QUALITY_STANDARDS.md) | Стандарты качества кода, тестирования, CI/CD |
@@ -41,6 +42,7 @@
 - **Многотенантность закладывается с первого дня** на уровне схемы БД (`company_id` в доменных таблицах), даже если MVP разворачивается как single-tenant.
 - **Интеграции с маркетплейсами** — через единый интерфейс адаптера (`MarketplaceConnector`), а не встраиванием специфики WB/Ozon в доменную логику.
 - **Честный Знак — отдельный bounded context**, не размазан по другим модулям.
+- **Инфраструктура cloud-agnostic** (принцип «Start Lean, Scale Smart»): Docker, PostgreSQL, Redis, S3-совместимое хранилище за адаптером — переносимо между self-hosted (включая Кыргызстан по стоимости), Yandex Cloud, VK Cloud, AWS, GCP, Azure без изменений в коде. Подробности — `docs/INFRASTRUCTURE.md`.
 - Технологический стек — TypeScript везде (backend + frontend), PostgreSQL, Redis, монорепозиторий на pnpm + Turborepo. Обоснование — `docs/TECH_STACK.md`.
 
 ## 4. Терминологический глоссарий (используй именно эти термины в коде и документах)

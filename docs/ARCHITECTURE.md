@@ -1,6 +1,6 @@
 # Архитектура системы GarmentOS
 
-> Связанные документы: [`PROJECT_VISION.md`](../PROJECT_VISION.md) (зачем), [`TECH_STACK.md`](./TECH_STACK.md) (на чём), [`DATABASE_SCHEMA.md`](./DATABASE_SCHEMA.md) (данные), [`REPOSITORY_STRUCTURE.md`](./REPOSITORY_STRUCTURE.md) (где лежит код).
+> Связанные документы: [`PROJECT_VISION.md`](../PROJECT_VISION.md) (зачем), [`TECH_STACK.md`](./TECH_STACK.md) (на чём), [`DATABASE_SCHEMA.md`](./DATABASE_SCHEMA.md) (данные), [`REPOSITORY_STRUCTURE.md`](./REPOSITORY_STRUCTURE.md) (где лежит код), [`INFRASTRUCTURE.md`](./INFRASTRUCTURE.md) (где и как развёрнуто).
 
 ## 1. Архитектурный стиль
 
@@ -172,6 +172,8 @@ interface MarketplaceConnector {
 
 ## 9. Развёртывание
 
+**Решено (см. [`INFRASTRUCTURE.md`](./INFRASTRUCTURE.md))**: инфраструктура **cloud-agnostic** по принципу «Start Lean, Scale Smart» — не привязана к конкретному облачному провайдеру, переносима между self-hosted сервером (в т.ч. в Кыргызстане, по критерию стоимости), Yandex Cloud, VK Cloud, AWS, Google Cloud и Azure без изменений в коде. Единственная зависимость приложения от среды исполнения — Docker, PostgreSQL-совместимая БД, Redis-совместимый кэш и S3-совместимое объектное хранилище, доступное через `StorageAdapter` (тот же паттерн адаптера, что и `MarketplaceConnector`, см. п.5.1).
+
 ```mermaid
 flowchart TB
     subgraph Client
@@ -180,15 +182,15 @@ flowchart TB
     subgraph Edge
         LB[Load Balancer / Reverse Proxy]
     end
-    subgraph App["Application Tier"]
+    subgraph App["Application Tier (контейнеры — переносимы на любую площадку)"]
         API1[API instance]
         API2[API instance]
         WORKER[Background Workers]
     end
-    subgraph Data["Data Tier"]
+    subgraph Data["Data Tier — доступ только через стандартные протоколы/S3 API"]
         PG[(PostgreSQL)]
         REDIS[(Redis)]
-        S3[(S3-совместимое хранилище)]
+        S3[(S3-совместимое хранилище: MinIO / любой провайдер)]
     end
 
     Browser --> LB --> API1
@@ -201,9 +203,10 @@ flowchart TB
     WORKER -.-> ExternalAPIs["Wildberries / Ozon / ГИС МТ"]
 ```
 
-- API stateless — горизонтально масштабируется за балансировщиком.
+- API stateless — горизонтально масштабируется за балансировщиком, на любой площадке.
 - Background Workers — отдельный процесс(ы), масштабируется независимо от API (важно: синхронизация с маркетплейсами и обработка «Честного Знака» — I/O-bound и не должна конкурировать за ресурсы с обслуживанием пользовательских запросов).
-- Хостинг — см. открытый вопрос в `ARCHITECTURE_SELF_REVIEW.md` про требования к локализации данных.
+- На Фазе 1 (Lean-старт) всё разворачивается на одном сервере через Docker Compose — эталонная схема и поэтапный план роста инфраструктуры без переписывания домена описаны в `INFRASTRUCTURE.md`.
+- Юридическая применимость конкретной площадки для конкретного клиента (требования 152-ФЗ/242-ФЗ к ПДн граждан РФ) — бизнес-решение по каждому клиенту, не архитектурное ограничение; см. `INFRASTRUCTURE.md` п.8.
 
 ## 10. Путь к масштабированию
 

@@ -19,12 +19,16 @@ GarmentOS/
 │   │   ├── wildberries/
 │   │   ├── ozon/
 │   │   ├── yandex-market/
-│   │   └── honest-sign/          # ГИС МТ / «Честный Знак»
+│   │   ├── honest-sign/          # ГИС МТ / «Честный Знак»
+│   │   └── storage/               # StorageAdapter — реализации под S3/MinIO/Yandex Object Storage и т.д. (см. docs/INFRASTRUCTURE.md, 2.3)
 │   └── config/                   # Общие конфиги (eslint, tsconfig, tailwind) для всех пакетов
 │
-├── infra/
+├── infra/                          # cloud-agnostic, см. docs/INFRASTRUCTURE.md
 │   ├── docker/                    # Dockerfile-ы для api/web/workers
-│   ├── docker-compose.yml         # Локальное окружение (postgres, redis, api, web, workers)
+│   ├── docker-compose.yml         # Локальное окружение (postgres, redis, minio, api, web, workers)
+│   ├── docker-compose.prod.yml    # Эталонный прод-стек Фазы 1 (Lean-старт, один сервер — любая площадка)
+│   ├── provision/                  # Короткие provisioning-скрипты для Стадии A (без Terraform, см. INFRASTRUCTURE.md п.6)
+│   ├── terraform/                  # Вводится на Стадии B (несколько окружений/провайдеров) — пусто на Фазе 1
 │   └── ci/                        # Вспомогательные скрипты для GitHub Actions
 │
 ├── docs/
