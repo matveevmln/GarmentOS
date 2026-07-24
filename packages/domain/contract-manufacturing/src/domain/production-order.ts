@@ -1,0 +1,105 @@
+import { DomainError } from "./errors";
+
+export type ProductionOrderStatus =
+  | "draft"
+  | "placed"
+  | "in_progress"
+  | "ready_for_pickup"
+  | "received"
+  | "cancelled";
+
+export interface ProductionOrderVariant {
+  id: string;
+  productionOrderId: string;
+  productVariantId: string;
+  quantity: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface ProductionOrder {
+  id: string;
+  companyId: string;
+  productId: string;
+  bomId: string;
+  workshopId: string;
+  plannedQuantity: string;
+  agreedUnitPrice: string;
+  materialsProvidedByUs: boolean;
+  status: ProductionOrderStatus;
+  dueDate: string | null;
+  receivedAt: Date | null;
+  createdBy: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+  variants: ProductionOrderVariant[];
+}
+
+export interface ProductionOrderVariantDraft {
+  productVariantId: string;
+  quantity: number;
+}
+
+// Разбивка по SKU не может быть пустой — заказ пошива размещается на
+// конкретный объём по конкретным размерам/цветам (docs/DATABASE_SCHEMA.md,
+// раздел 8).
+export function assertHasVariants(variants: ProductionOrderVariantDraft[]): void {
+  if (variants.length === 0) {
+    throw new DomainError(
+      "Заказ пошива должен содержать хотя бы одну строку разбивки по SKU",
+      "PRODUCTION_ORDER_VARIANTS_EMPTY",
+    );
+  }
+}
+
+export function assertValidVariant(variant: ProductionOrderVariantDraft): void {
+  if (variant.quantity <= 0) {
+    throw new DomainError(
+      `Количество по SKU должно быть положительным (получено ${variant.quantity})`,
+      "PRODUCTION_ORDER_VARIANT_QUANTITY_INVALID",
+    );
+  }
+}
+
+export function assertValidPlannedQuantity(plannedQuantity: number): void {
+  if (plannedQuantity <= 0) {
+    throw new DomainError(
+      `Плановое количество должно быть положительным (получено ${plannedQuantity})`,
+      "PRODUCTION_ORDER_PLANNED_QUANTITY_INVALID",
+    );
+  }
+}
+
+export function assertValidUnitPrice(agreedUnitPrice: number): void {
+  if (agreedUnitPrice < 0) {
+    throw new DomainError(
+      `Согласованная цена за единицу не может быть отрицательной (получено ${agreedUnitPrice})`,
+      "PRODUCTION_ORDER_UNIT_PRICE_INVALID",
+    );
+  }
+}
+
+// Ключевой инвариант, найденный в USER_JOURNEY_AUDIT.md и зафиксированный в
+// ROADMAP.md (Итерация 3): нельзя разместить заказ пошива без утверждённого
+// (approved) BOM модели. Проверка "approved ли конкретный bomId" делегирована
+// в модуль BOM через порт (application/ports.ts) — Contract Manufacturing не
+// читает таблицу boms напрямую (docs/PRINCIPLES.md, принцип 2).
+export function assertBomIsApproved(isApproved: boolean, bomId: string): void {
+  if (!isApproved) {
+    throw new DomainError(
+      `Нельзя разместить заказ пошива: BOM ${bomId} не утверждён (approved) для этой модели`,
+      "PRODUCTION_ORDER_BOM_NOT_APPROVED",
+    );
+  }
+}
+
+// Инвариант: подтвердить (разместить у цеха) можно только черновик — тот же
+// draft-first паттерн, что и в Materials & Procurement.
+export function assertCanConfirm(status: ProductionOrderStatus): void {
+  if (status !== "draft") {
+    throw new DomainError(
+      `Нельзя подтвердить заказ пошива в статусе "${status}" — подтверждение доступно только для черновика`,
+      "PRODUCTION_ORDER_NOT_DRAFT",
+    );
+  }
+}
