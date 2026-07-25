@@ -209,9 +209,21 @@ importers:
       '@garmentos/domain-catalog':
         specifier: workspace:*
         version: link:../catalog
+      '@garmentos/domain-honest-sign':
+        specifier: workspace:*
+        version: link:../honest-sign
       '@garmentos/domain-identity':
         specifier: workspace:*
         version: link:../identity
+      '@garmentos/domain-marketplace-integration':
+        specifier: workspace:*
+        version: link:../marketplace-integration
+      '@garmentos/domain-sales':
+        specifier: workspace:*
+        version: link:../sales
+      '@garmentos/domain-warehouse':
+        specifier: workspace:*
+        version: link:../warehouse
       '@types/node':
         specifier: ^26.1.1
         version: 26.1.1
