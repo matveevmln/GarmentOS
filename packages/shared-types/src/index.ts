@@ -8,3 +8,4 @@ export * from "./sales";
 export * from "./marketplace-integration";
 export * from "./honest-sign";
 export * from "./finance";
+export * from "./notifications";
