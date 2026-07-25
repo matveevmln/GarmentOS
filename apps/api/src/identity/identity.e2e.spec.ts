@@ -4,6 +4,7 @@ config({ path: "../../.env" });
 
 import type { Server } from "node:http";
 import type { INestApplication } from "@nestjs/common";
+import { VersioningType } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import { companies, createDb, users } from "@garmentos/db-schema";
 import type { CompanyResponseDto, UserResponseDto } from "@garmentos/shared-types";
@@ -37,6 +38,10 @@ describe("Identity API (e2e)", () => {
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
     app = moduleRef.createNestApplication();
+    // main.ts не запускается в e2e-тесте (тестовое приложение собирается
+    // напрямую из AppModule) — версионирование нужно включить здесь так же,
+    // как в bootstrap(), иначе /v1/... маршруты не зарегистрируются.
+    app.enableVersioning({ type: VersioningType.URI, defaultVersion: "1" });
     await app.init();
     httpServer = app.getHttpServer() as Server;
   });
@@ -52,12 +57,12 @@ describe("Identity API (e2e)", () => {
     await app.close();
   });
 
-  it("POST /companies создаёт компанию, POST /users создаёт пользователя, дубликат email — 409", async () => {
+  it("POST /v1/companies создаёт компанию, POST /v1/users создаёт пользователя, дубликат email — 409", async () => {
     const companyName = `E2E Тест ${Date.now()}`;
     createdCompanyNames.push(companyName);
 
     const companyResponse = await request(httpServer)
-      .post("/companies")
+      .post("/v1/companies")
       .send({ name: companyName, defaultCurrency: "RUB" })
       .expect(201);
     const company = companyResponse.body as CompanyResponseDto;
@@ -65,7 +70,7 @@ describe("Identity API (e2e)", () => {
     expect(company.defaultCurrency).toBe("RUB");
 
     const userResponse = await request(httpServer)
-      .post("/users")
+      .post("/v1/users")
       .send({
         companyId: company.id,
         email: "E2E.Owner@Example.com",
@@ -78,7 +83,7 @@ describe("Identity API (e2e)", () => {
     expect(user).not.toHaveProperty("passwordHash");
 
     const conflictResponse = await request(httpServer)
-      .post("/users")
+      .post("/v1/users")
       .send({
         companyId: company.id,
         email: "e2e.owner@example.com",
@@ -90,7 +95,7 @@ describe("Identity API (e2e)", () => {
     expect(conflictBody.code).toBe("USER_EMAIL_TAKEN");
   });
 
-  it("POST /companies с пустым именем — 400", async () => {
-    await request(httpServer).post("/companies").send({ name: "" }).expect(400);
+  it("POST /v1/companies с пустым именем — 400", async () => {
+    await request(httpServer).post("/v1/companies").send({ name: "" }).expect(400);
   });
 });

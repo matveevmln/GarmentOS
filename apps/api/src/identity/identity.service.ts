@@ -1,30 +1,27 @@
 import { Inject, Injectable } from "@nestjs/common";
-import type { Database } from "@garmentos/db-schema";
 import {
   createCompany,
   createUser,
-  DrizzleCompanyRepository,
-  DrizzleUserRepository,
   type Company,
+  type CompanyRepository,
   type User,
+  type UserRepository,
 } from "@garmentos/domain-identity";
 import type { CreateCompanyDto, CreateUserDto } from "@garmentos/shared-types";
-import { DATABASE_CONNECTION } from "../database/database.module";
+import { COMPANY_REPOSITORY, USER_REPOSITORY } from "./identity.tokens";
 import { hashPassword } from "./password-hasher";
 
 // Тонкий presentation-адаптер поверх packages/domain/identity — сам не
 // содержит бизнес-логики (docs/ARCHITECTURE.md, раздел 2). Репозитории
-// создаются здесь (единственное место, знающее про Drizzle в этом модуле),
-// use case из домена вызываются как обычные функции.
+// внедряются через DI по токенам доменных портов (identity.tokens.ts) —
+// сервис не знает, что это Drizzle, use case из домена вызываются как
+// обычные функции.
 @Injectable()
 export class IdentityService {
-  private readonly companies: DrizzleCompanyRepository;
-  private readonly users: DrizzleUserRepository;
-
-  constructor(@Inject(DATABASE_CONNECTION) db: Database) {
-    this.companies = new DrizzleCompanyRepository(db);
-    this.users = new DrizzleUserRepository(db);
-  }
+  constructor(
+    @Inject(COMPANY_REPOSITORY) private readonly companies: CompanyRepository,
+    @Inject(USER_REPOSITORY) private readonly users: UserRepository,
+  ) {}
 
   async createCompany(input: CreateCompanyDto): Promise<Company> {
     return createCompany({ companies: this.companies }, input);

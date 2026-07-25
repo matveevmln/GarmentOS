@@ -4,6 +4,7 @@ loadEnv({ path: "../../.env" });
 
 import "reflect-metadata";
 import { NestFactory } from "@nestjs/core";
+import { VersioningType } from "@nestjs/common";
 import { DocumentBuilder, SwaggerModule } from "@nestjs/swagger";
 import { cleanupOpenApiDoc } from "nestjs-zod";
 import { AppModule } from "./app.module";
@@ -16,6 +17,10 @@ import { AppModule } from "./app.module";
 // использующей встроенную поддержку OpenAPI в zod v4).
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule);
+
+  // URI-versioning с первого контроллера (/v1/...) — маршруты будущих 10
+  // модулей сразу попадают под версию без миграции путей задним числом.
+  app.enableVersioning({ type: VersioningType.URI, defaultVersion: "1" });
 
   const swaggerConfig = new DocumentBuilder()
     .setTitle("GarmentOS API")
