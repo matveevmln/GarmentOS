@@ -23,14 +23,14 @@ export class ContractManufacturingService {
     @Inject(BOM_APPROVAL_PORT) private readonly bomApproval: BomApprovalPort,
   ) {}
 
-  async createWorkshop(input: CreateWorkshopDto): Promise<Workshop> {
-    return createWorkshop({ workshops: this.workshops }, input);
+  async createWorkshop(companyId: string, input: CreateWorkshopDto): Promise<Workshop> {
+    return createWorkshop({ workshops: this.workshops }, { ...input, companyId });
   }
 
-  async createProductionOrderDraft(input: CreateProductionOrderDto): Promise<ProductionOrder> {
+  async createProductionOrderDraft(companyId: string, input: CreateProductionOrderDto): Promise<ProductionOrder> {
     return createProductionOrderDraft(
       { productionOrders: this.productionOrders, workshops: this.workshops, bomApproval: this.bomApproval },
-      input,
+      { ...input, companyId },
     );
   }
 

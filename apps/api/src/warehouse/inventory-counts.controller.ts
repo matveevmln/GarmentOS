@@ -7,6 +7,7 @@ import {
   recordInventoryCountItemSchema,
   type InventoryCountResponseDto,
 } from "@garmentos/shared-types";
+import { RequirePermissions } from "../auth/require-permissions.decorator";
 import { WarehouseService } from "./warehouse.service";
 
 class CreateInventoryCountDto extends createZodDto(createInventoryCountSchema) {}
@@ -17,12 +18,14 @@ class RecordInventoryCountItemDto extends createZodDto(recordInventoryCountItemS
 export class InventoryCountsController {
   constructor(private readonly warehouseService: WarehouseService) {}
 
+  @RequirePermissions("warehouse.write")
   @Post()
   async create(@Body() body: CreateInventoryCountDto): Promise<InventoryCountResponseDto> {
     const inventoryCount = await this.warehouseService.createInventoryCount(body);
     return inventoryCountResponseSchema.parse(inventoryCount);
   }
 
+  @RequirePermissions("warehouse.write")
   @Post(":id/items")
   async recordItem(
     @Param("id") id: string,
@@ -32,6 +35,7 @@ export class InventoryCountsController {
     return inventoryCountResponseSchema.parse(inventoryCount);
   }
 
+  @RequirePermissions("warehouse.write")
   @Post(":id/complete")
   async complete(@Param("id") id: string): Promise<InventoryCountResponseDto> {
     const inventoryCount = await this.warehouseService.completeInventoryCount(id);

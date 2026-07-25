@@ -16,6 +16,9 @@ import {
   productionOrderVariants,
   productVariants,
   products,
+  refreshTokens,
+  userRoles,
+  users,
   workshops,
 } from "@garmentos/db-schema";
 import type {
@@ -30,6 +33,7 @@ import { eq } from "drizzle-orm";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { AppModule } from "../app.module";
+import { authHeader, setupAuthenticatedCompany } from "../test-support/auth-test-helper";
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) {
@@ -80,6 +84,12 @@ describe("Contract Manufacturing API (e2e)", () => {
           await db.delete(productVariants).where(eq(productVariants.productId, product.id));
         }
         await db.delete(products).where(eq(products.companyId, company.id));
+        const companyUsers = await db.select().from(users).where(eq(users.companyId, company.id));
+        for (const user of companyUsers) {
+          await db.delete(refreshTokens).where(eq(refreshTokens.userId, user.id));
+          await db.delete(userRoles).where(eq(userRoles.userId, user.id));
+        }
+        await db.delete(users).where(eq(users.companyId, company.id));
         await db.delete(companies).where(eq(companies.id, company.id));
       }
     }
@@ -89,37 +99,40 @@ describe("Contract Manufacturing API (e2e)", () => {
   it("отклоняет заказ пошива без утверждённого BOM, затем создаёт и подтверждает его после утверждения", async () => {
     const companyName = `E2E ContractManufacturing ${Date.now()}`;
     createdCompanyNames.push(companyName);
-    const [company] = await db.insert(companies).values({ name: companyName }).returning();
-    if (!company) throw new Error("Не удалось создать тестовую компанию");
+    const { accessToken } = await setupAuthenticatedCompany(db, httpServer, companyName, "owner");
 
     const productResponse = await request(httpServer)
       .post("/v1/products")
-      .send({ companyId: company.id, name: "Худи Петроль", code: "HOODIE-PETROL-CM-E2E" })
+      .set(...authHeader(accessToken))
+      .send({ name: "Худи Петроль", code: "HOODIE-PETROL-CM-E2E" })
       .expect(201);
     const product = productResponse.body as ProductResponseDto;
 
     const variantResponse = await request(httpServer)
       .post("/v1/product-variants")
+      .set(...authHeader(accessToken))
       .send({ productId: product.id, size: "M", color: "Петроль", skuCode: "HOODIE-PETROL-CM-E2E-M" })
       .expect(201);
     const variant = variantResponse.body as ProductVariantResponseDto;
 
     const materialResponse = await request(httpServer)
       .post("/v1/materials")
-      .send({ companyId: company.id, name: "Оксфорд 280", type: "fabric", unit: "m" })
+      .set(...authHeader(accessToken))
+      .send({ name: "Оксфорд 280", type: "fabric", unit: "m" })
       .expect(201);
     const material = materialResponse.body as MaterialResponseDto;
 
     const workshopResponse = await request(httpServer)
       .post("/v1/workshops")
-      .send({ companyId: company.id, name: "Цех №1 (Иваново)", specialization: "трикотаж" })
+      .set(...authHeader(accessToken))
+      .send({ name: "Цех №1 (Иваново)", specialization: "трикотаж" })
       .expect(201);
     const workshop = workshopResponse.body as WorkshopResponseDto;
 
     const draftBomResponse = await request(httpServer)
       .post("/v1/boms")
+      .set(...authHeader(accessToken))
       .send({
-        companyId: company.id,
         productId: product.id,
         items: [{ materialId: material.id, quantityPerUnit: 1.15, wastePercent: 4 }],
       })
@@ -129,8 +142,8 @@ describe("Contract Manufacturing API (e2e)", () => {
     // Ключевой инвариант Итерации 3: без утверждённого BOM заказ пошива запрещён.
     const rejectedResponse = await request(httpServer)
       .post("/v1/production-orders")
+      .set(...authHeader(accessToken))
       .send({
-        companyId: company.id,
         productId: product.id,
         bomId: draftBom.id,
         workshopId: workshop.id,
@@ -144,14 +157,14 @@ describe("Contract Manufacturing API (e2e)", () => {
 
     const approvedBomResponse = await request(httpServer)
       .post(`/v1/boms/${draftBom.id}/approve`)
-      .send({ companyId: company.id })
+      .set(...authHeader(accessToken))
       .expect(201);
     const approvedBom = approvedBomResponse.body as BomResponseDto;
 
     const orderResponse = await request(httpServer)
       .post("/v1/production-orders")
+      .set(...authHeader(accessToken))
       .send({
-        companyId: company.id,
         productId: product.id,
         bomId: approvedBom.id,
         workshopId: workshop.id,
@@ -165,16 +178,28 @@ describe("Contract Manufacturing API (e2e)", () => {
 
     const confirmedResponse = await request(httpServer)
       .post(`/v1/production-orders/${order.id}/confirm`)
-      .send({ companyId: company.id })
+      .set(...authHeader(accessToken))
       .expect(201);
     const confirmed = confirmedResponse.body as ProductionOrderResponseDto;
     expect(confirmed.status).toBe("placed");
 
     const conflictResponse = await request(httpServer)
       .post(`/v1/production-orders/${order.id}/confirm`)
-      .send({ companyId: company.id })
+      .set(...authHeader(accessToken))
       .expect(409);
     const conflictBody = conflictResponse.body as ErrorResponseBody;
     expect(conflictBody.code).toBe("PRODUCTION_ORDER_NOT_DRAFT");
+  });
+
+  it("viewer без contract_manufacturing.write не может создать цех — 403", async () => {
+    const companyName = `E2E ContractManufacturing Forbidden ${Date.now()}`;
+    createdCompanyNames.push(companyName);
+    const { accessToken } = await setupAuthenticatedCompany(db, httpServer, companyName, "viewer");
+
+    await request(httpServer)
+      .post("/v1/workshops")
+      .set(...authHeader(accessToken))
+      .send({ name: "Цех №2 (Бишкек)" })
+      .expect(403);
   });
 });

@@ -7,7 +7,6 @@ import { z } from "zod";
 export const workshopStatusSchema = z.enum(["draft", "active", "archived"]);
 
 export const createWorkshopSchema = z.object({
-  companyId: z.string().uuid(),
   name: z.string().min(1, "Название цеха не может быть пустым"),
   inn: z.string().optional(),
   contactInfo: z.string().optional(),
@@ -47,7 +46,6 @@ export const productionOrderVariantDraftSchema = z.object({
 });
 
 export const createProductionOrderSchema = z.object({
-  companyId: z.string().uuid(),
   productId: z.string().uuid(),
   bomId: z.string().uuid(),
   workshopId: z.string().uuid(),
@@ -89,8 +87,3 @@ export const productionOrderResponseSchema = z.object({
   variants: z.array(productionOrderVariantResponseSchema),
 });
 export type ProductionOrderResponseDto = z.infer<typeof productionOrderResponseSchema>;
-
-export const confirmProductionOrderSchema = z.object({
-  companyId: z.string().uuid(),
-});
-export type ConfirmProductionOrderDto = z.infer<typeof confirmProductionOrderSchema>;

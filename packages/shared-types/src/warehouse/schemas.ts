@@ -6,7 +6,6 @@ import { z } from "zod";
 export const warehouseTypeSchema = z.enum(["own", "workshop", "marketplace_fbo", "consignment"]);
 
 export const createWarehouseSchema = z.object({
-  companyId: z.string().uuid(),
   name: z.string().min(1, "Название склада не может быть пустым"),
   type: warehouseTypeSchema.optional(),
   country: z.string().optional(),
@@ -84,7 +83,6 @@ export const shipmentItemDraftSchema = z.object({
 });
 
 export const createShipmentSchema = z.object({
-  companyId: z.string().uuid(),
   originWarehouseId: z.string().uuid(),
   destinationWarehouseId: z.string().uuid(),
   carrierId: z.string().uuid().optional(),
@@ -119,11 +117,6 @@ export const shipmentResponseSchema = z.object({
   items: z.array(shipmentItemResponseSchema),
 });
 export type ShipmentResponseDto = z.infer<typeof shipmentResponseSchema>;
-
-export const shipmentActionSchema = z.object({
-  companyId: z.string().uuid(),
-});
-export type ShipmentActionDto = z.infer<typeof shipmentActionSchema>;
 
 export const inventoryCountStatusSchema = z.enum(["in_progress", "completed", "cancelled"]);
 

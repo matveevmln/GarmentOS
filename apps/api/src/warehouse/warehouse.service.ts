@@ -50,8 +50,8 @@ export class WarehouseService {
     @Inject(INVENTORY_COUNT_REPOSITORY) private readonly inventoryCounts: InventoryCountRepository,
   ) {}
 
-  async createWarehouse(input: CreateWarehouseDto): Promise<Warehouse> {
-    return createWarehouse({ warehouses: this.warehouses }, input);
+  async createWarehouse(companyId: string, input: CreateWarehouseDto): Promise<Warehouse> {
+    return createWarehouse({ warehouses: this.warehouses }, { ...input, companyId });
   }
 
   async receiveStock(input: ReceiveStockDto): Promise<StockItem> {
@@ -99,8 +99,8 @@ export class WarehouseService {
     return releaseReservation({ stock: this.stock }, input);
   }
 
-  async createShipment(input: CreateShipmentDto): Promise<Shipment> {
-    return createShipment({ shipments: this.shipments }, input);
+  async createShipment(companyId: string, input: CreateShipmentDto): Promise<Shipment> {
+    return createShipment({ shipments: this.shipments }, { ...input, companyId });
   }
 
   async dispatchShipment(companyId: string, shipmentId: string): Promise<Shipment> {
