@@ -48,8 +48,11 @@ export class MarketplaceIntegrationService {
     return ensureMarketplace({ marketplaces: this.marketplaces }, input);
   }
 
-  async createMarketplaceAccount(input: CreateMarketplaceAccountDto): Promise<MarketplaceAccount> {
-    return createMarketplaceAccount({ marketplaceAccounts: this.marketplaceAccounts, marketplaces: this.marketplaces }, input);
+  async createMarketplaceAccount(companyId: string, input: CreateMarketplaceAccountDto): Promise<MarketplaceAccount> {
+    return createMarketplaceAccount(
+      { marketplaceAccounts: this.marketplaceAccounts, marketplaces: this.marketplaces },
+      { ...input, companyId },
+    );
   }
 
   async activateMarketplaceAccount(companyId: string, marketplaceAccountId: string): Promise<MarketplaceAccount> {
@@ -60,10 +63,10 @@ export class MarketplaceIntegrationService {
     return deactivateMarketplaceAccount({ marketplaceAccounts: this.marketplaceAccounts }, { companyId, marketplaceAccountId });
   }
 
-  async createMarketplaceListing(input: CreateMarketplaceListingDto): Promise<MarketplaceListing> {
+  async createMarketplaceListing(companyId: string, input: CreateMarketplaceListingDto): Promise<MarketplaceListing> {
     return createMarketplaceListing(
       { marketplaceListings: this.marketplaceListings, marketplaceAccounts: this.marketplaceAccounts },
-      input,
+      { ...input, companyId },
     );
   }
 

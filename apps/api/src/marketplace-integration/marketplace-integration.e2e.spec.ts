@@ -14,6 +14,9 @@ import {
   marketplaceSyncLogs,
   productVariants,
   products,
+  refreshTokens,
+  userRoles,
+  users,
 } from "@garmentos/db-schema";
 import type {
   MarketplaceAccountResponseDto,
@@ -27,6 +30,7 @@ import { eq } from "drizzle-orm";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { AppModule } from "../app.module";
+import { authHeader, setupAuthenticatedCompany } from "../test-support/auth-test-helper";
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) {
@@ -75,6 +79,12 @@ describe("Marketplace Integration API (e2e)", () => {
           await db.delete(productVariants).where(eq(productVariants.productId, product.id));
         }
         await db.delete(products).where(eq(products.companyId, company.id));
+        const companyUsers = await db.select().from(users).where(eq(users.companyId, company.id));
+        for (const user of companyUsers) {
+          await db.delete(refreshTokens).where(eq(refreshTokens.userId, user.id));
+          await db.delete(userRoles).where(eq(userRoles.userId, user.id));
+        }
+        await db.delete(users).where(eq(users.companyId, company.id));
         await db.delete(companies).where(eq(companies.id, company.id));
       }
     }
@@ -84,23 +94,25 @@ describe("Marketplace Integration API (e2e)", () => {
   it("гарантирует справочник Wildberries, создаёт личный кабинет, карточку SKU и журнал синхронизации", async () => {
     const companyName = `E2E MarketplaceIntegration ${Date.now()}`;
     createdCompanyNames.push(companyName);
-    const [company] = await db.insert(companies).values({ name: companyName }).returning();
-    if (!company) throw new Error("Не удалось создать тестовую компанию");
+    const { accessToken } = await setupAuthenticatedCompany(db, httpServer, companyName, "marketplace_manager");
 
     const productResponse = await request(httpServer)
       .post("/v1/products")
-      .send({ companyId: company.id, name: "Худи Петроль", code: "HOODIE-PETROL-MP-E2E" })
+      .set(...authHeader(accessToken))
+      .send({ name: "Худи Петроль", code: "HOODIE-PETROL-MP-E2E" })
       .expect(201);
     const product = productResponse.body as ProductResponseDto;
 
     const variantResponse = await request(httpServer)
       .post("/v1/product-variants")
+      .set(...authHeader(accessToken))
       .send({ productId: product.id, size: "M", color: "Петроль", skuCode: "HOODIE-PETROL-MP-E2E-M" })
       .expect(201);
     const variant = variantResponse.body as ProductVariantResponseDto;
 
     const marketplaceResponse = await request(httpServer)
       .post("/v1/marketplaces/ensure")
+      .set(...authHeader(accessToken))
       .send({ code: "wildberries", name: "Wildberries" })
       .expect(201);
     const marketplace = marketplaceResponse.body as MarketplaceResponseDto;
@@ -108,33 +120,35 @@ describe("Marketplace Integration API (e2e)", () => {
     // Идемпотентность: повторный вызов возвращает ту же строку, не дублирует.
     const marketplaceAgainResponse = await request(httpServer)
       .post("/v1/marketplaces/ensure")
+      .set(...authHeader(accessToken))
       .send({ code: "wildberries", name: "Wildberries" })
       .expect(201);
     expect((marketplaceAgainResponse.body as MarketplaceResponseDto).id).toBe(marketplace.id);
 
     const accountResponse = await request(httpServer)
       .post("/v1/marketplace-accounts")
-      .send({ companyId: company.id, marketplaceCode: "wildberries", apiCredentialsEncrypted: "encrypted-token" })
+      .set(...authHeader(accessToken))
+      .send({ marketplaceCode: "wildberries", apiCredentialsEncrypted: "encrypted-token" })
       .expect(201);
     const account = accountResponse.body as MarketplaceAccountResponseDto;
     expect(account.isActive).toBe(true);
 
     const deactivatedResponse = await request(httpServer)
       .post(`/v1/marketplace-accounts/${account.id}/deactivate`)
-      .send({ companyId: company.id })
+      .set(...authHeader(accessToken))
       .expect(201);
     expect((deactivatedResponse.body as MarketplaceAccountResponseDto).isActive).toBe(false);
 
     const reactivatedResponse = await request(httpServer)
       .post(`/v1/marketplace-accounts/${account.id}/activate`)
-      .send({ companyId: company.id })
+      .set(...authHeader(accessToken))
       .expect(201);
     expect((reactivatedResponse.body as MarketplaceAccountResponseDto).isActive).toBe(true);
 
     const listingResponse = await request(httpServer)
       .post("/v1/marketplace-listings")
+      .set(...authHeader(accessToken))
       .send({
-        companyId: company.id,
         marketplaceAccountId: account.id,
         productVariantId: variant.id,
         externalSkuId: "WB-12345",
@@ -146,8 +160,8 @@ describe("Marketplace Integration API (e2e)", () => {
 
     const duplicateListingResponse = await request(httpServer)
       .post("/v1/marketplace-listings")
+      .set(...authHeader(accessToken))
       .send({
-        companyId: company.id,
         marketplaceAccountId: account.id,
         productVariantId: variant.id,
         externalSkuId: "WB-12345",
@@ -157,18 +171,21 @@ describe("Marketplace Integration API (e2e)", () => {
 
     const priceUpdatedResponse = await request(httpServer)
       .post(`/v1/marketplace-listings/${listing.id}/price`)
+      .set(...authHeader(accessToken))
       .send({ currentPrice: 3300 })
       .expect(201);
     expect((priceUpdatedResponse.body as MarketplaceListingResponseDto).currentPrice).toBe("3300.00");
 
     const stockUpdatedResponse = await request(httpServer)
       .post(`/v1/marketplace-listings/${listing.id}/stock`)
+      .set(...authHeader(accessToken))
       .send({ currentStockReported: 8 })
       .expect(201);
     expect((stockUpdatedResponse.body as MarketplaceListingResponseDto).currentStockReported).toBe("8.000");
 
     const syncLogResponse = await request(httpServer)
       .post("/v1/sync-logs")
+      .set(...authHeader(accessToken))
       .send({
         marketplaceAccountId: account.id,
         syncType: "stock_price",
@@ -177,5 +194,17 @@ describe("Marketplace Integration API (e2e)", () => {
       })
       .expect(201);
     expect((syncLogResponse.body as SyncLogResponseDto).status).toBe("success");
+  });
+
+  it("warehouse_keeper без marketplace_integration.write не может создать личный кабинет — 403", async () => {
+    const companyName = `E2E MarketplaceIntegration Forbidden ${Date.now()}`;
+    createdCompanyNames.push(companyName);
+    const { accessToken } = await setupAuthenticatedCompany(db, httpServer, companyName, "warehouse_keeper");
+
+    await request(httpServer)
+      .post("/v1/marketplace-accounts")
+      .set(...authHeader(accessToken))
+      .send({ marketplaceCode: "wildberries", apiCredentialsEncrypted: "encrypted-token" })
+      .expect(403);
   });
 });

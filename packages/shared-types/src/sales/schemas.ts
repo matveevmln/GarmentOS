@@ -5,7 +5,6 @@ import { z } from "zod";
 export const salesChannelTypeSchema = z.enum(["marketplace", "wholesale", "retail", "own_website"]);
 
 export const createSalesChannelSchema = z.object({
-  companyId: z.string().uuid(),
   type: salesChannelTypeSchema,
   name: z.string().min(1, "Название канала продаж не может быть пустым"),
 });
@@ -30,7 +29,6 @@ export const orderItemDraftSchema = z.object({
 });
 
 export const createOrderSchema = z.object({
-  companyId: z.string().uuid(),
   salesChannelId: z.string().uuid(),
   items: z.array(orderItemDraftSchema).min(1, "Заказ должен содержать хотя бы одну позицию"),
   externalOrderId: z.string().optional(),
@@ -64,8 +62,3 @@ export const orderResponseSchema = z.object({
   items: z.array(orderItemResponseSchema),
 });
 export type OrderResponseDto = z.infer<typeof orderResponseSchema>;
-
-export const transitionOrderStatusSchema = z.object({
-  companyId: z.string().uuid(),
-});
-export type TransitionOrderStatusDto = z.infer<typeof transitionOrderStatusSchema>;

@@ -24,17 +24,17 @@ export class SalesService {
     @Inject(ORDER_REPOSITORY) private readonly orders: OrderRepository,
   ) {}
 
-  async createSalesChannel(input: CreateSalesChannelDto): Promise<SalesChannel> {
-    return createSalesChannel({ salesChannels: this.salesChannels }, input);
+  async createSalesChannel(companyId: string, input: CreateSalesChannelDto): Promise<SalesChannel> {
+    return createSalesChannel({ salesChannels: this.salesChannels }, { ...input, companyId });
   }
 
-  async createOrder(input: CreateOrderDto): Promise<Order> {
+  async createOrder(companyId: string, input: CreateOrderDto): Promise<Order> {
     // orderedAt — ISO-строка в DTO (Swagger/zod v4 не представляют Date в
     // JSON Schema, packages/shared-types/src/sales/schemas.ts), домен
     // ожидает Date — приведение здесь, на границе presentation/domain.
     return createOrder(
       { orders: this.orders, salesChannels: this.salesChannels },
-      { ...input, orderedAt: input.orderedAt ? new Date(input.orderedAt) : undefined },
+      { ...input, companyId, orderedAt: input.orderedAt ? new Date(input.orderedAt) : undefined },
     );
   }
 

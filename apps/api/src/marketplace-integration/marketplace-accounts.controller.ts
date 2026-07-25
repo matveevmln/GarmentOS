@@ -4,40 +4,46 @@ import { createZodDto } from "nestjs-zod";
 import {
   createMarketplaceAccountSchema,
   marketplaceAccountResponseSchema,
-  toggleMarketplaceAccountSchema,
   type MarketplaceAccountResponseDto,
 } from "@garmentos/shared-types";
+import { CurrentUser, type AuthenticatedRequestUser } from "../auth/current-user.decorator";
+import { RequirePermissions } from "../auth/require-permissions.decorator";
 import { MarketplaceIntegrationService } from "./marketplace-integration.service";
 
 class CreateMarketplaceAccountDto extends createZodDto(createMarketplaceAccountSchema) {}
-class ToggleMarketplaceAccountDto extends createZodDto(toggleMarketplaceAccountSchema) {}
 
 @ApiTags("marketplace-accounts")
 @Controller("marketplace-accounts")
 export class MarketplaceAccountsController {
   constructor(private readonly marketplaceIntegrationService: MarketplaceIntegrationService) {}
 
+  @RequirePermissions("marketplace_integration.write")
   @Post()
-  async create(@Body() body: CreateMarketplaceAccountDto): Promise<MarketplaceAccountResponseDto> {
-    const account = await this.marketplaceIntegrationService.createMarketplaceAccount(body);
+  async create(
+    @Body() body: CreateMarketplaceAccountDto,
+    @CurrentUser() currentUser: AuthenticatedRequestUser,
+  ): Promise<MarketplaceAccountResponseDto> {
+    const account = await this.marketplaceIntegrationService.createMarketplaceAccount(currentUser.companyId, body);
     return marketplaceAccountResponseSchema.parse(account);
   }
 
+  @RequirePermissions("marketplace_integration.write")
   @Post(":id/activate")
   async activate(
     @Param("id") id: string,
-    @Body() body: ToggleMarketplaceAccountDto,
+    @CurrentUser() currentUser: AuthenticatedRequestUser,
   ): Promise<MarketplaceAccountResponseDto> {
-    const account = await this.marketplaceIntegrationService.activateMarketplaceAccount(body.companyId, id);
+    const account = await this.marketplaceIntegrationService.activateMarketplaceAccount(currentUser.companyId, id);
     return marketplaceAccountResponseSchema.parse(account);
   }
 
+  @RequirePermissions("marketplace_integration.write")
   @Post(":id/deactivate")
   async deactivate(
     @Param("id") id: string,
-    @Body() body: ToggleMarketplaceAccountDto,
+    @CurrentUser() currentUser: AuthenticatedRequestUser,
   ): Promise<MarketplaceAccountResponseDto> {
-    const account = await this.marketplaceIntegrationService.deactivateMarketplaceAccount(body.companyId, id);
+    const account = await this.marketplaceIntegrationService.deactivateMarketplaceAccount(currentUser.companyId, id);
     return marketplaceAccountResponseSchema.parse(account);
   }
 }

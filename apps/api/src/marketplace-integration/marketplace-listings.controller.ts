@@ -8,6 +8,8 @@ import {
   updateListingStockSchema,
   type MarketplaceListingResponseDto,
 } from "@garmentos/shared-types";
+import { CurrentUser, type AuthenticatedRequestUser } from "../auth/current-user.decorator";
+import { RequirePermissions } from "../auth/require-permissions.decorator";
 import { MarketplaceIntegrationService } from "./marketplace-integration.service";
 
 class CreateMarketplaceListingDto extends createZodDto(createMarketplaceListingSchema) {}
@@ -19,12 +21,17 @@ class UpdateListingStockDto extends createZodDto(updateListingStockSchema) {}
 export class MarketplaceListingsController {
   constructor(private readonly marketplaceIntegrationService: MarketplaceIntegrationService) {}
 
+  @RequirePermissions("marketplace_integration.write")
   @Post()
-  async create(@Body() body: CreateMarketplaceListingDto): Promise<MarketplaceListingResponseDto> {
-    const listing = await this.marketplaceIntegrationService.createMarketplaceListing(body);
+  async create(
+    @Body() body: CreateMarketplaceListingDto,
+    @CurrentUser() currentUser: AuthenticatedRequestUser,
+  ): Promise<MarketplaceListingResponseDto> {
+    const listing = await this.marketplaceIntegrationService.createMarketplaceListing(currentUser.companyId, body);
     return marketplaceListingResponseSchema.parse(listing);
   }
 
+  @RequirePermissions("marketplace_integration.write")
   @Post(":id/price")
   async updatePrice(
     @Param("id") id: string,
@@ -34,6 +41,7 @@ export class MarketplaceListingsController {
     return marketplaceListingResponseSchema.parse(listing);
   }
 
+  @RequirePermissions("marketplace_integration.write")
   @Post(":id/stock")
   async updateStock(
     @Param("id") id: string,

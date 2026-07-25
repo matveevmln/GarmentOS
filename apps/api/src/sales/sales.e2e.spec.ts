@@ -6,7 +6,18 @@ import type { Server } from "node:http";
 import type { INestApplication } from "@nestjs/common";
 import { VersioningType } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
-import { companies, createDb, orderItems, orders, productVariants, products, salesChannels } from "@garmentos/db-schema";
+import {
+  companies,
+  createDb,
+  orderItems,
+  orders,
+  productVariants,
+  products,
+  refreshTokens,
+  salesChannels,
+  userRoles,
+  users,
+} from "@garmentos/db-schema";
 import type {
   OrderResponseDto,
   ProductResponseDto,
@@ -17,6 +28,7 @@ import { eq } from "drizzle-orm";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { AppModule } from "../app.module";
+import { authHeader, setupAuthenticatedCompany } from "../test-support/auth-test-helper";
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) {
@@ -58,6 +70,12 @@ describe("Sales API (e2e)", () => {
           await db.delete(productVariants).where(eq(productVariants.productId, product.id));
         }
         await db.delete(products).where(eq(products.companyId, company.id));
+        const companyUsers = await db.select().from(users).where(eq(users.companyId, company.id));
+        for (const user of companyUsers) {
+          await db.delete(refreshTokens).where(eq(refreshTokens.userId, user.id));
+          await db.delete(userRoles).where(eq(userRoles.userId, user.id));
+        }
+        await db.delete(users).where(eq(users.companyId, company.id));
         await db.delete(companies).where(eq(companies.id, company.id));
       }
     }
@@ -67,31 +85,33 @@ describe("Sales API (e2e)", () => {
   it("создаёт канал продаж и заказ, проводит его new → confirmed → shipped → delivered", async () => {
     const companyName = `E2E Sales ${Date.now()}`;
     createdCompanyNames.push(companyName);
-    const [company] = await db.insert(companies).values({ name: companyName }).returning();
-    if (!company) throw new Error("Не удалось создать тестовую компанию");
+    const { accessToken } = await setupAuthenticatedCompany(db, httpServer, companyName, "marketplace_manager");
 
     const productResponse = await request(httpServer)
       .post("/v1/products")
-      .send({ companyId: company.id, name: "Худи Петроль", code: "HOODIE-PETROL-SALES-E2E" })
+      .set(...authHeader(accessToken))
+      .send({ name: "Худи Петроль", code: "HOODIE-PETROL-SALES-E2E" })
       .expect(201);
     const product = productResponse.body as ProductResponseDto;
 
     const variantResponse = await request(httpServer)
       .post("/v1/product-variants")
+      .set(...authHeader(accessToken))
       .send({ productId: product.id, size: "M", color: "Петроль", skuCode: "HOODIE-PETROL-SALES-E2E-M" })
       .expect(201);
     const variant = variantResponse.body as ProductVariantResponseDto;
 
     const channelResponse = await request(httpServer)
       .post("/v1/sales-channels")
-      .send({ companyId: company.id, type: "marketplace", name: "Wildberries" })
+      .set(...authHeader(accessToken))
+      .send({ type: "marketplace", name: "Wildberries" })
       .expect(201);
     const channel = channelResponse.body as SalesChannelResponseDto;
 
     const orderResponse = await request(httpServer)
       .post("/v1/orders")
+      .set(...authHeader(accessToken))
       .send({
-        companyId: company.id,
         salesChannelId: channel.id,
         items: [{ productVariantId: variant.id, quantity: 2, unitPrice: 3500 }],
       })
@@ -102,45 +122,58 @@ describe("Sales API (e2e)", () => {
 
     const confirmedResponse = await request(httpServer)
       .post(`/v1/orders/${order.id}/confirm`)
-      .send({ companyId: company.id })
+      .set(...authHeader(accessToken))
       .expect(201);
     expect((confirmedResponse.body as OrderResponseDto).status).toBe("confirmed");
 
     // Недопустимый переход: подтверждённый заказ нельзя доставить, минуя отгрузку.
     const invalidTransitionResponse = await request(httpServer)
       .post(`/v1/orders/${order.id}/deliver`)
-      .send({ companyId: company.id })
+      .set(...authHeader(accessToken))
       .expect(409);
     expect((invalidTransitionResponse.body as ErrorResponseBody).code).toBe("ORDER_INVALID_STATUS_TRANSITION");
 
     const shippedResponse = await request(httpServer)
       .post(`/v1/orders/${order.id}/ship`)
-      .send({ companyId: company.id })
+      .set(...authHeader(accessToken))
       .expect(201);
     expect((shippedResponse.body as OrderResponseDto).status).toBe("shipped");
 
     const deliveredResponse = await request(httpServer)
       .post(`/v1/orders/${order.id}/deliver`)
-      .send({ companyId: company.id })
+      .set(...authHeader(accessToken))
       .expect(201);
     expect((deliveredResponse.body as OrderResponseDto).status).toBe("delivered");
   });
 
-  it("POST /v1/orders без позиций — 400", async () => {
+  it("POST /v1/orders без позиций — 400; warehouse_keeper без sales.write — 403", async () => {
     const companyName = `E2E Sales Invalid ${Date.now()}`;
     createdCompanyNames.push(companyName);
-    const [company] = await db.insert(companies).values({ name: companyName }).returning();
-    if (!company) throw new Error("Не удалось создать тестовую компанию");
+    const { accessToken } = await setupAuthenticatedCompany(db, httpServer, companyName, "marketplace_manager");
 
     const channelResponse = await request(httpServer)
       .post("/v1/sales-channels")
-      .send({ companyId: company.id, type: "retail", name: "Розничная точка" })
+      .set(...authHeader(accessToken))
+      .send({ type: "retail", name: "Розничная точка" })
       .expect(201);
     const channel = channelResponse.body as SalesChannelResponseDto;
 
     await request(httpServer)
       .post("/v1/orders")
-      .send({ companyId: company.id, salesChannelId: channel.id, items: [] })
+      .set(...authHeader(accessToken))
+      .send({ salesChannelId: channel.id, items: [] })
       .expect(400);
+
+    const { accessToken: warehouseKeeperToken } = await setupAuthenticatedCompany(
+      db,
+      httpServer,
+      `${companyName} WarehouseKeeper`,
+      "warehouse_keeper",
+    );
+    await request(httpServer)
+      .post("/v1/sales-channels")
+      .set(...authHeader(warehouseKeeperToken))
+      .send({ type: "retail", name: "Точка кладовщика" })
+      .expect(403);
   });
 });

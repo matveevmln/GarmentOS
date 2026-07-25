@@ -2,6 +2,7 @@ import { Body, Controller, Post } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
 import { createZodDto } from "nestjs-zod";
 import { recordSyncLogSchema, syncLogResponseSchema, type SyncLogResponseDto } from "@garmentos/shared-types";
+import { RequirePermissions } from "../auth/require-permissions.decorator";
 import { MarketplaceIntegrationService } from "./marketplace-integration.service";
 
 class RecordSyncLogDto extends createZodDto(recordSyncLogSchema) {}
@@ -11,6 +12,7 @@ class RecordSyncLogDto extends createZodDto(recordSyncLogSchema) {}
 export class SyncLogsController {
   constructor(private readonly marketplaceIntegrationService: MarketplaceIntegrationService) {}
 
+  @RequirePermissions("marketplace_integration.write")
   @Post()
   async record(@Body() body: RecordSyncLogDto): Promise<SyncLogResponseDto> {
     const syncLog = await this.marketplaceIntegrationService.recordSyncLog(body);

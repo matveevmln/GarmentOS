@@ -21,7 +21,6 @@ export const marketplaceResponseSchema = z.object({
 export type MarketplaceResponseDto = z.infer<typeof marketplaceResponseSchema>;
 
 export const createMarketplaceAccountSchema = z.object({
-  companyId: z.string().uuid(),
   marketplaceCode: marketplaceCodeSchema,
   apiCredentialsEncrypted: z.string().min(1, "Учётные данные API не могут быть пустыми"),
 });
@@ -38,13 +37,7 @@ export const marketplaceAccountResponseSchema = z.object({
 });
 export type MarketplaceAccountResponseDto = z.infer<typeof marketplaceAccountResponseSchema>;
 
-export const toggleMarketplaceAccountSchema = z.object({
-  companyId: z.string().uuid(),
-});
-export type ToggleMarketplaceAccountDto = z.infer<typeof toggleMarketplaceAccountSchema>;
-
 export const createMarketplaceListingSchema = z.object({
-  companyId: z.string().uuid(),
   marketplaceAccountId: z.string().uuid(),
   productVariantId: z.string().uuid(),
   externalSkuId: z.string().min(1, "Внешний ID SKU на маркетплейсе не может быть пустым"),
