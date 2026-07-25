@@ -35,6 +35,9 @@ importers:
       '@garmentos/db-schema':
         specifier: workspace:*
         version: link:../../packages/db-schema
+      '@garmentos/domain-bom':
+        specifier: workspace:*
+        version: link:../../packages/domain/bom
       '@garmentos/domain-catalog':
         specifier: workspace:*
         version: link:../../packages/domain/catalog

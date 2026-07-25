@@ -14,6 +14,7 @@
   },
   "dependencies": {
     "@garmentos/db-schema": "workspace:*",
+    "@garmentos/domain-bom": "workspace:*",
     "@garmentos/domain-catalog": "workspace:*",
     "@garmentos/domain-identity": "workspace:*",
     "@garmentos/domain-procurement": "workspace:*",
