@@ -8,6 +8,25 @@ on:
 jobs:
   lint-typecheck-test-build:
     runs-on: ubuntu-latest
+    # Доменные пакеты (packages/domain/*) тестируются на реальном Postgres,
+    # не моками (см. docs/QUALITY_STANDARDS.md) — сервис ниже поднимает ту
+    # же схему, что и в локальной разработке (packages/db-schema).
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: garmentos
+          POSTGRES_PASSWORD: garmentos
+          POSTGRES_DB: garmentos
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgres://garmentos:garmentos@localhost:5432/garmentos
     steps:
       - uses: actions/checkout@v4
 
@@ -20,6 +39,9 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Run database migrations
+        run: pnpm --filter @garmentos/db-schema db:migrate
 
       - name: Lint
         run: pnpm lint
