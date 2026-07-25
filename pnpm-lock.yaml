@@ -47,6 +47,9 @@ importers:
       '@garmentos/domain-identity':
         specifier: workspace:*
         version: link:../../packages/domain/identity
+      '@garmentos/domain-marketplace-integration':
+        specifier: workspace:*
+        version: link:../../packages/domain/marketplace-integration
       '@garmentos/domain-procurement':
         specifier: workspace:*
         version: link:../../packages/domain/procurement

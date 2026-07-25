@@ -18,6 +18,7 @@
     "@garmentos/domain-catalog": "workspace:*",
     "@garmentos/domain-contract-manufacturing": "workspace:*",
     "@garmentos/domain-identity": "workspace:*",
+    "@garmentos/domain-marketplace-integration": "workspace:*",
     "@garmentos/domain-procurement": "workspace:*",
     "@garmentos/domain-sales": "workspace:*",
     "@garmentos/domain-warehouse": "workspace:*",
