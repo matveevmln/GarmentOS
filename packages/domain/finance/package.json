@@ -18,7 +18,11 @@
   },
   "devDependencies": {
     "@garmentos/domain-catalog": "workspace:*",
+    "@garmentos/domain-honest-sign": "workspace:*",
     "@garmentos/domain-identity": "workspace:*",
+    "@garmentos/domain-marketplace-integration": "workspace:*",
+    "@garmentos/domain-sales": "workspace:*",
+    "@garmentos/domain-warehouse": "workspace:*",
     "@types/node": "^26.1.1",
     "dotenv": "^17.4.2",
     "postgres": "^3.4.9",
