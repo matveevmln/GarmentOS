@@ -15,11 +15,11 @@ import { NOTIFICATION_REPOSITORY } from "./notifications.tokens";
 export class NotificationsService {
   constructor(@Inject(NOTIFICATION_REPOSITORY) private readonly notifications: NotificationRepository) {}
 
-  async create(input: CreateNotificationDto): Promise<Notification> {
-    return createNotification({ notifications: this.notifications }, input);
+  async create(companyId: string, input: CreateNotificationDto): Promise<Notification> {
+    return createNotification({ notifications: this.notifications }, { ...input, companyId });
   }
 
-  async markRead(companyId: string, notificationId: string): Promise<Notification> {
-    return markNotificationRead({ notifications: this.notifications }, { companyId, notificationId });
+  async markRead(companyId: string, userId: string, notificationId: string): Promise<Notification> {
+    return markNotificationRead({ notifications: this.notifications }, { companyId, userId, notificationId });
   }
 }

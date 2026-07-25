@@ -45,11 +45,44 @@ describe("domain/notifications", () => {
       );
       expect(notification.readAt).toBeNull();
 
-      const read = await markNotificationRead({ notifications }, { companyId: company.id, notificationId: notification.id });
+      const read = await markNotificationRead(
+        { notifications },
+        { companyId: company.id, userId: user.id, notificationId: notification.id },
+      );
       expect(read.readAt).not.toBeNull();
 
       await expect(
-        markNotificationRead({ notifications }, { companyId: company.id, notificationId: notification.id }),
+        markNotificationRead(
+          { notifications },
+          { companyId: company.id, userId: user.id, notificationId: notification.id },
+        ),
+      ).rejects.toThrow(DomainError);
+    });
+  });
+
+  it("отклоняет отметку прочитанным чужого уведомления", async () => {
+    await runInRolledBackTransaction(async (tx) => {
+      const company = await createCompany({ companies: new DrizzleCompanyRepository(tx) }, { name: "Бренд уведомлений 3" });
+      const owner = await createUser(
+        { users: new DrizzleUserRepository(tx) },
+        { companyId: company.id, email: "owner3@example.com", passwordHash: "hash", fullName: "Сидор Сидоров" },
+      );
+      const otherUser = await createUser(
+        { users: new DrizzleUserRepository(tx) },
+        { companyId: company.id, email: "other3@example.com", passwordHash: "hash", fullName: "Другой Пользователь" },
+      );
+
+      const notifications = new DrizzleNotificationRepository(tx);
+      const notification = await createNotification(
+        { notifications },
+        { companyId: company.id, userId: owner.id, type: "low_stock", payloadJson: null },
+      );
+
+      await expect(
+        markNotificationRead(
+          { notifications },
+          { companyId: company.id, userId: otherUser.id, notificationId: notification.id },
+        ),
       ).rejects.toThrow(DomainError);
     });
   });

@@ -6,12 +6,13 @@ import type { Server } from "node:http";
 import type { INestApplication } from "@nestjs/common";
 import { VersioningType } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
-import { companies, createDb, notifications, users } from "@garmentos/db-schema";
-import type { CompanyResponseDto, NotificationResponseDto, UserResponseDto } from "@garmentos/shared-types";
+import { companies, createDb, notifications, refreshTokens, userRoles, users } from "@garmentos/db-schema";
+import type { NotificationResponseDto } from "@garmentos/shared-types";
 import { eq } from "drizzle-orm";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { AppModule } from "../app.module";
+import { addUserToCompany, authHeader, setupAuthenticatedCompany } from "../test-support/auth-test-helper";
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) {
@@ -43,6 +44,11 @@ describe("Notifications API (e2e)", () => {
       const [company] = await db.select().from(companies).where(eq(companies.name, name));
       if (company) {
         await db.delete(notifications).where(eq(notifications.companyId, company.id));
+        const companyUsers = await db.select().from(users).where(eq(users.companyId, company.id));
+        for (const user of companyUsers) {
+          await db.delete(refreshTokens).where(eq(refreshTokens.userId, user.id));
+          await db.delete(userRoles).where(eq(userRoles.userId, user.id));
+        }
         await db.delete(users).where(eq(users.companyId, company.id));
         await db.delete(companies).where(eq(companies.id, company.id));
       }
@@ -53,63 +59,56 @@ describe("Notifications API (e2e)", () => {
   it("создаёт уведомление и отмечает его прочитанным; повторная отметка — 409", async () => {
     const companyName = `E2E Notifications ${Date.now()}`;
     createdCompanyNames.push(companyName);
-
-    const companyResponse = await request(httpServer).post("/v1/companies").send({ name: companyName }).expect(201);
-    const company = companyResponse.body as CompanyResponseDto;
-
-    const userResponse = await request(httpServer)
-      .post("/v1/users")
-      .send({
-        companyId: company.id,
-        email: `owner-${Date.now()}@example.com`,
-        password: "supersecret123",
-        fullName: "Владелец",
-      })
-      .expect(201);
-    const user = userResponse.body as UserResponseDto;
+    const { userId, accessToken } = await setupAuthenticatedCompany(db, httpServer, companyName, "viewer");
 
     const notificationResponse = await request(httpServer)
       .post("/v1/notifications")
-      .send({ companyId: company.id, userId: user.id, type: "low_stock", payloadJson: { productVariantId: "sku-1" } })
+      .set(...authHeader(accessToken))
+      .send({ userId, type: "low_stock", payloadJson: { productVariantId: "sku-1" } })
       .expect(201);
     const notification = notificationResponse.body as NotificationResponseDto;
     expect(notification.readAt).toBeNull();
 
     const readResponse = await request(httpServer)
       .post(`/v1/notifications/${notification.id}/read`)
-      .send({ companyId: company.id })
+      .set(...authHeader(accessToken))
       .expect(201);
     const read = readResponse.body as NotificationResponseDto;
     expect(read.readAt).not.toBeNull();
 
     const conflictResponse = await request(httpServer)
       .post(`/v1/notifications/${notification.id}/read`)
-      .send({ companyId: company.id })
+      .set(...authHeader(accessToken))
       .expect(409);
     expect((conflictResponse.body as ErrorResponseBody).code).toBe("NOTIFICATION_ALREADY_READ");
   });
 
-  it("POST /v1/notifications с пустым type — 400", async () => {
+  it("POST /v1/notifications с пустым type — 400; другой пользователь не может отметить чужое уведомление — 404", async () => {
     const companyName = `E2E Notifications Invalid ${Date.now()}`;
     createdCompanyNames.push(companyName);
-
-    const companyResponse = await request(httpServer).post("/v1/companies").send({ name: companyName }).expect(201);
-    const company = companyResponse.body as CompanyResponseDto;
-
-    const userResponse = await request(httpServer)
-      .post("/v1/users")
-      .send({
-        companyId: company.id,
-        email: `owner-invalid-${Date.now()}@example.com`,
-        password: "supersecret123",
-        fullName: "Владелец",
-      })
-      .expect(201);
-    const user = userResponse.body as UserResponseDto;
+    const { companyId, userId, accessToken } = await setupAuthenticatedCompany(db, httpServer, companyName, "viewer");
 
     await request(httpServer)
       .post("/v1/notifications")
-      .send({ companyId: company.id, userId: user.id, type: "" })
+      .set(...authHeader(accessToken))
+      .send({ userId, type: "" })
       .expect(400);
+
+    // notifications не подчиняется ролевой матрице (docs/AUTH_ARCHITECTURE.md,
+    // раздел 7) — доступ определяется владением: второй пользователь той же
+    // компании не может отметить прочитанным чужое уведомление.
+    const notificationResponse = await request(httpServer)
+      .post("/v1/notifications")
+      .set(...authHeader(accessToken))
+      .send({ userId, type: "low_stock" })
+      .expect(201);
+    const notification = notificationResponse.body as NotificationResponseDto;
+
+    const { accessToken: otherUserToken } = await addUserToCompany(db, httpServer, companyId, "viewer");
+    const forbiddenResponse = await request(httpServer)
+      .post(`/v1/notifications/${notification.id}/read`)
+      .set(...authHeader(otherUserToken))
+      .expect(404);
+    expect((forbiddenResponse.body as ErrorResponseBody).code).toBe("NOTIFICATION_NOT_FOUND");
   });
 });

@@ -4,6 +4,7 @@ import type { NotificationRepository } from "./ports";
 
 export interface MarkNotificationReadInput {
   companyId: string;
+  userId: string;
   notificationId: string;
 }
 
@@ -16,7 +17,10 @@ export async function markNotificationRead(
   input: MarkNotificationReadInput,
 ): Promise<Notification> {
   const notification = await deps.notifications.findById(input.companyId, input.notificationId);
-  if (!notification) {
+  // notifications не подчиняется ролевой матрице (docs/AUTH_ARCHITECTURE.md,
+  // раздел 7) — доступ определяется владением записью: пользователь видит и
+  // отмечает прочитанными только свои уведомления, независимо от роли.
+  if (!notification || notification.userId !== input.userId) {
     throw new DomainError(`Уведомление ${input.notificationId} не найдено в этой компании`, "NOTIFICATION_NOT_FOUND");
   }
   assertNotAlreadyRead(notification.readAt);
