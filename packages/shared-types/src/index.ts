@@ -7,3 +7,4 @@ export * from "./warehouse";
 export * from "./sales";
 export * from "./marketplace-integration";
 export * from "./honest-sign";
+export * from "./finance";

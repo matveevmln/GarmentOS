@@ -44,6 +44,9 @@ importers:
       '@garmentos/domain-contract-manufacturing':
         specifier: workspace:*
         version: link:../../packages/domain/contract-manufacturing
+      '@garmentos/domain-finance':
+        specifier: workspace:*
+        version: link:../../packages/domain/finance
       '@garmentos/domain-honest-sign':
         specifier: workspace:*
         version: link:../../packages/domain/honest-sign
