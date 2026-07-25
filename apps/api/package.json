@@ -19,6 +19,7 @@
     "@garmentos/domain-contract-manufacturing": "workspace:*",
     "@garmentos/domain-identity": "workspace:*",
     "@garmentos/domain-procurement": "workspace:*",
+    "@garmentos/domain-sales": "workspace:*",
     "@garmentos/domain-warehouse": "workspace:*",
     "@garmentos/shared-types": "workspace:*",
     "@nestjs/common": "^11.1.28",

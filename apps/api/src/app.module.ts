@@ -10,6 +10,7 @@ import { ProcurementModule } from "./procurement/procurement.module";
 import { BomModule } from "./bom/bom.module";
 import { ContractManufacturingModule } from "./contract-manufacturing/contract-manufacturing.module";
 import { WarehouseModule } from "./warehouse/warehouse.module";
+import { SalesModule } from "./sales/sales.module";
 
 // Presentation-слой (docs/ARCHITECTURE.md, п.2). Доменные модули
 // (packages/domain/*) подключаются сюда по мере реализации итераций
@@ -24,6 +25,7 @@ import { WarehouseModule } from "./warehouse/warehouse.module";
     BomModule,
     ContractManufacturingModule,
     WarehouseModule,
+    SalesModule,
   ],
   providers: [
     { provide: APP_PIPE, useClass: ZodValidationPipe },
