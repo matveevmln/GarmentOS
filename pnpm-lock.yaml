@@ -50,6 +50,9 @@ importers:
       '@garmentos/domain-procurement':
         specifier: workspace:*
         version: link:../../packages/domain/procurement
+      '@garmentos/domain-warehouse':
+        specifier: workspace:*
+        version: link:../../packages/domain/warehouse
       '@garmentos/shared-types':
         specifier: workspace:*
         version: link:../../packages/shared-types

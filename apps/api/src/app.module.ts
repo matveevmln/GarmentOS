@@ -9,6 +9,7 @@ import { CatalogModule } from "./catalog/catalog.module";
 import { ProcurementModule } from "./procurement/procurement.module";
 import { BomModule } from "./bom/bom.module";
 import { ContractManufacturingModule } from "./contract-manufacturing/contract-manufacturing.module";
+import { WarehouseModule } from "./warehouse/warehouse.module";
 
 // Presentation-слой (docs/ARCHITECTURE.md, п.2). Доменные модули
 // (packages/domain/*) подключаются сюда по мере реализации итераций
@@ -22,6 +23,7 @@ import { ContractManufacturingModule } from "./contract-manufacturing/contract-m
     ProcurementModule,
     BomModule,
     ContractManufacturingModule,
+    WarehouseModule,
   ],
   providers: [
     { provide: APP_PIPE, useClass: ZodValidationPipe },
