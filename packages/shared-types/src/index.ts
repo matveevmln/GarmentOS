@@ -6,3 +6,4 @@ export * from "./contract-manufacturing";
 export * from "./warehouse";
 export * from "./sales";
 export * from "./marketplace-integration";
+export * from "./honest-sign";

@@ -12,6 +12,7 @@ import { ContractManufacturingModule } from "./contract-manufacturing/contract-m
 import { WarehouseModule } from "./warehouse/warehouse.module";
 import { SalesModule } from "./sales/sales.module";
 import { MarketplaceIntegrationModule } from "./marketplace-integration/marketplace-integration.module";
+import { HonestSignModule } from "./honest-sign/honest-sign.module";
 
 // Presentation-слой (docs/ARCHITECTURE.md, п.2). Доменные модули
 // (packages/domain/*) подключаются сюда по мере реализации итераций
@@ -28,6 +29,7 @@ import { MarketplaceIntegrationModule } from "./marketplace-integration/marketpl
     WarehouseModule,
     SalesModule,
     MarketplaceIntegrationModule,
+    HonestSignModule,
   ],
   providers: [
     { provide: APP_PIPE, useClass: ZodValidationPipe },
