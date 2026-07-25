@@ -3,7 +3,6 @@ import { z } from "zod";
 // Контракты модуля Finance (docs/ARCHITECTURE.md, раздел 3).
 
 export const recordCostEntrySchema = z.object({
-  companyId: z.string().uuid(),
   productVariantId: z.string().uuid(),
   productionOrderId: z.string().uuid().optional(),
   materialCost: z.number().min(0),
@@ -31,7 +30,6 @@ export type CostEntryResponseDto = z.infer<typeof costEntryResponseSchema>;
 export const transactionTypeSchema = z.enum(["income", "expense"]);
 
 export const recordTransactionSchema = z.object({
-  companyId: z.string().uuid(),
   type: transactionTypeSchema,
   amount: z.number().positive(),
   referenceType: z.string().optional(),
@@ -57,7 +55,6 @@ export type TransactionResponseDto = z.infer<typeof transactionResponseSchema>;
 export const invoiceStatusSchema = z.enum(["draft", "issued", "paid", "overdue", "cancelled"]);
 
 export const createInvoiceSchema = z.object({
-  companyId: z.string().uuid(),
   amount: z.number().min(0),
   orderId: z.string().uuid().optional(),
   purchaseOrderId: z.string().uuid().optional(),
@@ -79,8 +76,3 @@ export const invoiceResponseSchema = z.object({
   updatedAt: z.date(),
 });
 export type InvoiceResponseDto = z.infer<typeof invoiceResponseSchema>;
-
-export const transitionInvoiceStatusSchema = z.object({
-  companyId: z.string().uuid(),
-});
-export type TransitionInvoiceStatusDto = z.infer<typeof transitionInvoiceStatusSchema>;

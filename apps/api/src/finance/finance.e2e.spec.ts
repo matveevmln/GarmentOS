@@ -6,7 +6,18 @@ import type { Server } from "node:http";
 import type { INestApplication } from "@nestjs/common";
 import { VersioningType } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
-import { companies, costEntries, createDb, invoices, productVariants, products, transactions } from "@garmentos/db-schema";
+import {
+  companies,
+  costEntries,
+  createDb,
+  invoices,
+  productVariants,
+  products,
+  refreshTokens,
+  transactions,
+  userRoles,
+  users,
+} from "@garmentos/db-schema";
 import type {
   CostEntryResponseDto,
   InvoiceResponseDto,
@@ -18,6 +29,7 @@ import { eq } from "drizzle-orm";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { AppModule } from "../app.module";
+import { authHeader, setupAuthenticatedCompany } from "../test-support/auth-test-helper";
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) {
@@ -56,6 +68,12 @@ describe("Finance API (e2e)", () => {
           await db.delete(productVariants).where(eq(productVariants.productId, product.id));
         }
         await db.delete(products).where(eq(products.companyId, company.id));
+        const companyUsers = await db.select().from(users).where(eq(users.companyId, company.id));
+        for (const user of companyUsers) {
+          await db.delete(refreshTokens).where(eq(refreshTokens.userId, user.id));
+          await db.delete(userRoles).where(eq(userRoles.userId, user.id));
+        }
+        await db.delete(users).where(eq(users.companyId, company.id));
         await db.delete(companies).where(eq(companies.id, company.id));
       }
     }
@@ -65,25 +83,26 @@ describe("Finance API (e2e)", () => {
   it("записывает себестоимость и движение денег, проводит счёт draft → issued → paid", async () => {
     const companyName = `E2E Finance ${Date.now()}`;
     createdCompanyNames.push(companyName);
-    const [company] = await db.insert(companies).values({ name: companyName }).returning();
-    if (!company) throw new Error("Не удалось создать тестовую компанию");
+    const { accessToken } = await setupAuthenticatedCompany(db, httpServer, companyName, "owner");
 
     const productResponse = await request(httpServer)
       .post("/v1/products")
-      .send({ companyId: company.id, name: "Худи Петроль", code: "HOODIE-PETROL-FIN-E2E" })
+      .set(...authHeader(accessToken))
+      .send({ name: "Худи Петроль", code: "HOODIE-PETROL-FIN-E2E" })
       .expect(201);
     const product = productResponse.body as ProductResponseDto;
 
     const variantResponse = await request(httpServer)
       .post("/v1/product-variants")
+      .set(...authHeader(accessToken))
       .send({ productId: product.id, size: "M", color: "Петроль", skuCode: "HOODIE-PETROL-FIN-E2E-M" })
       .expect(201);
     const variant = variantResponse.body as ProductVariantResponseDto;
 
     const costEntryResponse = await request(httpServer)
       .post("/v1/cost-entries")
+      .set(...authHeader(accessToken))
       .send({
-        companyId: company.id,
         productVariantId: variant.id,
         materialCost: 500,
         manufacturingCost: 450,
@@ -96,46 +115,60 @@ describe("Finance API (e2e)", () => {
 
     const transactionResponse = await request(httpServer)
       .post("/v1/transactions")
-      .send({ companyId: company.id, type: "expense", amount: 1000 })
+      .set(...authHeader(accessToken))
+      .send({ type: "expense", amount: 1000 })
       .expect(201);
     expect((transactionResponse.body as TransactionResponseDto).type).toBe("expense");
 
     const invoiceResponse = await request(httpServer)
       .post("/v1/invoices")
-      .send({ companyId: company.id, amount: 7000 })
+      .set(...authHeader(accessToken))
+      .send({ amount: 7000 })
       .expect(201);
     const invoice = invoiceResponse.body as InvoiceResponseDto;
     expect(invoice.status).toBe("draft");
 
     const issuedResponse = await request(httpServer)
       .post(`/v1/invoices/${invoice.id}/issue`)
-      .send({ companyId: company.id })
+      .set(...authHeader(accessToken))
       .expect(201);
     expect((issuedResponse.body as InvoiceResponseDto).status).toBe("issued");
 
     const paidResponse = await request(httpServer)
       .post(`/v1/invoices/${invoice.id}/pay`)
-      .send({ companyId: company.id })
+      .set(...authHeader(accessToken))
       .expect(201);
     expect((paidResponse.body as InvoiceResponseDto).status).toBe("paid");
 
     // Оплаченный счёт — терминальное состояние, повторная отмена запрещена.
     const invalidCancelResponse = await request(httpServer)
       .post(`/v1/invoices/${invoice.id}/cancel`)
-      .send({ companyId: company.id })
+      .set(...authHeader(accessToken))
       .expect(409);
     expect((invalidCancelResponse.body as ErrorResponseBody).code).toBe("INVOICE_INVALID_STATUS_TRANSITION");
   });
 
-  it("POST /v1/transactions с отрицательной суммой — 400", async () => {
+  it("POST /v1/transactions с отрицательной суммой — 400; procurement_manager без finance.write — 403", async () => {
     const companyName = `E2E Finance Invalid ${Date.now()}`;
     createdCompanyNames.push(companyName);
-    const [company] = await db.insert(companies).values({ name: companyName }).returning();
-    if (!company) throw new Error("Не удалось создать тестовую компанию");
+    const { accessToken } = await setupAuthenticatedCompany(db, httpServer, companyName, "owner");
 
     await request(httpServer)
       .post("/v1/transactions")
-      .send({ companyId: company.id, type: "income", amount: -1 })
+      .set(...authHeader(accessToken))
+      .send({ type: "income", amount: -1 })
       .expect(400);
+
+    const { accessToken: procurementManagerToken } = await setupAuthenticatedCompany(
+      db,
+      httpServer,
+      `${companyName} Procurement`,
+      "procurement_manager",
+    );
+    await request(httpServer)
+      .post("/v1/transactions")
+      .set(...authHeader(procurementManagerToken))
+      .send({ type: "income", amount: 100 })
+      .expect(403);
   });
 });

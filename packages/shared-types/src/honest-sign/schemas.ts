@@ -6,7 +6,6 @@ import { z } from "zod";
 export const markingCodeStatusSchema = z.enum(["issued", "applied", "introduced", "sold", "retired", "damaged"]);
 
 export const issueMarkingCodeSchema = z.object({
-  companyId: z.string().uuid(),
   productVariantId: z.string().uuid(),
   codeValue: z.string().min(1, "Код маркировки не может быть пустым"),
   productionOrderId: z.string().uuid().optional(),
@@ -26,7 +25,6 @@ export const markingCodeResponseSchema = z.object({
 export type MarkingCodeResponseDto = z.infer<typeof markingCodeResponseSchema>;
 
 export const transitionMarkingCodeSchema = z.object({
-  companyId: z.string().uuid(),
   referenceType: z.string().optional(),
   referenceId: z.string().optional(),
 });

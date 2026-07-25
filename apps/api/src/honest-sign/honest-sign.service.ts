@@ -17,8 +17,8 @@ import { MARKING_CODE_REPOSITORY } from "./honest-sign.tokens";
 export class HonestSignService {
   constructor(@Inject(MARKING_CODE_REPOSITORY) private readonly markingCodes: MarkingCodeRepository) {}
 
-  async issue(input: IssueMarkingCodeDto): Promise<MarkingCode> {
-    return issueMarkingCode({ markingCodes: this.markingCodes }, input);
+  async issue(companyId: string, input: IssueMarkingCodeDto): Promise<MarkingCode> {
+    return issueMarkingCode({ markingCodes: this.markingCodes }, { ...input, companyId });
   }
 
   async apply(companyId: string, markingCodeId: string, input: TransitionMarkingCodeDto): Promise<MarkingCode> {

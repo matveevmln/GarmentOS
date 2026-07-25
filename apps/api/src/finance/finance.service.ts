@@ -28,21 +28,21 @@ export class FinanceService {
     @Inject(INVOICE_REPOSITORY) private readonly invoices: InvoiceRepository,
   ) {}
 
-  async recordCostEntry(input: RecordCostEntryDto): Promise<CostEntry> {
-    return recordCostEntry({ costEntries: this.costEntries }, input);
+  async recordCostEntry(companyId: string, input: RecordCostEntryDto): Promise<CostEntry> {
+    return recordCostEntry({ costEntries: this.costEntries }, { ...input, companyId });
   }
 
-  async recordTransaction(input: RecordTransactionDto): Promise<Transaction> {
+  async recordTransaction(companyId: string, input: RecordTransactionDto): Promise<Transaction> {
     // occurredAt — ISO-строка в DTO (Swagger/zod v4 не представляют Date в
     // JSON Schema), домен ожидает Date — приведение на границе.
     return recordTransaction(
       { transactions: this.transactions },
-      { ...input, occurredAt: input.occurredAt ? new Date(input.occurredAt) : undefined },
+      { ...input, companyId, occurredAt: input.occurredAt ? new Date(input.occurredAt) : undefined },
     );
   }
 
-  async createInvoice(input: CreateInvoiceDto): Promise<Invoice> {
-    return createInvoice({ invoices: this.invoices }, input);
+  async createInvoice(companyId: string, input: CreateInvoiceDto): Promise<Invoice> {
+    return createInvoice({ invoices: this.invoices }, { ...input, companyId });
   }
 
   async issueInvoice(companyId: string, invoiceId: string): Promise<Invoice> {
