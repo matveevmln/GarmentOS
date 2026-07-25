@@ -29,7 +29,13 @@ export class SalesService {
   }
 
   async createOrder(input: CreateOrderDto): Promise<Order> {
-    return createOrder({ orders: this.orders, salesChannels: this.salesChannels }, input);
+    // orderedAt — ISO-строка в DTO (Swagger/zod v4 не представляют Date в
+    // JSON Schema, packages/shared-types/src/sales/schemas.ts), домен
+    // ожидает Date — приведение здесь, на границе presentation/domain.
+    return createOrder(
+      { orders: this.orders, salesChannels: this.salesChannels },
+      { ...input, orderedAt: input.orderedAt ? new Date(input.orderedAt) : undefined },
+    );
   }
 
   async confirmOrder(companyId: string, orderId: string): Promise<Order> {

@@ -36,7 +36,8 @@ export const recordTransactionSchema = z.object({
   amount: z.number().positive(),
   referenceType: z.string().optional(),
   referenceId: z.string().optional(),
-  occurredAt: z.coerce.date().optional(),
+  // ISO-строка, не z.date() (см. sales/schemas.ts — Swagger/zod v4 ограничение).
+  occurredAt: z.iso.datetime().optional(),
 });
 export type RecordTransactionDto = z.infer<typeof recordTransactionSchema>;
 

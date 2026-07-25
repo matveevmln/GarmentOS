@@ -34,7 +34,10 @@ export const createOrderSchema = z.object({
   salesChannelId: z.string().uuid(),
   items: z.array(orderItemDraftSchema).min(1, "Заказ должен содержать хотя бы одну позицию"),
   externalOrderId: z.string().optional(),
-  orderedAt: z.coerce.date().optional(),
+  // ISO-строка, не z.date()/z.coerce.date() — zod v4 не может представить
+  // Date в JSON Schema (падает при генерации OpenAPI, nestjs-zod
+  // cleanupOpenApiDoc); приведение к Date — на уровне сервиса apps/api.
+  orderedAt: z.iso.datetime().optional(),
 });
 export type CreateOrderDto = z.infer<typeof createOrderSchema>;
 

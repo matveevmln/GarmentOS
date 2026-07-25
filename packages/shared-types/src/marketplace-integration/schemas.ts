@@ -81,8 +81,9 @@ export const recordSyncLogSchema = z.object({
   marketplaceAccountId: z.string().uuid(),
   syncType: z.string().min(1),
   status: syncStatusSchema,
-  startedAt: z.coerce.date(),
-  finishedAt: z.coerce.date().optional(),
+  // ISO-строки, не z.date() (см. sales/schemas.ts — Swagger/zod v4 ограничение).
+  startedAt: z.iso.datetime(),
+  finishedAt: z.iso.datetime().optional(),
   errorDetails: z.string().optional(),
 });
 export type RecordSyncLogDto = z.infer<typeof recordSyncLogSchema>;

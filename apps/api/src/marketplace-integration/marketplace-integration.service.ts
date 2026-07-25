@@ -76,6 +76,15 @@ export class MarketplaceIntegrationService {
   }
 
   async recordSyncLog(input: RecordSyncLogDto): Promise<MarketplaceSyncLog> {
-    return recordSyncLog({ syncLogs: this.syncLogs }, input);
+    // startedAt/finishedAt — ISO-строки в DTO (Swagger/zod v4 не представляют
+    // Date в JSON Schema), домен ожидает Date — приведение на границе.
+    return recordSyncLog(
+      { syncLogs: this.syncLogs },
+      {
+        ...input,
+        startedAt: new Date(input.startedAt),
+        finishedAt: input.finishedAt ? new Date(input.finishedAt) : undefined,
+      },
+    );
   }
 }

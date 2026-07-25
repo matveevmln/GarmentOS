@@ -33,7 +33,12 @@ export class FinanceService {
   }
 
   async recordTransaction(input: RecordTransactionDto): Promise<Transaction> {
-    return recordTransaction({ transactions: this.transactions }, input);
+    // occurredAt — ISO-строка в DTO (Swagger/zod v4 не представляют Date в
+    // JSON Schema), домен ожидает Date — приведение на границе.
+    return recordTransaction(
+      { transactions: this.transactions },
+      { ...input, occurredAt: input.occurredAt ? new Date(input.occurredAt) : undefined },
+    );
   }
 
   async createInvoice(input: CreateInvoiceDto): Promise<Invoice> {
