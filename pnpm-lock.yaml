@@ -315,6 +315,34 @@ importers:
         specifier: ^4.1.10
         version: 4.1.10(@types/node@26.1.1)(vite@8.1.5(@types/node@26.1.1)(esbuild@0.28.1)(terser@5.49.0)(tsx@4.23.1))
 
+  packages/domain/notifications:
+    dependencies:
+      '@garmentos/db-schema':
+        specifier: workspace:*
+        version: link:../../db-schema
+      drizzle-orm:
+        specifier: ^0.45.2
+        version: 0.45.2(postgres@3.4.9)
+    devDependencies:
+      '@garmentos/domain-identity':
+        specifier: workspace:*
+        version: link:../identity
+      '@types/node':
+        specifier: ^26.1.1
+        version: 26.1.1
+      dotenv:
+        specifier: ^17.4.2
+        version: 17.4.2
+      postgres:
+        specifier: ^3.4.9
+        version: 3.4.9
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: ^4.1.10
+        version: 4.1.10(@types/node@26.1.1)(vite@8.1.5(@types/node@26.1.1)(esbuild@0.28.1)(terser@5.49.0)(tsx@4.23.1))
+
   packages/domain/procurement:
     dependencies:
       '@garmentos/db-schema':
