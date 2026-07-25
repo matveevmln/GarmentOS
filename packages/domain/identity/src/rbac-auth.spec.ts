@@ -159,7 +159,8 @@ describe("domain/identity — RBAC/Auth (Итерация 5)", () => {
         { refreshTokens: refreshTokensRepo },
         {
           presentedTokenHash: first.tokenHash,
-          next: { userId: user.id, tokenHash: `hash-2-${randomUUID()}`, familyId, expiresAt: new Date(Date.now() + 3600_000) },
+          newTokenHash: `hash-2-${randomUUID()}`,
+          newExpiresAt: new Date(Date.now() + 3600_000),
         },
       );
       expect(second.familyId).toBe(familyId);
@@ -171,7 +172,8 @@ describe("domain/identity — RBAC/Auth (Итерация 5)", () => {
           { refreshTokens: refreshTokensRepo },
           {
             presentedTokenHash: first.tokenHash,
-            next: { userId: user.id, tokenHash: `hash-3-${randomUUID()}`, familyId, expiresAt: new Date(Date.now() + 3600_000) },
+            newTokenHash: `hash-3-${randomUUID()}`,
+            newExpiresAt: new Date(Date.now() + 3600_000),
           },
         ),
       ).rejects.toThrow(/повторное использование/);
@@ -183,7 +185,8 @@ describe("domain/identity — RBAC/Auth (Итерация 5)", () => {
           { refreshTokens: refreshTokensRepo },
           {
             presentedTokenHash: second.tokenHash,
-            next: { userId: user.id, tokenHash: `hash-4-${randomUUID()}`, familyId, expiresAt: new Date(Date.now() + 3600_000) },
+            newTokenHash: `hash-4-${randomUUID()}`,
+            newExpiresAt: new Date(Date.now() + 3600_000),
           },
         ),
       ).rejects.toThrow(DomainError);
@@ -214,7 +217,8 @@ describe("domain/identity — RBAC/Auth (Итерация 5)", () => {
           { refreshTokens: refreshTokensRepo },
           {
             presentedTokenHash: token.tokenHash,
-            next: { userId: user.id, tokenHash: `hash-after-logout-${randomUUID()}`, familyId, expiresAt: new Date(Date.now() + 3600_000) },
+            newTokenHash: `hash-after-logout-${randomUUID()}`,
+            newExpiresAt: new Date(Date.now() + 3600_000),
           },
         ),
       ).rejects.toThrow(/повторное использование/);

@@ -55,9 +55,16 @@ export interface ListUserPermissionsDeps {
   userRoles: UserRoleRepository;
 }
 
-// Источник истины для PermissionsGuard (apps/api кэширует результат в Redis
-// на короткий TTL, docs/AUTH_ARCHITECTURE.md, раздел 13, п.3) — не источник
-// истины сам по себе, только оптимизация обращения к этой функции.
+// Источник истины для PermissionsGuard (apps/api). Кэширование результата
+// (Redis, TTL) — задокументированная, но осознанно отложенная оптимизация
+// (docs/AUTH_ARCHITECTURE.md, раздел 14, п.3): на пилотном масштабе прямой
+// запрос к БД на каждый вызов быстрее и проще, чем разворачивать отдельную
+// инвалидацию кэша без доказанной необходимости (принцип 3, эволюционная
+// архитектура) — добавляется, когда появится измеренная нагрузка.
 export async function listUserPermissions(deps: ListUserPermissionsDeps, input: ListUserPermissionsInput): Promise<string[]> {
   return deps.userRoles.listPermissionCodesForUser(input.userId);
+}
+
+export async function listUserRoleCodes(deps: ListUserPermissionsDeps, input: ListUserPermissionsInput): Promise<string[]> {
+  return deps.userRoles.listRoleCodesForUser(input.userId);
 }

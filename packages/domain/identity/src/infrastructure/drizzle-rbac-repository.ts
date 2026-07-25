@@ -99,6 +99,16 @@ export class DrizzleUserRoleRepository implements UserRoleRepository {
 
     return [...new Set(rows.map((row) => row.code))];
   }
+
+  async listRoleCodesForUser(userId: string): Promise<string[]> {
+    const rows = await this.db
+      .select({ code: roles.code })
+      .from(userRoles)
+      .innerJoin(roles, eq(roles.id, userRoles.roleId))
+      .where(eq(userRoles.userId, userId));
+
+    return [...new Set(rows.map((row) => row.code))];
+  }
 }
 
 export class DrizzleRefreshTokenRepository implements RefreshTokenRepository {

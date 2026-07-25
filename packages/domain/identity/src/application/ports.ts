@@ -26,11 +26,13 @@ export interface NewUserInput {
 export interface UserRepository {
   create(input: NewUserInput): Promise<User>;
   findByEmail(companyId: string, email: string): Promise<User | null>;
-  // Поиск без companyId — единственное место, где это оправдано: на входе в
-  // систему (authenticate-user.ts) компания ещё не известна, известен только
-  // email — контекст запроса (companyId из JWT) появляется только ПОСЛЕ
-  // успешного логина, это и есть то единственное исключение.
+  // Поиск без companyId — оправдан только в двух местах на входе в систему,
+  // где companyId ещё не известен (контекст запроса появляется ПОСЛЕ
+  // успешного логина): по email — authenticate-user.ts; по id — после
+  // ротации refresh-токена (в токене есть userId, companyId — только у
+  // самого пользователя, не в refresh_tokens).
   findByEmailGlobal(email: string): Promise<User | null>;
+  findByIdGlobal(id: string): Promise<User | null>;
   findById(companyId: string, id: string): Promise<User | null>;
 }
 
@@ -52,8 +54,12 @@ export interface UserRoleRepository {
   revoke(userId: string, roleId: string): Promise<void>;
   // Агрегирует permissions всех ролей пользователя одним запросом
   // (user_roles → role_permissions → permissions) — источник истины для
-  // PermissionsGuard (короткий Redis-кэш поверх этого метода — apps/api).
+  // PermissionsGuard (кэшируется на уровне apps/api).
   listPermissionCodesForUser(userId: string): Promise<string[]>;
+  // Коды ролей пользователя — кладутся в payload JWT исключительно
+  // информационно (docs/AUTH_ARCHITECTURE.md, раздел 1); авторизация всегда
+  // проверяется через listPermissionCodesForUser, не через эти коды.
+  listRoleCodesForUser(userId: string): Promise<string[]>;
 }
 
 export type { Permission };

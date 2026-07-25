@@ -20,10 +20,23 @@ function isDomainErrorLike(error: unknown): error is DomainErrorLike {
   return error instanceof Error && typeof (error as { code?: unknown }).code === "string";
 }
 
+// Ошибки Auth (packages/domain/identity) — исключение из общего маппинга по
+// суффиксу: конвенционально всегда 401, а не 404/400 (docs/AUTH_ARCHITECTURE.md).
+// Явный список, а не суффикс, — сознательно, чтобы не задеть другие
+// *_NOT_FOUND коды (например, USER_NOT_FOUND при назначении роли — это
+// обычный 404, не сбой аутентификации).
+const UNAUTHORIZED_CODES = new Set([
+  "INVALID_CREDENTIALS",
+  "REFRESH_TOKEN_NOT_FOUND",
+  "REFRESH_TOKEN_EXPIRED",
+  "REFRESH_TOKEN_REUSE_DETECTED",
+]);
+
 // Единообразный маппинг кода ошибки на HTTP-статус по суффиксу — так же, как
 // коды ошибок уже единообразны по конвенции внутри каждого домена
 // (*_NOT_FOUND, *_TAKEN, *_INVALID и т.п., см. packages/domain/*/src/domain/errors.ts).
 function statusForCode(code: string): number {
+  if (UNAUTHORIZED_CODES.has(code)) return HttpStatus.UNAUTHORIZED;
   if (code.endsWith("_NOT_FOUND")) return HttpStatus.NOT_FOUND;
   if (
     code.endsWith("_TAKEN") ||

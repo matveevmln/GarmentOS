@@ -66,6 +66,11 @@ export class DrizzleUserRepository implements UserRepository {
     return row ? toUser(row) : null;
   }
 
+  async findByIdGlobal(id: string): Promise<User | null> {
+    const [row] = await this.db.select().from(users).where(eq(users.id, id)).limit(1);
+    return row ? toUser(row) : null;
+  }
+
   async findById(companyId: string, id: string): Promise<User | null> {
     const [row] = await this.db
       .select()

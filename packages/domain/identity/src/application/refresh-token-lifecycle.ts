@@ -22,7 +22,11 @@ export async function issueRefreshToken(deps: RefreshTokenDeps, input: IssueRefr
 
 export interface RotateRefreshTokenInput {
   presentedTokenHash: string;
-  next: NewRefreshTokenInput;
+  // userId/familyId нового токена наследуются от текущего (найденного по
+  // presentedTokenHash) — вызывающий код (apps/api) знает заранее только
+  // новый tokenHash/expiresAt, не userId/familyId текущей сессии.
+  newTokenHash: string;
+  newExpiresAt: Date;
 }
 
 // Ротация refresh-токена (docs/AUTH_ARCHITECTURE.md, раздел 1-2): предъявлен
@@ -47,7 +51,14 @@ export async function rotateRefreshToken(deps: RefreshTokenDeps, input: RotateRe
 
   assertNotExpired(current);
 
-  return deps.refreshTokens.rotate(current.id, input.next);
+  const next: NewRefreshTokenInput = {
+    userId: current.userId,
+    familyId: current.familyId,
+    tokenHash: input.newTokenHash,
+    expiresAt: input.newExpiresAt,
+  };
+
+  return deps.refreshTokens.rotate(current.id, next);
 }
 
 export interface RevokeRefreshTokenFamilyInput {

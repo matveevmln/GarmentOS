@@ -5,6 +5,7 @@ import { DomainExceptionFilter } from "./common/domain-exception.filter";
 import { DatabaseModule } from "./database/database.module";
 import { HealthModule } from "./health/health.module";
 import { IdentityModule } from "./identity/identity.module";
+import { AuthModule } from "./auth/auth.module";
 import { CatalogModule } from "./catalog/catalog.module";
 import { ProcurementModule } from "./procurement/procurement.module";
 import { BomModule } from "./bom/bom.module";
@@ -24,6 +25,7 @@ import { NotificationsModule } from "./notifications/notifications.module";
     DatabaseModule,
     HealthModule,
     IdentityModule,
+    AuthModule,
     CatalogModule,
     ProcurementModule,
     BomModule,

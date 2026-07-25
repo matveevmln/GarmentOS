@@ -36,6 +36,7 @@ export {
 export {
   assignRoleToUser,
   listUserPermissions,
+  listUserRoleCodes,
   revokeRoleFromUser,
   type ListUserPermissionsDeps,
   type ListUserPermissionsInput,

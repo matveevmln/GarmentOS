@@ -30,8 +30,12 @@ export type CompanyResponseDto = z.infer<typeof companyResponseSchema>;
 // (Infrastructure/Auth) до вызова доменного createUser, который принимает
 // уже готовый passwordHash и не знает об алгоритме (docs/PRINCIPLES.md,
 // принцип 4; packages/domain/identity/src/domain/user.ts).
+// Без companyId (docs/AUTH_ARCHITECTURE.md, раздел 8-9) — новый пользователь
+// всегда добавляется в компанию аутентифицированного вызывающего
+// (@CurrentUser(), требуется identity.write); для самой первой компании
+// пользователь создаётся отдельным CLI-скриптом (bootstrap-company.script.ts),
+// не через этот HTTP-эндпоинт.
 export const createUserSchema = z.object({
-  companyId: z.string().uuid(),
   email: z.string().email("Некорректный email"),
   password: z.string().min(8, "Пароль должен быть не короче 8 символов"),
   fullName: z.string().min(1, "Имя пользователя не может быть пустым"),
