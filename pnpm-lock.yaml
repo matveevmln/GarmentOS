@@ -41,6 +41,9 @@ importers:
       '@garmentos/domain-identity':
         specifier: workspace:*
         version: link:../../packages/domain/identity
+      '@garmentos/domain-procurement':
+        specifier: workspace:*
+        version: link:../../packages/domain/procurement
       '@garmentos/shared-types':
         specifier: workspace:*
         version: link:../../packages/shared-types

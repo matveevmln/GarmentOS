@@ -16,6 +16,7 @@
     "@garmentos/db-schema": "workspace:*",
     "@garmentos/domain-catalog": "workspace:*",
     "@garmentos/domain-identity": "workspace:*",
+    "@garmentos/domain-procurement": "workspace:*",
     "@garmentos/shared-types": "workspace:*",
     "@nestjs/common": "^11.1.28",
     "@nestjs/core": "^11.1.28",
