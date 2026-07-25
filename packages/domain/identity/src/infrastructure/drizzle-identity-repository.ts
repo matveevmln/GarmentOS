@@ -60,4 +60,18 @@ export class DrizzleUserRepository implements UserRepository {
       .limit(1);
     return row ? toUser(row) : null;
   }
+
+  async findByEmailGlobal(email: string): Promise<User | null> {
+    const [row] = await this.db.select().from(users).where(eq(users.email, email)).limit(1);
+    return row ? toUser(row) : null;
+  }
+
+  async findById(companyId: string, id: string): Promise<User | null> {
+    const [row] = await this.db
+      .select()
+      .from(users)
+      .where(and(eq(users.companyId, companyId), eq(users.id, id)))
+      .limit(1);
+    return row ? toUser(row) : null;
+  }
 }
