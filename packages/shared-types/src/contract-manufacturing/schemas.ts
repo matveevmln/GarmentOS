@@ -1,0 +1,96 @@
+import { z } from "zod";
+
+// Контракты модуля Contract Manufacturing (docs/ARCHITECTURE.md, раздел 3;
+// CLAUDE.md, глоссарий: workshop — независимый подрядный цех, productionOrder
+// — заказ на пошив у workshop, не путать с закупкой материалов).
+
+export const workshopStatusSchema = z.enum(["draft", "active", "archived"]);
+
+export const createWorkshopSchema = z.object({
+  companyId: z.string().uuid(),
+  name: z.string().min(1, "Название цеха не может быть пустым"),
+  inn: z.string().optional(),
+  contactInfo: z.string().optional(),
+  specialization: z.string().optional(),
+  status: workshopStatusSchema.optional(),
+  createdBy: z.string().uuid().optional(),
+});
+export type CreateWorkshopDto = z.infer<typeof createWorkshopSchema>;
+
+export const workshopResponseSchema = z.object({
+  id: z.string().uuid(),
+  companyId: z.string().uuid(),
+  name: z.string(),
+  inn: z.string().nullable(),
+  contactInfo: z.string().nullable(),
+  specialization: z.string().nullable(),
+  status: workshopStatusSchema,
+  createdBy: z.string().uuid().nullable(),
+  createdAt: z.date(),
+  updatedAt: z.date(),
+  deletedAt: z.date().nullable(),
+});
+export type WorkshopResponseDto = z.infer<typeof workshopResponseSchema>;
+
+export const productionOrderStatusSchema = z.enum([
+  "draft",
+  "placed",
+  "in_progress",
+  "ready_for_pickup",
+  "received",
+  "cancelled",
+]);
+
+export const productionOrderVariantDraftSchema = z.object({
+  productVariantId: z.string().uuid(),
+  quantity: z.number().positive(),
+});
+
+export const createProductionOrderSchema = z.object({
+  companyId: z.string().uuid(),
+  productId: z.string().uuid(),
+  bomId: z.string().uuid(),
+  workshopId: z.string().uuid(),
+  plannedQuantity: z.number().positive(),
+  agreedUnitPrice: z.number().min(0),
+  materialsProvidedByUs: z.boolean().optional(),
+  dueDate: z.string().optional(),
+  variants: z
+    .array(productionOrderVariantDraftSchema)
+    .min(1, "Заказ пошива должен содержать хотя бы одну строку разбивки по SKU"),
+  createdBy: z.string().uuid().optional(),
+});
+export type CreateProductionOrderDto = z.infer<typeof createProductionOrderSchema>;
+
+export const productionOrderVariantResponseSchema = z.object({
+  id: z.string().uuid(),
+  productionOrderId: z.string().uuid(),
+  productVariantId: z.string().uuid(),
+  quantity: z.string(),
+  createdAt: z.date(),
+  updatedAt: z.date(),
+});
+
+export const productionOrderResponseSchema = z.object({
+  id: z.string().uuid(),
+  companyId: z.string().uuid(),
+  productId: z.string().uuid(),
+  bomId: z.string().uuid(),
+  workshopId: z.string().uuid(),
+  plannedQuantity: z.string(),
+  agreedUnitPrice: z.string(),
+  materialsProvidedByUs: z.boolean(),
+  status: productionOrderStatusSchema,
+  dueDate: z.string().nullable(),
+  receivedAt: z.date().nullable(),
+  createdBy: z.string().uuid().nullable(),
+  createdAt: z.date(),
+  updatedAt: z.date(),
+  variants: z.array(productionOrderVariantResponseSchema),
+});
+export type ProductionOrderResponseDto = z.infer<typeof productionOrderResponseSchema>;
+
+export const confirmProductionOrderSchema = z.object({
+  companyId: z.string().uuid(),
+});
+export type ConfirmProductionOrderDto = z.infer<typeof confirmProductionOrderSchema>;
