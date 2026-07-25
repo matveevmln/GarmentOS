@@ -7,8 +7,8 @@ import { z } from "zod";
 export const materialTypeSchema = z.enum(["fabric", "trim", "packaging", "accessory"]);
 export const materialUnitSchema = z.enum(["m", "kg", "pcs"]);
 
+// companyId — из аутентифицированного принципала (docs/AUTH_ARCHITECTURE.md, раздел 8).
 export const createMaterialSchema = z.object({
-  companyId: z.string().uuid(),
   name: z.string().min(1, "Название материала не может быть пустым"),
   type: materialTypeSchema,
   unit: materialUnitSchema,
@@ -35,7 +35,6 @@ export const supplierTypeSchema = z.enum(["fabric", "trim", "packaging", "logist
 export const partnerStatusSchema = z.enum(["draft", "active", "archived"]);
 
 export const createSupplierSchema = z.object({
-  companyId: z.string().uuid(),
   name: z.string().min(1, "Название поставщика не может быть пустым"),
   type: supplierTypeSchema,
   status: partnerStatusSchema.optional(),
@@ -69,7 +68,6 @@ export const purchaseOrderItemDraftSchema = z.object({
 });
 
 export const createPurchaseOrderSchema = z.object({
-  companyId: z.string().uuid(),
   supplierId: z.string().uuid(),
   items: z.array(purchaseOrderItemDraftSchema).min(1, "Закупка должна содержать хотя бы одну позицию материала"),
   orderedAt: z.string().optional(),
@@ -102,7 +100,3 @@ export const purchaseOrderResponseSchema = z.object({
 });
 export type PurchaseOrderResponseDto = z.infer<typeof purchaseOrderResponseSchema>;
 
-export const confirmPurchaseOrderSchema = z.object({
-  companyId: z.string().uuid(),
-});
-export type ConfirmPurchaseOrderDto = z.infer<typeof confirmPurchaseOrderSchema>;

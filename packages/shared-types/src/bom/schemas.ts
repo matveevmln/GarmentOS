@@ -12,7 +12,6 @@ export const bomItemDraftSchema = z.object({
 });
 
 export const createBomDraftSchema = z.object({
-  companyId: z.string().uuid(),
   productId: z.string().uuid(),
   items: z.array(bomItemDraftSchema).min(1, "Спецификация (BOM) должна содержать хотя бы один материал"),
   createdBy: z.string().uuid().optional(),
@@ -42,13 +41,7 @@ export const bomResponseSchema = z.object({
 });
 export type BomResponseDto = z.infer<typeof bomResponseSchema>;
 
-export const approveBomSchema = z.object({
-  companyId: z.string().uuid(),
-});
-export type ApproveBomDto = z.infer<typeof approveBomSchema>;
-
 export const getApprovedBomQuerySchema = z.object({
-  companyId: z.string().uuid(),
   productId: z.string().uuid(),
 });
 export type GetApprovedBomQueryDto = z.infer<typeof getApprovedBomQuerySchema>;

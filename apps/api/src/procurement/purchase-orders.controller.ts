@@ -1,34 +1,35 @@
 import { Body, Controller, Param, Post } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
 import { createZodDto } from "nestjs-zod";
-import {
-  confirmPurchaseOrderSchema,
-  createPurchaseOrderSchema,
-  purchaseOrderResponseSchema,
-  type PurchaseOrderResponseDto,
-} from "@garmentos/shared-types";
+import { createPurchaseOrderSchema, purchaseOrderResponseSchema, type PurchaseOrderResponseDto } from "@garmentos/shared-types";
+import { CurrentUser, type AuthenticatedRequestUser } from "../auth/current-user.decorator";
+import { RequirePermissions } from "../auth/require-permissions.decorator";
 import { ProcurementService } from "./procurement.service";
 
 class CreatePurchaseOrderDto extends createZodDto(createPurchaseOrderSchema) {}
-class ConfirmPurchaseOrderDto extends createZodDto(confirmPurchaseOrderSchema) {}
 
 @ApiTags("purchase-orders")
 @Controller("purchase-orders")
 export class PurchaseOrdersController {
   constructor(private readonly procurementService: ProcurementService) {}
 
+  @RequirePermissions("procurement.write")
   @Post()
-  async create(@Body() body: CreatePurchaseOrderDto): Promise<PurchaseOrderResponseDto> {
-    const purchaseOrder = await this.procurementService.createPurchaseOrderDraft(body);
+  async create(
+    @Body() body: CreatePurchaseOrderDto,
+    @CurrentUser() currentUser: AuthenticatedRequestUser,
+  ): Promise<PurchaseOrderResponseDto> {
+    const purchaseOrder = await this.procurementService.createPurchaseOrderDraft(currentUser.companyId, body);
     return purchaseOrderResponseSchema.parse(purchaseOrder);
   }
 
+  @RequirePermissions("procurement.write")
   @Post(":id/confirm")
   async confirm(
     @Param("id") id: string,
-    @Body() body: ConfirmPurchaseOrderDto,
+    @CurrentUser() currentUser: AuthenticatedRequestUser,
   ): Promise<PurchaseOrderResponseDto> {
-    const purchaseOrder = await this.procurementService.confirmPurchaseOrder(body.companyId, id);
+    const purchaseOrder = await this.procurementService.confirmPurchaseOrder(currentUser.companyId, id);
     return purchaseOrderResponseSchema.parse(purchaseOrder);
   }
 }

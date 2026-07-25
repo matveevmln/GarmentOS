@@ -2,6 +2,8 @@ import { Body, Controller, Post } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
 import { createZodDto } from "nestjs-zod";
 import { createSupplierSchema, supplierResponseSchema, type SupplierResponseDto } from "@garmentos/shared-types";
+import { CurrentUser, type AuthenticatedRequestUser } from "../auth/current-user.decorator";
+import { RequirePermissions } from "../auth/require-permissions.decorator";
 import { ProcurementService } from "./procurement.service";
 
 class CreateSupplierDto extends createZodDto(createSupplierSchema) {}
@@ -11,9 +13,13 @@ class CreateSupplierDto extends createZodDto(createSupplierSchema) {}
 export class SuppliersController {
   constructor(private readonly procurementService: ProcurementService) {}
 
+  @RequirePermissions("procurement.write")
   @Post()
-  async create(@Body() body: CreateSupplierDto): Promise<SupplierResponseDto> {
-    const supplier = await this.procurementService.createSupplier(body);
+  async create(
+    @Body() body: CreateSupplierDto,
+    @CurrentUser() currentUser: AuthenticatedRequestUser,
+  ): Promise<SupplierResponseDto> {
+    const supplier = await this.procurementService.createSupplier(currentUser.companyId, body);
     return supplierResponseSchema.parse(supplier);
   }
 }

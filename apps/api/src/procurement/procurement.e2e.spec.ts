@@ -6,12 +6,23 @@ import type { Server } from "node:http";
 import type { INestApplication } from "@nestjs/common";
 import { VersioningType } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
-import { companies, createDb, materials, purchaseOrderItems, purchaseOrders, suppliers } from "@garmentos/db-schema";
+import {
+  companies,
+  createDb,
+  materials,
+  purchaseOrderItems,
+  purchaseOrders,
+  refreshTokens,
+  suppliers,
+  userRoles,
+  users,
+} from "@garmentos/db-schema";
 import type { MaterialResponseDto, PurchaseOrderResponseDto, SupplierResponseDto } from "@garmentos/shared-types";
 import { eq } from "drizzle-orm";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { AppModule } from "../app.module";
+import { authHeader, setupAuthenticatedCompany } from "../test-support/auth-test-helper";
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) {
@@ -49,6 +60,12 @@ describe("Procurement API (e2e)", () => {
         await db.delete(purchaseOrders).where(eq(purchaseOrders.companyId, company.id));
         await db.delete(materials).where(eq(materials.companyId, company.id));
         await db.delete(suppliers).where(eq(suppliers.companyId, company.id));
+        const companyUsers = await db.select().from(users).where(eq(users.companyId, company.id));
+        for (const user of companyUsers) {
+          await db.delete(refreshTokens).where(eq(refreshTokens.userId, user.id));
+          await db.delete(userRoles).where(eq(userRoles.userId, user.id));
+        }
+        await db.delete(users).where(eq(users.companyId, company.id));
         await db.delete(companies).where(eq(companies.id, company.id));
       }
     }
@@ -58,29 +75,27 @@ describe("Procurement API (e2e)", () => {
   it("создаёт поставщика, материал, черновик закупки и подтверждает его; повторное подтверждение — 409", async () => {
     const companyName = `E2E Procurement ${Date.now()}`;
     createdCompanyNames.push(companyName);
-    const [company] = await db.insert(companies).values({ name: companyName }).returning();
-    if (!company) throw new Error("Не удалось создать тестовую компанию");
+    const { accessToken } = await setupAuthenticatedCompany(db, httpServer, companyName, "procurement_manager");
 
     const supplierResponse = await request(httpServer)
       .post("/v1/suppliers")
-      .send({ companyId: company.id, name: "Оксфорд Текстиль", type: "fabric" })
+      .set(...authHeader(accessToken))
+      .send({ name: "Оксфорд Текстиль", type: "fabric" })
       .expect(201);
     const supplier = supplierResponse.body as SupplierResponseDto;
     expect(supplier.status).toBe("active");
 
     const materialResponse = await request(httpServer)
       .post("/v1/materials")
-      .send({ companyId: company.id, name: "Оксфорд 280", type: "fabric", unit: "m" })
+      .set(...authHeader(accessToken))
+      .send({ name: "Оксфорд 280", type: "fabric", unit: "m" })
       .expect(201);
     const material = materialResponse.body as MaterialResponseDto;
 
     const orderResponse = await request(httpServer)
       .post("/v1/purchase-orders")
-      .send({
-        companyId: company.id,
-        supplierId: supplier.id,
-        items: [{ materialId: material.id, quantity: 500, unitPrice: 350 }],
-      })
+      .set(...authHeader(accessToken))
+      .send({ supplierId: supplier.id, items: [{ materialId: material.id, quantity: 500, unitPrice: 350 }] })
       .expect(201);
     const order = orderResponse.body as PurchaseOrderResponseDto;
     expect(order.status).toBe("draft");
@@ -88,14 +103,14 @@ describe("Procurement API (e2e)", () => {
 
     const confirmedResponse = await request(httpServer)
       .post(`/v1/purchase-orders/${order.id}/confirm`)
-      .send({ companyId: company.id })
+      .set(...authHeader(accessToken))
       .expect(201);
     const confirmed = confirmedResponse.body as PurchaseOrderResponseDto;
     expect(confirmed.status).toBe("sent");
 
     const conflictResponse = await request(httpServer)
       .post(`/v1/purchase-orders/${order.id}/confirm`)
-      .send({ companyId: company.id })
+      .set(...authHeader(accessToken))
       .expect(409);
     const conflictBody = conflictResponse.body as ErrorResponseBody;
     expect(conflictBody.code).toBe("PURCHASE_ORDER_NOT_DRAFT");
@@ -104,18 +119,19 @@ describe("Procurement API (e2e)", () => {
   it("POST /v1/purchase-orders без позиций — 400", async () => {
     const companyName = `E2E Procurement Invalid ${Date.now()}`;
     createdCompanyNames.push(companyName);
-    const [company] = await db.insert(companies).values({ name: companyName }).returning();
-    if (!company) throw new Error("Не удалось создать тестовую компанию");
+    const { accessToken } = await setupAuthenticatedCompany(db, httpServer, companyName, "procurement_manager");
 
     const supplierResponse = await request(httpServer)
       .post("/v1/suppliers")
-      .send({ companyId: company.id, name: "Фурнитура Плюс", type: "trim" })
+      .set(...authHeader(accessToken))
+      .send({ name: "Фурнитура Плюс", type: "trim" })
       .expect(201);
     const supplier = supplierResponse.body as SupplierResponseDto;
 
     await request(httpServer)
       .post("/v1/purchase-orders")
-      .send({ companyId: company.id, supplierId: supplier.id, items: [] })
+      .set(...authHeader(accessToken))
+      .send({ supplierId: supplier.id, items: [] })
       .expect(400);
   });
 });

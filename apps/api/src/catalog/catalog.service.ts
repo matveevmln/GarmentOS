@@ -23,12 +23,12 @@ export class CatalogService {
     @Inject(PRODUCT_VARIANT_REPOSITORY) private readonly productVariants: ProductVariantRepository,
   ) {}
 
-  async createCollection(input: CreateCollectionDto): Promise<Collection> {
-    return createCollection({ collections: this.collections }, input);
+  async createCollection(companyId: string, input: CreateCollectionDto): Promise<Collection> {
+    return createCollection({ collections: this.collections }, { ...input, companyId });
   }
 
-  async createProduct(input: CreateProductDto): Promise<Product> {
-    return createProduct({ products: this.products }, input);
+  async createProduct(companyId: string, input: CreateProductDto): Promise<Product> {
+    return createProduct({ products: this.products }, { ...input, companyId });
   }
 
   async createProductVariant(input: CreateProductVariantDto): Promise<ProductVariant> {

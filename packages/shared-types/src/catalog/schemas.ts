@@ -3,8 +3,9 @@ import { z } from "zod";
 // Контракты модуля Catalog (docs/ARCHITECTURE.md, раздел 3; CLAUDE.md,
 // глоссарий: collection/product/sku).
 
+// companyId — из аутентифицированного принципала (@CurrentUser()), не тела
+// запроса (docs/AUTH_ARCHITECTURE.md, раздел 8).
 export const createCollectionSchema = z.object({
-  companyId: z.string().uuid(),
   name: z.string().min(1, "Название коллекции не может быть пустым"),
   season: z.enum(["spring", "summer", "autumn", "winter"]).optional(),
   year: z.number().int().optional(),
@@ -26,7 +27,6 @@ export const collectionResponseSchema = z.object({
 export type CollectionResponseDto = z.infer<typeof collectionResponseSchema>;
 
 export const createProductSchema = z.object({
-  companyId: z.string().uuid(),
   collectionId: z.string().uuid().optional(),
   name: z.string().min(1, "Название модели не может быть пустым"),
   code: z.string().min(1, "Артикул модели не может быть пустым"),

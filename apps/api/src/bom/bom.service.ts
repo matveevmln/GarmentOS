@@ -9,15 +9,15 @@ import { BOM_REPOSITORY } from "./bom.tokens";
 export class BomService {
   constructor(@Inject(BOM_REPOSITORY) private readonly boms: BomRepository) {}
 
-  async createDraft(input: CreateBomDraftDto): Promise<Bom> {
-    return createBomDraft({ boms: this.boms }, input);
+  async createDraft(companyId: string, input: CreateBomDraftDto): Promise<Bom> {
+    return createBomDraft({ boms: this.boms }, { ...input, companyId });
   }
 
   async approve(companyId: string, bomId: string): Promise<Bom> {
     return approveBom({ boms: this.boms }, { companyId, bomId });
   }
 
-  async getApproved(query: GetApprovedBomQueryDto): Promise<Bom | null> {
-    return getApprovedBom({ boms: this.boms }, query);
+  async getApproved(companyId: string, query: GetApprovedBomQueryDto): Promise<Bom | null> {
+    return getApprovedBom({ boms: this.boms }, { ...query, companyId });
   }
 }

@@ -25,16 +25,19 @@ export class ProcurementService {
     @Inject(PURCHASE_ORDER_REPOSITORY) private readonly purchaseOrders: PurchaseOrderRepository,
   ) {}
 
-  async createMaterial(input: CreateMaterialDto): Promise<Material> {
-    return createMaterial({ materials: this.materials }, input);
+  async createMaterial(companyId: string, input: CreateMaterialDto): Promise<Material> {
+    return createMaterial({ materials: this.materials }, { ...input, companyId });
   }
 
-  async createSupplier(input: CreateSupplierDto): Promise<Supplier> {
-    return createSupplier({ suppliers: this.suppliers }, input);
+  async createSupplier(companyId: string, input: CreateSupplierDto): Promise<Supplier> {
+    return createSupplier({ suppliers: this.suppliers }, { ...input, companyId });
   }
 
-  async createPurchaseOrderDraft(input: CreatePurchaseOrderDto): Promise<PurchaseOrder> {
-    return createPurchaseOrderDraft({ purchaseOrders: this.purchaseOrders, suppliers: this.suppliers }, input);
+  async createPurchaseOrderDraft(companyId: string, input: CreatePurchaseOrderDto): Promise<PurchaseOrder> {
+    return createPurchaseOrderDraft(
+      { purchaseOrders: this.purchaseOrders, suppliers: this.suppliers },
+      { ...input, companyId },
+    );
   }
 
   async confirmPurchaseOrder(companyId: string, purchaseOrderId: string): Promise<PurchaseOrder> {

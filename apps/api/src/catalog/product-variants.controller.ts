@@ -6,6 +6,7 @@ import {
   productVariantResponseSchema,
   type ProductVariantResponseDto,
 } from "@garmentos/shared-types";
+import { RequirePermissions } from "../auth/require-permissions.decorator";
 import { CatalogService } from "./catalog.service";
 
 class CreateProductVariantDto extends createZodDto(createProductVariantSchema) {}
@@ -15,6 +16,7 @@ class CreateProductVariantDto extends createZodDto(createProductVariantSchema) {
 export class ProductVariantsController {
   constructor(private readonly catalogService: CatalogService) {}
 
+  @RequirePermissions("catalog.write")
   @Post()
   async create(@Body() body: CreateProductVariantDto): Promise<ProductVariantResponseDto> {
     const productVariant = await this.catalogService.createProductVariant(body);
