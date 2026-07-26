@@ -18,6 +18,7 @@ import { HonestSignModule } from "./honest-sign/honest-sign.module";
 import { FinanceModule } from "./finance/finance.module";
 import { NotificationsModule } from "./notifications/notifications.module";
 import { TelegramModule } from "./telegram/telegram.module";
+import { AiProductionAssistantModule } from "./ai-production-assistant/ai-production-assistant.module";
 
 // Presentation-слой (docs/ARCHITECTURE.md, п.2). Доменные модули
 // (packages/domain/*) подключаются сюда по мере реализации итераций
@@ -40,6 +41,7 @@ import { TelegramModule } from "./telegram/telegram.module";
     FinanceModule,
     NotificationsModule,
     TelegramModule,
+    AiProductionAssistantModule,
   ],
   providers: [
     { provide: APP_PIPE, useClass: ZodValidationPipe },

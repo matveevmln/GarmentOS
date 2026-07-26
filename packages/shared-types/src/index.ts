@@ -11,3 +11,4 @@ export * from "./honest-sign";
 export * from "./finance";
 export * from "./notifications";
 export * from "./telegram";
+export * from "./ai-production-assistant";
