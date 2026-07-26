@@ -18,6 +18,8 @@ export interface NewWorkshopInput {
 export interface WorkshopRepository {
   create(input: NewWorkshopInput): Promise<Workshop>;
   findById(companyId: string, id: string): Promise<Workshop | null>;
+  findByTelegramChatId(chatId: string): Promise<Workshop | null>;
+  setTelegramChatId(id: string, chatId: string): Promise<Workshop>;
 }
 
 export interface NewProductionOrderInput {

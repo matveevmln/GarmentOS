@@ -27,6 +27,7 @@ function toWorkshop(row: WorkshopRow): Workshop {
     contactInfo: row.contactInfo,
     specialization: row.specialization,
     status: row.status,
+    telegramChatId: row.telegramChatId,
     createdBy: row.createdBy,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
@@ -81,6 +82,21 @@ export class DrizzleWorkshopRepository implements WorkshopRepository {
       .where(and(eq(workshops.companyId, companyId), eq(workshops.id, id)))
       .limit(1);
     return row ? toWorkshop(row) : null;
+  }
+
+  async findByTelegramChatId(chatId: string): Promise<Workshop | null> {
+    const [row] = await this.db.select().from(workshops).where(eq(workshops.telegramChatId, chatId)).limit(1);
+    return row ? toWorkshop(row) : null;
+  }
+
+  async setTelegramChatId(id: string, chatId: string): Promise<Workshop> {
+    const [row] = await this.db
+      .update(workshops)
+      .set({ telegramChatId: chatId, updatedAt: new Date() })
+      .where(eq(workshops.id, id))
+      .returning();
+    if (!row) throw new Error(`UPDATE workshops не нашёл строку id=${id}`);
+    return toWorkshop(row);
   }
 }
 

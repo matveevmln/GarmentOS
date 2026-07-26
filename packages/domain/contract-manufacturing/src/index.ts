@@ -27,6 +27,11 @@ export {
   type ConfirmProductionOrderDeps,
   type ConfirmProductionOrderInput,
 } from "./application/confirm-production-order";
+export {
+  linkWorkshopTelegramChat,
+  type LinkWorkshopTelegramChatDeps,
+  type LinkWorkshopTelegramChatInput,
+} from "./application/link-workshop-telegram-chat";
 
 export {
   DrizzleProductionOrderRepository,

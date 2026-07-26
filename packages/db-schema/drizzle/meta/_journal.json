@@ -71,6 +71,13 @@
       "when": 1785099098260,
       "tag": "0009_telegram_integration",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1785099749907,
+      "tag": "0010_telegram_invite_company_id",
+      "breakpoints": true
     }
   ]
 }

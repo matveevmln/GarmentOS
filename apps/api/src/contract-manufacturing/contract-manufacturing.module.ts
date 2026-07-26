@@ -24,5 +24,9 @@ import { ContractManufacturingService } from "./contract-manufacturing.service";
       inject: [DATABASE_CONNECTION],
     },
   ],
+  // WORKSHOP_REPOSITORY нужен apps/api/src/telegram (привязка чата цеха к
+  // Telegram, docs/TELEGRAM_INTEGRATION_ARCHITECTURE.md) — тот же провайдер,
+  // не отдельный экземпляр репозитория.
+  exports: [WORKSHOP_REPOSITORY],
 })
 export class ContractManufacturingModule {}

@@ -24,6 +24,7 @@ export const workshopResponseSchema = z.object({
   contactInfo: z.string().nullable(),
   specialization: z.string().nullable(),
   status: workshopStatusSchema,
+  telegramChatId: z.string().nullable(),
   createdBy: z.string().uuid().nullable(),
   createdAt: z.date(),
   updatedAt: z.date(),

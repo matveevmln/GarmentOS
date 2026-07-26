@@ -17,6 +17,7 @@ import { MarketplaceIntegrationModule } from "./marketplace-integration/marketpl
 import { HonestSignModule } from "./honest-sign/honest-sign.module";
 import { FinanceModule } from "./finance/finance.module";
 import { NotificationsModule } from "./notifications/notifications.module";
+import { TelegramModule } from "./telegram/telegram.module";
 
 // Presentation-слой (docs/ARCHITECTURE.md, п.2). Доменные модули
 // (packages/domain/*) подключаются сюда по мере реализации итераций
@@ -38,6 +39,7 @@ import { NotificationsModule } from "./notifications/notifications.module";
     HonestSignModule,
     FinanceModule,
     NotificationsModule,
+    TelegramModule,
   ],
   providers: [
     { provide: APP_PIPE, useClass: ZodValidationPipe },

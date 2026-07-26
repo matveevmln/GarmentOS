@@ -13,6 +13,10 @@ export interface Workshop {
   contactInfo: string | null;
   specialization: string | null;
   status: WorkshopStatus;
+  // Заполняется только после того, как цех перешёл по инвайт-ссылке в
+  // Telegram (docs/TELEGRAM_INTEGRATION_ARCHITECTURE.md) — Bot API не
+  // позволяет проактивно написать в чат, который не взаимодействовал с ботом.
+  telegramChatId: string | null;
   createdBy: string | null;
   createdAt: Date;
   updatedAt: Date;
