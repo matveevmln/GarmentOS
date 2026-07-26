@@ -19,7 +19,7 @@ export class TransactionsController {
     @Body() body: RecordTransactionDto,
     @CurrentUser() currentUser: AuthenticatedRequestUser,
   ): Promise<TransactionResponseDto> {
-    const transaction = await this.financeService.recordTransaction(currentUser.companyId, body);
+    const transaction = await this.financeService.recordTransaction(currentUser, body);
     return transactionResponseSchema.parse(transaction);
   }
 }

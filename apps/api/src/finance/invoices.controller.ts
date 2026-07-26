@@ -29,7 +29,7 @@ export class InvoicesController {
     @Param("id") id: string,
     @CurrentUser() currentUser: AuthenticatedRequestUser,
   ): Promise<InvoiceResponseDto> {
-    const invoice = await this.financeService.issueInvoice(currentUser.companyId, id);
+    const invoice = await this.financeService.issueInvoice(currentUser, id);
     return invoiceResponseSchema.parse(invoice);
   }
 
@@ -39,7 +39,7 @@ export class InvoicesController {
     @Param("id") id: string,
     @CurrentUser() currentUser: AuthenticatedRequestUser,
   ): Promise<InvoiceResponseDto> {
-    const invoice = await this.financeService.markInvoicePaid(currentUser.companyId, id);
+    const invoice = await this.financeService.markInvoicePaid(currentUser, id);
     return invoiceResponseSchema.parse(invoice);
   }
 
@@ -49,7 +49,7 @@ export class InvoicesController {
     @Param("id") id: string,
     @CurrentUser() currentUser: AuthenticatedRequestUser,
   ): Promise<InvoiceResponseDto> {
-    const invoice = await this.financeService.markInvoiceOverdue(currentUser.companyId, id);
+    const invoice = await this.financeService.markInvoiceOverdue(currentUser, id);
     return invoiceResponseSchema.parse(invoice);
   }
 
@@ -59,7 +59,7 @@ export class InvoicesController {
     @Param("id") id: string,
     @CurrentUser() currentUser: AuthenticatedRequestUser,
   ): Promise<InvoiceResponseDto> {
-    const invoice = await this.financeService.cancelInvoice(currentUser.companyId, id);
+    const invoice = await this.financeService.cancelInvoice(currentUser, id);
     return invoiceResponseSchema.parse(invoice);
   }
 }

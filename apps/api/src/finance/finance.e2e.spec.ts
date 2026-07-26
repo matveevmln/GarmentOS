@@ -7,6 +7,7 @@ import type { INestApplication } from "@nestjs/common";
 import { VersioningType } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import {
+  auditLog,
   companies,
   costEntries,
   createDb,
@@ -25,7 +26,7 @@ import type {
   ProductVariantResponseDto,
   TransactionResponseDto,
 } from "@garmentos/shared-types";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { AppModule } from "../app.module";
@@ -60,6 +61,7 @@ describe("Finance API (e2e)", () => {
     for (const name of createdCompanyNames) {
       const [company] = await db.select().from(companies).where(eq(companies.name, name));
       if (company) {
+        await db.delete(auditLog).where(eq(auditLog.companyId, company.id));
         await db.delete(invoices).where(eq(invoices.companyId, company.id));
         await db.delete(transactions).where(eq(transactions.companyId, company.id));
         await db.delete(costEntries).where(eq(costEntries.companyId, company.id));
@@ -133,6 +135,16 @@ describe("Finance API (e2e)", () => {
       .set(...authHeader(accessToken))
       .expect(201);
     expect((issuedResponse.body as InvoiceResponseDto).status).toBe("issued");
+
+    // Итерация 6: "финансовые проводки" — явно названная в docs/ARCHITECTURE.md,
+    // раздел 7 критичная операция — переход статуса счёта пишется с before/after.
+    const [issueAuditRow] = await db
+      .select()
+      .from(auditLog)
+      .where(and(eq(auditLog.entityId, invoice.id), eq(auditLog.action, "finance.invoice_issue")));
+    expect(issueAuditRow?.source).toBe("http_api");
+    expect(issueAuditRow?.beforeJson).toEqual({ status: "draft" });
+    expect(issueAuditRow?.afterJson).toEqual({ status: "issued" });
 
     const paidResponse = await request(httpServer)
       .post(`/v1/invoices/${invoice.id}/pay`)

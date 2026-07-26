@@ -1,6 +1,7 @@
 import { Module } from "@nestjs/common";
 import { APP_FILTER, APP_PIPE } from "@nestjs/core";
 import { ZodValidationPipe } from "nestjs-zod";
+import { AuditModule } from "./audit/audit.module";
 import { DomainExceptionFilter } from "./common/domain-exception.filter";
 import { DatabaseModule } from "./database/database.module";
 import { HealthModule } from "./health/health.module";
@@ -23,6 +24,7 @@ import { NotificationsModule } from "./notifications/notifications.module";
 @Module({
   imports: [
     DatabaseModule,
+    AuditModule,
     HealthModule,
     IdentityModule,
     AuthModule,

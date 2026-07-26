@@ -7,6 +7,7 @@ import type { INestApplication } from "@nestjs/common";
 import { VersioningType } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import {
+  auditLog,
   companies,
   createDb,
   markingCodeEvents,
@@ -22,7 +23,7 @@ import type {
   ProductResponseDto,
   ProductVariantResponseDto,
 } from "@garmentos/shared-types";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { AppModule } from "../app.module";
@@ -57,6 +58,7 @@ describe("Honest Sign API (e2e)", () => {
     for (const name of createdCompanyNames) {
       const [company] = await db.select().from(companies).where(eq(companies.name, name));
       if (company) {
+        await db.delete(auditLog).where(eq(auditLog.companyId, company.id));
         const companyCodes = await db.select().from(markingCodes).where(eq(markingCodes.companyId, company.id));
         for (const code of companyCodes) {
           await db.delete(markingCodeEvents).where(eq(markingCodeEvents.markingCodeId, code.id));
@@ -142,6 +144,16 @@ describe("Honest Sign API (e2e)", () => {
       .send({ reason: "sold" })
       .expect(201);
     expect((retiredResponse.body as MarkingCodeResponseDto).status).toBe("sold");
+
+    // Итерация 6: "списание кодов маркировки" — явно названная в
+    // docs/ARCHITECTURE.md, раздел 7 критичная операция.
+    const [retireAuditRow] = await db
+      .select()
+      .from(auditLog)
+      .where(and(eq(auditLog.entityId, issued.id), eq(auditLog.action, "honest_sign.retire")));
+    expect(retireAuditRow?.source).toBe("http_api");
+    expect(retireAuditRow?.beforeJson).toEqual({ status: "introduced" });
+    expect(retireAuditRow?.afterJson).toEqual({ status: "sold" });
   });
 
   it("marketplace_manager без honest_sign.write не может выдать код маркировки — 403", async () => {

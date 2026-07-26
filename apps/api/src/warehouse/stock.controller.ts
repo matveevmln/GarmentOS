@@ -11,6 +11,7 @@ import {
   type StockItemResponseDto,
   type TransferStockResponseDto,
 } from "@garmentos/shared-types";
+import { CurrentUser, type AuthenticatedRequestUser } from "../auth/current-user.decorator";
 import { RequirePermissions } from "../auth/require-permissions.decorator";
 import { WarehouseService } from "./warehouse.service";
 
@@ -26,22 +27,31 @@ export class StockController {
 
   @RequirePermissions("warehouse.write")
   @Post("receive")
-  async receive(@Body() body: ReceiveStockDto): Promise<StockItemResponseDto> {
-    const stockItem = await this.warehouseService.receiveStock(body);
+  async receive(
+    @Body() body: ReceiveStockDto,
+    @CurrentUser() currentUser: AuthenticatedRequestUser,
+  ): Promise<StockItemResponseDto> {
+    const stockItem = await this.warehouseService.receiveStock(currentUser, body);
     return stockItemResponseSchema.parse(stockItem);
   }
 
   @RequirePermissions("warehouse.write")
   @Post("dispatch")
-  async dispatch(@Body() body: DispatchStockDto): Promise<StockItemResponseDto> {
-    const stockItem = await this.warehouseService.dispatchStock(body);
+  async dispatch(
+    @Body() body: DispatchStockDto,
+    @CurrentUser() currentUser: AuthenticatedRequestUser,
+  ): Promise<StockItemResponseDto> {
+    const stockItem = await this.warehouseService.dispatchStock(currentUser, body);
     return stockItemResponseSchema.parse(stockItem);
   }
 
   @RequirePermissions("warehouse.write")
   @Post("transfer")
-  async transfer(@Body() body: TransferStockDto): Promise<TransferStockResponseDto> {
-    const result = await this.warehouseService.transferStock(body);
+  async transfer(
+    @Body() body: TransferStockDto,
+    @CurrentUser() currentUser: AuthenticatedRequestUser,
+  ): Promise<TransferStockResponseDto> {
+    const result = await this.warehouseService.transferStock(currentUser, body);
     return transferStockResponseSchema.parse(result);
   }
 

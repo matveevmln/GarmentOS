@@ -47,12 +47,12 @@ async function run(): Promise<void> {
     const identityService = app.get(IdentityService);
 
     const company = await identityService.createCompany({ name, inn });
-    const owner = await identityService.createUser(company.id, {
-      email: ownerEmail,
-      fullName: ownerFullName,
-      password: ownerPassword,
-    });
-    await identityService.assignRole(company.id, owner.id, "owner");
+    const owner = await identityService.createUser(
+      company.id,
+      { email: ownerEmail, fullName: ownerFullName, password: ownerPassword },
+      { userId: null, source: "cli" },
+    );
+    await identityService.assignRole(company.id, owner.id, "owner", { userId: null, source: "cli" });
 
     console.log(`Компания создана: ${company.name} (${company.id})`);
     console.log(`Владелец создан: ${owner.email} (${owner.id}), роль "owner" назначена`);

@@ -7,6 +7,7 @@ import type { INestApplication } from "@nestjs/common";
 import { VersioningType } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import {
+  auditLog,
   companies,
   createDb,
   inventoryCountItems,
@@ -31,7 +32,7 @@ import type {
   TransferStockResponseDto,
   WarehouseResponseDto,
 } from "@garmentos/shared-types";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { AppModule } from "../app.module";
@@ -66,6 +67,7 @@ describe("Warehouse API (e2e)", () => {
     for (const name of createdCompanyNames) {
       const [company] = await db.select().from(companies).where(eq(companies.name, name));
       if (company) {
+        await db.delete(auditLog).where(eq(auditLog.companyId, company.id));
         const companyWarehouses = await db.select().from(warehouses).where(eq(warehouses.companyId, company.id));
         for (const warehouse of companyWarehouses) {
           const items = await db.select().from(stockItems).where(eq(stockItems.warehouseId, warehouse.id));
@@ -163,7 +165,18 @@ describe("Warehouse API (e2e)", () => {
       .set(...authHeader(accessToken))
       .send({ warehouseId: origin.id, productVariantId: variant.id, quantity: 80 })
       .expect(201);
-    expect((afterDispatchResponse.body as StockItemResponseDto).quantityOnHand).toBe("20.000");
+    const dispatchedStockItem = afterDispatchResponse.body as StockItemResponseDto;
+    expect(dispatchedStockItem.quantityOnHand).toBe("20.000");
+
+    // Итерация 6: "изменение остатков" — явно названная в docs/ARCHITECTURE.md,
+    // раздел 7 критичная операция — должна попасть в audit_log с before/after.
+    const [dispatchAuditRow] = await db
+      .select()
+      .from(auditLog)
+      .where(and(eq(auditLog.entityId, dispatchedStockItem.id), eq(auditLog.action, "warehouse.stock_dispatch")));
+    expect(dispatchAuditRow?.source).toBe("http_api");
+    expect(dispatchAuditRow?.beforeJson).toEqual({ quantityOnHand: "100.000", quantityReserved: "20.000" });
+    expect(dispatchAuditRow?.afterJson).toEqual({ quantityOnHand: "20.000", quantityReserved: "20.000" });
 
     await request(httpServer)
       .post("/v1/stock/release")

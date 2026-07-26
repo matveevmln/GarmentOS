@@ -6,9 +6,9 @@ import type { Server } from "node:http";
 import type { INestApplication } from "@nestjs/common";
 import { VersioningType } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
-import { companies, createDb, refreshTokens, userRoles, users } from "@garmentos/db-schema";
+import { auditLog, companies, createDb, refreshTokens, userRoles, users } from "@garmentos/db-schema";
 import type { UserResponseDto } from "@garmentos/shared-types";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { AppModule } from "../app.module";
@@ -56,6 +56,7 @@ describe("Identity API (e2e)", () => {
     for (const name of createdCompanyNames) {
       const [company] = await db.select().from(companies).where(eq(companies.name, name));
       if (company) {
+        await db.delete(auditLog).where(eq(auditLog.companyId, company.id));
         const companyUsers = await db.select().from(users).where(eq(users.companyId, company.id));
         for (const user of companyUsers) {
           await db.delete(refreshTokens).where(eq(refreshTokens.userId, user.id));
@@ -81,6 +82,15 @@ describe("Identity API (e2e)", () => {
     const user = userResponse.body as UserResponseDto;
     expect(user.email).toBe("e2e.owner@example.com");
     expect(user).not.toHaveProperty("passwordHash");
+
+    // Итерация 6: создание пользователя через HTTP API — источник "http_api",
+    // инициатор — owner, который его создал (docs/AUTH_ARCHITECTURE.md, раздел 13).
+    const [createUserAuditRow] = await db
+      .select()
+      .from(auditLog)
+      .where(and(eq(auditLog.entityId, user.id), eq(auditLog.action, "identity.create_user")));
+    expect(createUserAuditRow?.source).toBe("http_api");
+    expect(createUserAuditRow?.beforeJson).toBeNull();
 
     const conflictResponse = await request(httpServer)
       .post("/v1/users")

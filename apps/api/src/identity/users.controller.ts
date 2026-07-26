@@ -19,7 +19,10 @@ export class UsersController {
   @RequirePermissions("identity.write")
   @Post()
   async create(@Body() body: CreateUserDto, @CurrentUser() currentUser: AuthenticatedRequestUser): Promise<UserResponseDto> {
-    const user = await this.identityService.createUser(currentUser.companyId, body);
+    const user = await this.identityService.createUser(currentUser.companyId, body, {
+      userId: currentUser.id,
+      source: "http_api",
+    });
     return userResponseSchema.parse(user);
   }
 }

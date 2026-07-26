@@ -27,7 +27,7 @@ export class MarkingCodesController {
     @Body() body: IssueMarkingCodeDto,
     @CurrentUser() currentUser: AuthenticatedRequestUser,
   ): Promise<MarkingCodeResponseDto> {
-    const markingCode = await this.honestSignService.issue(currentUser.companyId, body);
+    const markingCode = await this.honestSignService.issue(currentUser, body);
     return markingCodeResponseSchema.parse(markingCode);
   }
 
@@ -38,7 +38,7 @@ export class MarkingCodesController {
     @Body() body: TransitionMarkingCodeDto,
     @CurrentUser() currentUser: AuthenticatedRequestUser,
   ): Promise<MarkingCodeResponseDto> {
-    const markingCode = await this.honestSignService.apply(currentUser.companyId, id, body);
+    const markingCode = await this.honestSignService.apply(currentUser, id, body);
     return markingCodeResponseSchema.parse(markingCode);
   }
 
@@ -49,7 +49,7 @@ export class MarkingCodesController {
     @Body() body: TransitionMarkingCodeDto,
     @CurrentUser() currentUser: AuthenticatedRequestUser,
   ): Promise<MarkingCodeResponseDto> {
-    const markingCode = await this.honestSignService.introduce(currentUser.companyId, id, body);
+    const markingCode = await this.honestSignService.introduce(currentUser, id, body);
     return markingCodeResponseSchema.parse(markingCode);
   }
 
@@ -60,7 +60,7 @@ export class MarkingCodesController {
     @Body() body: RetireMarkingCodeDto,
     @CurrentUser() currentUser: AuthenticatedRequestUser,
   ): Promise<MarkingCodeResponseDto> {
-    const markingCode = await this.honestSignService.retire(currentUser.companyId, id, body);
+    const markingCode = await this.honestSignService.retire(currentUser, id, body);
     return markingCodeResponseSchema.parse(markingCode);
   }
 }
