@@ -1,10 +1,19 @@
-import { documentLinks, documents, type DbOrTx } from "@garmentos/db-schema";
-import { and, eq } from "drizzle-orm";
-import type { DocumentEntity, DocumentLink } from "../domain/document";
-import type { DocumentLinkRepository, DocumentRepository, NewDocumentInput, NewDocumentLinkInput } from "../application/ports";
+import { documentDerivatives, documentLinks, documents, type DbOrTx } from "@garmentos/db-schema";
+import { and, desc, eq } from "drizzle-orm";
+import type { DocumentDerivativeType, DocumentEntity, DocumentLink } from "../domain/document";
+import type {
+  DocumentDerivativeEntity,
+  DocumentDerivativeRepository,
+  DocumentLinkRepository,
+  DocumentRepository,
+  NewDocumentDerivativeInput,
+  NewDocumentInput,
+  NewDocumentLinkInput,
+} from "../application/ports";
 
 type DocumentRow = typeof documents.$inferSelect;
 type DocumentLinkRow = typeof documentLinks.$inferSelect;
+type DocumentDerivativeRow = typeof documentDerivatives.$inferSelect;
 
 function toDocument(row: DocumentRow): DocumentEntity {
   return {
@@ -19,6 +28,18 @@ function toDocument(row: DocumentRow): DocumentEntity {
     isCurrentVersion: row.isCurrentVersion,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
+  };
+}
+
+function toDocumentDerivative(row: DocumentDerivativeRow): DocumentDerivativeEntity {
+  return {
+    id: row.id,
+    documentId: row.documentId,
+    type: row.type,
+    content: row.content,
+    language: row.language,
+    generatedBy: row.generatedBy,
+    createdAt: row.createdAt,
   };
 }
 
@@ -76,5 +97,25 @@ export class DrizzleDocumentLinkRepository implements DocumentLinkRepository {
         ),
       );
     return rows.map(toDocumentLink);
+  }
+}
+
+export class DrizzleDocumentDerivativeRepository implements DocumentDerivativeRepository {
+  constructor(private readonly db: DbOrTx) {}
+
+  async create(input: NewDocumentDerivativeInput): Promise<DocumentDerivativeEntity> {
+    const [row] = await this.db.insert(documentDerivatives).values(input).returning();
+    if (!row) throw new Error("INSERT document_derivatives не вернул строку");
+    return toDocumentDerivative(row);
+  }
+
+  async findLatestByDocumentId(documentId: string, type: DocumentDerivativeType): Promise<DocumentDerivativeEntity | null> {
+    const [row] = await this.db
+      .select()
+      .from(documentDerivatives)
+      .where(and(eq(documentDerivatives.documentId, documentId), eq(documentDerivatives.type, type)))
+      .orderBy(desc(documentDerivatives.createdAt))
+      .limit(1);
+    return row ? toDocumentDerivative(row) : null;
   }
 }

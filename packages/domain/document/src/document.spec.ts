@@ -8,8 +8,10 @@ import { describe, expect, it } from "vitest";
 import { attachDocument } from "./application/attach-document";
 import { generateSpecificationDocument } from "./application/generate-specification-document";
 import { listDocumentsForEntity } from "./application/list-documents-for-entity";
-import type { DocumentRenderAdapter, SpecificationPdfData, StorageAdapter } from "./application/ports";
+import { regenerateSpecificationDocument } from "./application/regenerate-specification-document";
+import type { DocumentDerivativeEntity, DocumentDerivativeRepository, DocumentRenderAdapter, NewDocumentDerivativeInput, StorageAdapter } from "./application/ports";
 import { DomainError } from "./domain/errors";
+import { DEFAULT_SPECIFICATION_TEMPLATE, type SpecificationDocumentData, type SpecificationTemplateDefinition } from "./domain/specification-template";
 import { DrizzleDocumentLinkRepository, DrizzleDocumentRepository } from "./infrastructure/drizzle-document-repository";
 
 class RollbackTestTransaction extends Error {}
@@ -31,9 +33,9 @@ async function runInRolledBackTransaction(fn: (tx: DbOrTx) => Promise<void>): Pr
     });
 }
 
-// Тестовые двойники StorageAdapter/DocumentRenderAdapter — реальный S3/pdf-lib
-// не нужны для проверки доменной логики (тот же паттерн, что
-// plainTextVerifier в packages/domain/identity/src/rbac-auth.spec.ts).
+// Тестовые двойники StorageAdapter/DocumentRenderAdapter/DocumentDerivativeRepository
+// — реальный S3/pdf-lib не нужны для проверки доменной логики (тот же
+// паттерн, что plainTextVerifier в packages/domain/identity/src/rbac-auth.spec.ts).
 class FakeStorageAdapter implements StorageAdapter {
   public readonly uploaded: Array<{ key: string; contentType: string }> = [];
 
@@ -44,9 +46,64 @@ class FakeStorageAdapter implements StorageAdapter {
 }
 
 class FakeRenderer implements DocumentRenderAdapter {
-  renderSpecification(_data: SpecificationPdfData): Promise<Uint8Array> {
+  public readonly calls: Array<{ template: SpecificationTemplateDefinition; data: SpecificationDocumentData }> = [];
+
+  renderSpecification(template: SpecificationTemplateDefinition, data: SpecificationDocumentData): Promise<Uint8Array> {
+    this.calls.push({ template, data });
     return Promise.resolve(new Uint8Array([0x25, 0x50, 0x44, 0x46])); // "%PDF" — не настоящий PDF, просто узнаваемые байты
   }
+}
+
+class FakeDocumentDerivativeRepository implements DocumentDerivativeRepository {
+  private readonly rows: DocumentDerivativeEntity[] = [];
+
+  create(input: NewDocumentDerivativeInput): Promise<DocumentDerivativeEntity> {
+    const row: DocumentDerivativeEntity = {
+      id: `derivative-${this.rows.length + 1}`,
+      documentId: input.documentId,
+      type: input.type,
+      content: input.content,
+      language: input.language ?? null,
+      generatedBy: input.generatedBy ?? null,
+      createdAt: new Date(),
+    };
+    this.rows.push(row);
+    return Promise.resolve(row);
+  }
+
+  findLatestByDocumentId(documentId: string, type: string): Promise<DocumentDerivativeEntity | null> {
+    const match = [...this.rows].reverse().find((row) => row.documentId === documentId && row.type === type);
+    return Promise.resolve(match ?? null);
+  }
+}
+
+function buildSpecificationData(): SpecificationDocumentData {
+  return {
+    fields: {
+      contractNumber: "П-22-04",
+      contractDate: "22.04.2026",
+      customerName: 'ИП Гашова А.А.',
+      customerRepresentative: "ИП Гашова А. А.",
+      contractorName: 'ОсОО "Ак-Сарай Текстиль"',
+      contractorRepresentative: "Генерального директора Нормуродова О.А.",
+      contractorBasis: "Устава",
+      specNumber: "2",
+      specDate: "11.06.2026",
+      totalSumWords: "325 000 руб",
+      paymentTerms: "предоплата 70%",
+      deliveryDeadline: "30 июня 2026 года",
+      producerAddress: 'ОсОО "Ак-Сарай Текстиль", Кыргызская республика',
+      consignee: "ИП Гашов А.А.",
+      contractorSignerRole: "Генеральный директор",
+      contractorSignerName: "Нормуродов О.А.",
+      customerSignerName: "Гашов А.А.",
+    },
+    items: [
+      { name: "Двойка, Петроль", unit: "шт", size: "48-50", tnVed: "6112120000", quantity: "200", unitPrice: "720.00", sum: "144000.00" },
+      { name: "Двойка, Бордо", unit: "шт", size: "48-50", tnVed: "6112120000", quantity: "100", unitPrice: "720.00", sum: "72000.00" },
+    ],
+    totals: { quantity: "300", sum: "216000.00" },
+  };
 }
 
 describe("domain/document", () => {
@@ -92,28 +149,20 @@ describe("domain/document", () => {
     });
   });
 
-  it("generateSpecificationDocument рендерит PDF, загружает в хранилище и привязывает к production_order", async () => {
+  it("generateSpecificationDocument рендерит по шаблону, сохраняет исходные данные и привязывает к production_order", async () => {
     await runInRolledBackTransaction(async (tx) => {
       const company = await createCompany({ companies: new DrizzleCompanyRepository(tx) }, { name: "Бренд документов 3" });
       const documents = new DrizzleDocumentRepository(tx);
       const documentLinks = new DrizzleDocumentLinkRepository(tx);
+      const documentDerivatives = new FakeDocumentDerivativeRepository();
       const storage = new FakeStorageAdapter();
       const renderer = new FakeRenderer();
 
       const productionOrderId = "33333333-3333-3333-3333-333333333333";
-      const data: SpecificationPdfData = {
-        productName: "Двойка",
-        workshopName: "Цех №1",
-        variants: [
-          { size: "M", color: "Петроль", quantity: "1000" },
-          { size: "M", color: "Бордо", quantity: "500" },
-        ],
-        materials: [{ materialName: "Двухнитка", unit: "m", totalQuantity: "1725.00" }],
-        dueDate: null,
-      };
+      const data = buildSpecificationData();
 
       const result = await generateSpecificationDocument(
-        { documents, documentLinks, storage, renderer },
+        { documents, documentLinks, documentDerivatives, storage, renderer },
         { companyId: company.id, productionOrderId, uploadedBy: null, data },
       );
 
@@ -121,6 +170,7 @@ describe("domain/document", () => {
       expect(result.document.fileUrl).toContain("specifications/");
       expect(storage.uploaded).toHaveLength(1);
       expect(storage.uploaded[0]?.contentType).toBe("application/pdf");
+      expect(renderer.calls[0]?.template.id).toBe(DEFAULT_SPECIFICATION_TEMPLATE.id);
 
       const links = await listDocumentsForEntity(
         { documentLinks },
@@ -128,6 +178,20 @@ describe("domain/document", () => {
       );
       expect(links).toHaveLength(1);
       expect(links[0]?.source).toBe("ai");
+
+      const derivative = await documentDerivatives.findLatestByDocumentId(result.document.id, "structured_data");
+      expect(derivative).not.toBeNull();
+      expect((derivative?.content as { templateId: string }).templateId).toBe(DEFAULT_SPECIFICATION_TEMPLATE.id);
+
+      // "открыть старую спецификацию и пересоздать её в один клик" —
+      // требование владельца проекта 2026-07-26.
+      const regenerated = await regenerateSpecificationDocument(
+        { documents, documentLinks, documentDerivatives, storage, renderer },
+        { companyId: company.id, productionOrderId, uploadedBy: null, sourceDocumentId: result.document.id },
+      );
+      expect(regenerated.document.id).not.toBe(result.document.id);
+      expect(renderer.calls).toHaveLength(2);
+      expect(renderer.calls[1]?.data.items).toEqual(data.items);
     });
   });
 });

@@ -9,6 +9,11 @@ import { DomainError } from "./errors";
 // drizzle/0005_document_immutability_trigger.sql), не только соглашением.
 export type DocumentLinkSource = "ai" | "manual";
 
+// Совпадает с document_derivative_type в БД (packages/db-schema/src/schema/common.ts)
+// — в отличие от docType/entityType (свободный текст в остальной схеме),
+// это настоящий pgEnum, поэтому домен фиксирует тот же закрытый список.
+export type DocumentDerivativeType = "ocr_text" | "translation" | "structured_data" | "ai_summary";
+
 export interface DocumentEntity {
   id: string;
   companyId: string;
