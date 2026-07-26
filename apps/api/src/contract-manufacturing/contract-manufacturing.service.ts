@@ -3,6 +3,7 @@ import {
   confirmProductionOrder,
   createProductionOrderDraft,
   createWorkshop,
+  updateProductionOrderStatusFromWorkshop,
   type BomApprovalPort,
   type ProductionOrder,
   type ProductionOrderRepository,
@@ -36,5 +37,24 @@ export class ContractManufacturingService {
 
   async confirmProductionOrder(companyId: string, productionOrderId: string): Promise<ProductionOrder> {
     return confirmProductionOrder({ productionOrders: this.productionOrders }, { companyId, productionOrderId });
+  }
+
+  async findProductionOrderById(companyId: string, id: string): Promise<ProductionOrder | null> {
+    return this.productionOrders.findById(companyId, id);
+  }
+
+  async findWorkshopById(companyId: string, id: string): Promise<Workshop | null> {
+    return this.workshops.findById(companyId, id);
+  }
+
+  async updateProductionOrderStatusFromWorkshop(
+    companyId: string,
+    workshopId: string,
+    status: "in_progress" | "ready_for_pickup",
+  ): Promise<ProductionOrder> {
+    return updateProductionOrderStatusFromWorkshop(
+      { productionOrders: this.productionOrders },
+      { companyId, workshopId, status },
+    );
   }
 }

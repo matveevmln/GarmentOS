@@ -4,7 +4,7 @@ import {
   workshops,
   type DbOrTx,
 } from "@garmentos/db-schema";
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import type { Workshop } from "../domain/workshop";
 import type { ProductionOrder, ProductionOrderStatus, ProductionOrderVariant } from "../domain/production-order";
 import type {
@@ -160,6 +160,29 @@ export class DrizzleProductionOrderRepository implements ProductionOrderReposito
       .where(eq(productionOrders.id, id))
       .returning();
     if (!orderRow) throw new Error(`UPDATE production_orders не нашёл строку id=${id}`);
+
+    const variantRows = await this.db
+      .select()
+      .from(productionOrderVariants)
+      .where(eq(productionOrderVariants.productionOrderId, orderRow.id));
+
+    return toProductionOrder(orderRow, variantRows);
+  }
+
+  async findLatestActiveByWorkshop(companyId: string, workshopId: string): Promise<ProductionOrder | null> {
+    const [orderRow] = await this.db
+      .select()
+      .from(productionOrders)
+      .where(
+        and(
+          eq(productionOrders.companyId, companyId),
+          eq(productionOrders.workshopId, workshopId),
+          inArray(productionOrders.status, ["placed", "in_progress", "ready_for_pickup"]),
+        ),
+      )
+      .orderBy(desc(productionOrders.createdAt))
+      .limit(1);
+    if (!orderRow) return null;
 
     const variantRows = await this.db
       .select()

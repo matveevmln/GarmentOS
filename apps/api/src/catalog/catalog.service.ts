@@ -34,4 +34,20 @@ export class CatalogService {
   async createProductVariant(input: CreateProductVariantDto): Promise<ProductVariant> {
     return createProductVariant({ productVariants: this.productVariants }, input);
   }
+
+  async findProductById(companyId: string, id: string): Promise<Product | null> {
+    return this.products.findById(companyId, id);
+  }
+
+  async findProductByName(companyId: string, name: string): Promise<Product | null> {
+    return this.products.findByName(companyId, name);
+  }
+
+  async findProductVariant(productId: string, size: string, color: string): Promise<ProductVariant | null> {
+    return this.productVariants.findByProductSizeColor(productId, size, color);
+  }
+
+  async findProductVariantById(id: string): Promise<ProductVariant | null> {
+    return this.productVariants.findById(id);
+  }
 }

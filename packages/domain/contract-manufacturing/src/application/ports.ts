@@ -40,6 +40,11 @@ export interface ProductionOrderRepository {
   create(input: NewProductionOrderInput): Promise<ProductionOrder>;
   findById(companyId: string, id: string): Promise<ProductionOrder | null>;
   updateStatus(id: string, status: ProductionOrderStatus): Promise<ProductionOrder>;
+  // Нужен для обработки входящего статус-обновления от цеха через Telegram
+  // (Итерация 7) — сообщение не ссылается на конкретный productionOrderId
+  // (простой текстовый ответ, не структурированная команда), поэтому
+  // обновляется самый свежий незавершённый заказ этого цеха.
+  findLatestActiveByWorkshop(companyId: string, workshopId: string): Promise<ProductionOrder | null>;
 }
 
 // Порт в модуль BOM — узкий срез, структурно совместимый с

@@ -41,6 +41,11 @@ export class DrizzleCompanyRepository implements CompanyRepository {
     if (!row) throw new Error("INSERT companies не вернул строку");
     return toCompany(row);
   }
+
+  async findById(id: string): Promise<Company | null> {
+    const [row] = await this.db.select().from(companies).where(eq(companies.id, id)).limit(1);
+    return row ? toCompany(row) : null;
+  }
 }
 
 export class DrizzleUserRepository implements UserRepository {

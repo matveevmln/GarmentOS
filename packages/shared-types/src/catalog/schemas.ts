@@ -53,6 +53,11 @@ export const productResponseSchema = z.object({
 });
 export type ProductResponseDto = z.infer<typeof productResponseSchema>;
 
+export const findProductByNameQuerySchema = z.object({
+  name: z.string().min(1, "Название модели не может быть пустым"),
+});
+export type FindProductByNameQueryDto = z.infer<typeof findProductByNameQuerySchema>;
+
 export const createProductVariantSchema = z.object({
   productId: z.string().uuid(),
   size: z.string().min(1, "Размер SKU не может быть пустым"),

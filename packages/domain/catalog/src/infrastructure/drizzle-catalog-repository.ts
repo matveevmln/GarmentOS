@@ -1,5 +1,5 @@
 import { collections, products, productVariants, type DbOrTx } from "@garmentos/db-schema";
-import { and, eq } from "drizzle-orm";
+import { and, eq, ilike } from "drizzle-orm";
 import type { Collection } from "../domain/collection";
 import type { Product } from "../domain/product";
 import type { ProductVariant } from "../domain/product-variant";
@@ -108,6 +108,15 @@ export class DrizzleProductRepository implements ProductRepository {
       .limit(1);
     return row ? toProduct(row) : null;
   }
+
+  async findByName(companyId: string, name: string): Promise<Product | null> {
+    const [row] = await this.db
+      .select()
+      .from(products)
+      .where(and(eq(products.companyId, companyId), ilike(products.name, name)))
+      .limit(1);
+    return row ? toProduct(row) : null;
+  }
 }
 
 export class DrizzleProductVariantRepository implements ProductVariantRepository {
@@ -136,6 +145,11 @@ export class DrizzleProductVariantRepository implements ProductVariantRepository
         ),
       )
       .limit(1);
+    return row ? toProductVariant(row) : null;
+  }
+
+  async findById(id: string): Promise<ProductVariant | null> {
+    const [row] = await this.db.select().from(productVariants).where(eq(productVariants.id, id)).limit(1);
     return row ? toProductVariant(row) : null;
   }
 }

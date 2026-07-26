@@ -16,5 +16,8 @@ import { BomService } from "./bom.service";
       inject: [DATABASE_CONNECTION],
     },
   ],
+  // BomService нужен ai-production-assistant (поиск утверждённого BOM по
+  // модели, Итерация 7) — переиспользуется, не дублируется.
+  exports: [BomService],
 })
 export class BomModule {}

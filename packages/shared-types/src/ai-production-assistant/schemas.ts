@@ -22,3 +22,12 @@ export const parsedProductionRequestResponseSchema = z.object({
   items: z.array(parsedProductionRequestItemSchema),
 });
 export type ParsedProductionRequestResponseDto = z.infer<typeof parsedProductionRequestResponseSchema>;
+
+// workshopId передаётся явно, не резолвится AI из текста — текст сценария
+// Итерации 7 не называет цех, а придумывать его AI не имеет права
+// (docs/AI_PRODUCTION_ASSISTANT_ARCHITECTURE.md, раздел 2, пункт 4).
+export const createProductionOrderFromTextSchema = z.object({
+  text: z.string().min(1, "Текст запроса не может быть пустым"),
+  workshopId: z.string().uuid(),
+});
+export type CreateProductionOrderFromTextDto = z.infer<typeof createProductionOrderFromTextSchema>;

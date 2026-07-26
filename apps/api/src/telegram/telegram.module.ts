@@ -24,5 +24,8 @@ import { TELEGRAM_CLIENT } from "./telegram.tokens";
       },
     },
   ],
+  // TELEGRAM_CLIENT нужен ai-production-assistant (отправка сгенерированной
+  // спецификации цеху, Итерация 7) — тот же провайдер, не отдельный экземпляр.
+  exports: [TELEGRAM_CLIENT],
 })
 export class TelegramModule {}

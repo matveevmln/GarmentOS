@@ -32,5 +32,9 @@ import { CatalogService } from "./catalog.service";
       inject: [DATABASE_CONNECTION],
     },
   ],
+  // CatalogService нужен ai-production-assistant (резолв модели по имени +
+  // SKU по цвету/размеру, Итерация 7) — тот же переиспользуемый сервис, не
+  // отдельный.
+  exports: [CatalogService],
 })
 export class CatalogModule {}

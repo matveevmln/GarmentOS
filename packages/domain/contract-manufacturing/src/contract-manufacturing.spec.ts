@@ -19,6 +19,7 @@ import { confirmProductionOrder } from "./application/confirm-production-order";
 import { createProductionOrderDraft } from "./application/create-production-order";
 import { createWorkshop } from "./application/create-workshop";
 import type { BomApprovalPort } from "./application/ports";
+import { updateProductionOrderStatusFromWorkshop } from "./application/update-production-order-status-from-workshop";
 import { DomainError } from "./domain/errors";
 import {
   DrizzleProductionOrderRepository,
@@ -176,6 +177,65 @@ describe("domain/contract-manufacturing", () => {
           },
         ),
       ).rejects.toThrow(/не утверждён/);
+    });
+  });
+
+  it("обновляет статус самого свежего активного заказа цеха по простому текстовому ответу (Telegram, Итерация 7)", async () => {
+    await runInRolledBackTransaction(async (tx) => {
+      const { company, product, variant, boms, approvedBom, workshops, workshop } = await seedApprovedBomAndVariant(tx);
+      const productionOrders = new DrizzleProductionOrderRepository(tx);
+      const bomApproval = makeBomApprovalPort(boms);
+
+      const draft = await createProductionOrderDraft(
+        { productionOrders, workshops, bomApproval },
+        {
+          companyId: company.id,
+          productId: product.id,
+          bomId: approvedBom.id,
+          workshopId: workshop.id,
+          plannedQuantity: 100,
+          agreedUnitPrice: 450,
+          variants: [{ productVariantId: variant.id, quantity: 100 }],
+        },
+      );
+      await confirmProductionOrder({ productionOrders }, { companyId: company.id, productionOrderId: draft.id });
+
+      const inProgress = await updateProductionOrderStatusFromWorkshop(
+        { productionOrders },
+        { companyId: company.id, workshopId: workshop.id, status: "in_progress" },
+      );
+      expect(inProgress.id).toBe(draft.id);
+      expect(inProgress.status).toBe("in_progress");
+
+      const readyForPickup = await updateProductionOrderStatusFromWorkshop(
+        { productionOrders },
+        { companyId: company.id, workshopId: workshop.id, status: "ready_for_pickup" },
+      );
+      expect(readyForPickup.status).toBe("ready_for_pickup");
+
+      // "в работе" после "готово к отгрузке" — недопустимый откат назад.
+      await expect(
+        updateProductionOrderStatusFromWorkshop(
+          { productionOrders },
+          { companyId: company.id, workshopId: workshop.id, status: "in_progress" },
+        ),
+      ).rejects.toThrow(DomainError);
+    });
+  });
+
+  it("бросает ошибку, если у цеха нет ни одного активного заказа", async () => {
+    await runInRolledBackTransaction(async (tx) => {
+      const company = await createCompany({ companies: new DrizzleCompanyRepository(tx) }, { name: "Бренд без заказов" });
+      const workshops = new DrizzleWorkshopRepository(tx);
+      const workshop = await createWorkshop({ workshops }, { companyId: company.id, name: "Цех без заказов" });
+      const productionOrders = new DrizzleProductionOrderRepository(tx);
+
+      await expect(
+        updateProductionOrderStatusFromWorkshop(
+          { productionOrders },
+          { companyId: company.id, workshopId: workshop.id, status: "in_progress" },
+        ),
+      ).rejects.toThrow(DomainError);
     });
   });
 });

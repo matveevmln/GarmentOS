@@ -19,6 +19,7 @@ import { FinanceModule } from "./finance/finance.module";
 import { NotificationsModule } from "./notifications/notifications.module";
 import { TelegramModule } from "./telegram/telegram.module";
 import { AiProductionAssistantModule } from "./ai-production-assistant/ai-production-assistant.module";
+import { DocumentModule } from "./document/document.module";
 
 // Presentation-слой (docs/ARCHITECTURE.md, п.2). Доменные модули
 // (packages/domain/*) подключаются сюда по мере реализации итераций
@@ -41,6 +42,7 @@ import { AiProductionAssistantModule } from "./ai-production-assistant/ai-produc
     FinanceModule,
     NotificationsModule,
     TelegramModule,
+    DocumentModule,
     AiProductionAssistantModule,
   ],
   providers: [

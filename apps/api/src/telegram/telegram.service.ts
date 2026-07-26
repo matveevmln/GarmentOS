@@ -4,10 +4,22 @@ import { linkWorkshopTelegramChat, type WorkshopRepository } from "@garmentos/do
 import { and, eq } from "drizzle-orm";
 import { DATABASE_CONNECTION } from "../database/database.module";
 import { WORKSHOP_REPOSITORY } from "../contract-manufacturing/contract-manufacturing.tokens";
+import { ContractManufacturingService } from "../contract-manufacturing/contract-manufacturing.service";
 import { TelegramInviteCodeRepository } from "./telegram-invite-code.repository";
 import { TELEGRAM_CLIENT } from "./telegram.tokens";
 import type { TelegramClient } from "./telegram-client";
 import type { TelegramUpdate } from "./telegram-update.schema";
+
+// Ключевые слова простого текстового ответа цеха → статус заказа
+// (docs/TELEGRAM_INTEGRATION_ARCHITECTURE.md, раздел 4, Итерация 7) — не
+// NLU, просто самый узкий набор, достаточный для сценария. Свободный текст
+// вне этих слов не меняет статус (не гадаем).
+function interpretWorkshopStatusUpdate(text: string): "in_progress" | "ready_for_pickup" | null {
+  const normalized = text.toLowerCase();
+  if (/готов/u.test(normalized)) return "ready_for_pickup";
+  if (/в работ|начал|приступ/u.test(normalized)) return "in_progress";
+  return null;
+}
 
 export interface CreateWorkshopInviteResult {
   code: string;
@@ -27,6 +39,7 @@ export class TelegramService {
     @Inject(WORKSHOP_REPOSITORY) private readonly workshops: WorkshopRepository,
     @Inject(TELEGRAM_CLIENT) private readonly telegramClient: TelegramClient,
     private readonly inviteCodes: TelegramInviteCodeRepository,
+    private readonly contractManufacturingService: ContractManufacturingService,
   ) {}
 
   async createWorkshopInvite(companyId: string, workshopId: string): Promise<CreateWorkshopInviteResult> {
@@ -59,7 +72,38 @@ export class TelegramService {
       return;
     }
 
+    const workshop = await this.workshops.findByTelegramChatId(chatId);
+    if (workshop) {
+      await this.handleWorkshopReply(workshop.companyId, workshop.id, chatId, text);
+      return;
+    }
+
     await this.recordIncomingMessage(chatId, text, update.update_id);
+  }
+
+  // Простой входящий ответ цеха → обновление статуса самого свежего активного
+  // заказа этого цеха (docs/TELEGRAM_INTEGRATION_ARCHITECTURE.md, раздел 4).
+  // Если сообщение не распознано как статус-обновление или у цеха нет
+  // активных заказов — просто подтверждаем получение, ничего не меняя (не
+  // гадаем финансово значимые решения, PRINCIPLES.md, принцип 17).
+  private async handleWorkshopReply(companyId: string, workshopId: string, chatId: string, text: string): Promise<void> {
+    const status = interpretWorkshopStatusUpdate(text);
+    if (!status) {
+      await this.telegramClient.sendMessage(chatId, "Принято.");
+      return;
+    }
+
+    try {
+      const order = await this.contractManufacturingService.updateProductionOrderStatusFromWorkshop(
+        companyId,
+        workshopId,
+        status,
+      );
+      await this.telegramClient.sendMessage(chatId, `Статус заказа обновлён: ${order.status}.`);
+    } catch (error) {
+      this.logger.warn(`Не удалось обновить статус заказа для цеха ${workshopId}: ${String(error)}`);
+      await this.telegramClient.sendMessage(chatId, "Принято.");
+    }
   }
 
   private async handleInviteStart(chatId: string, code: string): Promise<void> {

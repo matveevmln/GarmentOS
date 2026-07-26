@@ -1,4 +1,4 @@
-import { Body, Controller, Param, Post } from "@nestjs/common";
+import { Body, Controller, Get, HttpStatus, NotFoundException, Param, Post } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
 import { createZodDto } from "nestjs-zod";
 import {
@@ -40,6 +40,28 @@ export class ProductionOrdersController {
       currentUser.companyId,
       id,
     );
+    return productionOrderResponseSchema.parse(productionOrder);
+  }
+
+  // Показ заказа пошива и его статуса — минимум, нужный вертикальному
+  // сценарию Итерации 7 (docs/ROADMAP.md), не read-слой для всех операций.
+  @RequirePermissions("contract_manufacturing.read")
+  @Get(":id")
+  async findById(
+    @Param("id") id: string,
+    @CurrentUser() currentUser: AuthenticatedRequestUser,
+  ): Promise<ProductionOrderResponseDto> {
+    const productionOrder = await this.contractManufacturingService.findProductionOrderById(
+      currentUser.companyId,
+      id,
+    );
+    if (!productionOrder) {
+      throw new NotFoundException({
+        statusCode: HttpStatus.NOT_FOUND,
+        code: "PRODUCTION_ORDER_NOT_FOUND",
+        message: `Заказ пошива ${id} не найден`,
+      });
+    }
     return productionOrderResponseSchema.parse(productionOrder);
   }
 }

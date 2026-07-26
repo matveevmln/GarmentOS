@@ -30,6 +30,11 @@ export interface ProductRepository {
   create(input: NewProductInput): Promise<Product>;
   findByCode(companyId: string, code: string): Promise<Product | null>;
   findById(companyId: string, id: string): Promise<Product | null>;
+  // Регистронезависимый поиск по названию модели — нужен для разбора
+  // текстового производственного запроса (Итерация 7): AI не имеет права
+  // придумать модель, только найти уже существующую по имени
+  // (docs/AI_PRODUCTION_ASSISTANT_ARCHITECTURE.md, раздел 2, пункт 4).
+  findByName(companyId: string, name: string): Promise<Product | null>;
 }
 
 export interface NewProductVariantInput {
@@ -45,4 +50,8 @@ export interface ProductVariantRepository {
   create(input: NewProductVariantInput): Promise<ProductVariant>;
   findBySkuCode(skuCode: string): Promise<ProductVariant | null>;
   findByProductSizeColor(productId: string, size: string, color: string): Promise<ProductVariant | null>;
+  // Заказ пошива хранит только productVariantId — нужен обратный резолв
+  // size/color для заполнения строк спецификации (Итерация 7, Document
+  // Template Engine).
+  findById(id: string): Promise<ProductVariant | null>;
 }

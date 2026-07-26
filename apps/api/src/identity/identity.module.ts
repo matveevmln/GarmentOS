@@ -54,6 +54,8 @@ import { IdentityService } from "./identity.service";
       inject: [DATABASE_CONNECTION],
     },
   ],
-  exports: [USER_REPOSITORY, USER_ROLE_REPOSITORY, ROLE_REPOSITORY, PERMISSION_REPOSITORY, COMPANY_REPOSITORY],
+  // IdentityService нужен ai-production-assistant (реквизиты компании для
+  // шапки спецификации, Итерация 7) — переиспользуется.
+  exports: [USER_REPOSITORY, USER_ROLE_REPOSITORY, ROLE_REPOSITORY, PERMISSION_REPOSITORY, COMPANY_REPOSITORY, IdentityService],
 })
 export class IdentityModule {}

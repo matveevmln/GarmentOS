@@ -26,7 +26,9 @@ import { ContractManufacturingService } from "./contract-manufacturing.service";
   ],
   // WORKSHOP_REPOSITORY нужен apps/api/src/telegram (привязка чата цеха к
   // Telegram, docs/TELEGRAM_INTEGRATION_ARCHITECTURE.md) — тот же провайдер,
-  // не отдельный экземпляр репозитория.
-  exports: [WORKSHOP_REPOSITORY],
+  // не отдельный экземпляр репозитория. ContractManufacturingService нужен
+  // ai-production-assistant (создание заказа из разобранного запроса + показ
+  // заказа, Итерация 7) — переиспользуется, не дублируется.
+  exports: [WORKSHOP_REPOSITORY, ContractManufacturingService],
 })
 export class ContractManufacturingModule {}

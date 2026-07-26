@@ -14,6 +14,9 @@ export interface NewCompanyInput {
 
 export interface CompanyRepository {
   create(input: NewCompanyInput): Promise<Company>;
+  // Реквизиты компании (legalName/inn) нужны для заполнения шапки
+  // сгенерированной спецификации (Итерация 7, Document Template Engine).
+  findById(id: string): Promise<Company | null>;
 }
 
 export interface NewUserInput {

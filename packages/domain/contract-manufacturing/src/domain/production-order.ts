@@ -103,3 +103,32 @@ export function assertCanConfirm(status: ProductionOrderStatus): void {
     );
   }
 }
+
+// Статус, который цех сообщает сам (простой текстовый ответ в Telegram,
+// docs/TELEGRAM_INTEGRATION_ARCHITECTURE.md, раздел 4) — узкий набор,
+// достаточный для Итерации 7: "начали шить"/"готово". "received" — это
+// приёмка на нашем складе, подтверждается нашей стороной, не цехом; терминальные
+// статусы (received/cancelled) не переоткрываются входящим сообщением.
+export function assertCanUpdateStatusFromWorkshop(
+  current: ProductionOrderStatus,
+  next: "in_progress" | "ready_for_pickup",
+): void {
+  if (current === "received" || current === "cancelled") {
+    throw new DomainError(
+      `Заказ пошива в статусе "${current}" — обновление статуса цехом больше не применяется`,
+      "PRODUCTION_ORDER_INVALID_STATUS_TRANSITION",
+    );
+  }
+  if (current === "draft") {
+    throw new DomainError(
+      "Заказ пошива ещё черновик — цех не может обновлять статус заказа, который ему не подтверждён",
+      "PRODUCTION_ORDER_INVALID_STATUS_TRANSITION",
+    );
+  }
+  if (next === "in_progress" && current !== "placed") {
+    throw new DomainError(
+      `Нельзя перевести заказ пошива в "в работе" из статуса "${current}"`,
+      "PRODUCTION_ORDER_INVALID_STATUS_TRANSITION",
+    );
+  }
+}

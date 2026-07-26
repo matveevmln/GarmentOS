@@ -83,4 +83,8 @@ export class IdentityService {
       afterJson: { roleCode },
     });
   }
+
+  async findCompanyById(id: string): Promise<Company | null> {
+    return this.companies.findById(id);
+  }
 }

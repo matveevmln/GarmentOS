@@ -32,6 +32,11 @@ export {
   type LinkWorkshopTelegramChatDeps,
   type LinkWorkshopTelegramChatInput,
 } from "./application/link-workshop-telegram-chat";
+export {
+  updateProductionOrderStatusFromWorkshop,
+  type UpdateProductionOrderStatusFromWorkshopDeps,
+  type UpdateProductionOrderStatusFromWorkshopInput,
+} from "./application/update-production-order-status-from-workshop";
 
 export {
   DrizzleProductionOrderRepository,
