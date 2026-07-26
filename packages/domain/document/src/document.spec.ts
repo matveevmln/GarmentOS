@@ -82,27 +82,22 @@ function buildSpecificationData(): SpecificationDocumentData {
     fields: {
       contractNumber: "П-22-04",
       contractDate: "22.04.2026",
-      customerName: 'ИП Гашова А.А.',
-      customerRepresentative: "ИП Гашова А. А.",
+      customerName: "ИП Гашов А.А.",
       contractorName: 'ОсОО "Ак-Сарай Текстиль"',
-      contractorRepresentative: "Генерального директора Нормуродова О.А.",
-      contractorBasis: "Устава",
-      specNumber: "2",
-      specDate: "11.06.2026",
-      totalSumWords: "325 000 руб",
-      paymentTerms: "предоплата 70%",
-      deliveryDeadline: "30 июня 2026 года",
-      producerAddress: 'ОсОО "Ак-Сарай Текстиль", Кыргызская республика',
-      consignee: "ИП Гашов А.А.",
+      specNumber: "1",
+      paymentTerms:
+        "70% стоимости товара, указанной в спецификации, оплачиваются Заказчиком в течение 3 (трёх) рабочих дней после получения счёта от Исполнителя.",
+      deliveryDeadline: "30 июня 2026 г.",
+      deliveryMethod: "Самовывоз.",
       contractorSignerRole: "Генеральный директор",
       contractorSignerName: "Нормуродов О.А.",
       customerSignerName: "Гашов А.А.",
     },
     items: [
-      { name: "Двойка, Петроль", unit: "шт", size: "48-50", tnVed: "6112120000", quantity: "200", unitPrice: "720.00", sum: "144000.00" },
-      { name: "Двойка, Бордо", unit: "шт", size: "48-50", tnVed: "6112120000", quantity: "100", unitPrice: "720.00", sum: "72000.00" },
+      { name: "Двойка, Петроль", unit: "шт", size: "48-50", quantity: "200", unitPrice: "720,00", sum: "144 000,00" },
+      { name: "Двойка, Бордо", unit: "шт", size: "48-50", quantity: "100", unitPrice: "720,00", sum: "72 000,00" },
     ],
-    totals: { quantity: "300", sum: "216000.00" },
+    totals: { quantity: "300", sum: "216 000,00" },
   };
 }
 

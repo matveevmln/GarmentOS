@@ -9,6 +9,7 @@ import { IdentityService } from "../identity/identity.service";
 import type { TelegramClient } from "../telegram/telegram-client";
 import { TELEGRAM_CLIENT } from "../telegram/telegram.tokens";
 import { ProductionRequestService } from "./production-request.service";
+import { formatRuAmount, formatRuQuantity } from "./ru-number-format";
 
 // Форма {message, code} — распознаётся DomainExceptionFilter по duck typing
 // (apps/api/src/common/domain-exception.filter.ts), тот же паттерн, что
@@ -134,24 +135,24 @@ export class ProductionOrderOrchestrationService {
 
     const unitPrice = Number(order.agreedUnitPrice);
     const items: SpecificationLineItem[] = [];
+    let totalQuantity = 0;
+    let totalSum = 0;
     for (const variant of order.variants) {
       const productVariant = await this.catalogService.findProductVariantById(variant.productVariantId);
       if (!productVariant) continue;
       const quantity = Number(variant.quantity);
+      const sum = quantity * unitPrice;
+      totalQuantity += quantity;
+      totalSum += sum;
       items.push({
         name: `${product.name}, ${productVariant.color}`,
         unit: "шт",
         size: productVariant.size,
-        // ТН ВЭД не моделируется на уровне SKU сегодня — оставлено пустым,
-        // не придумывается (заполняется вручную при необходимости).
-        tnVed: "",
-        quantity: String(quantity),
-        unitPrice: unitPrice.toFixed(2),
-        sum: (quantity * unitPrice).toFixed(2),
+        quantity: formatRuQuantity(quantity),
+        unitPrice: formatRuAmount(unitPrice),
+        sum: formatRuAmount(sum),
       });
     }
-    const totalQuantity = items.reduce((sum, item) => sum + Number(item.quantity), 0);
-    const totalSum = items.reduce((sum, item) => sum + Number(item.sum), 0);
 
     // Реквизиты договора (номер/дата контракта, условия оплаты) не
     // моделируются как отдельная сущность сегодня (glossary,
@@ -162,23 +163,17 @@ export class ProductionOrderOrchestrationService {
         contractNumber: "",
         contractDate: "",
         customerName: company.legalName ?? company.name,
-        customerRepresentative: "",
         contractorName: workshop.name,
-        contractorRepresentative: "",
-        contractorBasis: "",
         specNumber: order.id.slice(0, 8),
-        specDate: new Date().toLocaleDateString("ru-RU"),
-        totalSumWords: `${totalSum.toFixed(2)} руб`,
         paymentTerms: "",
         deliveryDeadline: order.dueDate ?? "",
-        producerAddress: workshop.contactInfo ?? "",
-        consignee: company.legalName ?? company.name,
+        deliveryMethod: "",
         contractorSignerRole: "",
         contractorSignerName: "",
         customerSignerName: "",
       },
       items,
-      totals: { quantity: String(totalQuantity), sum: totalSum.toFixed(2) },
+      totals: { quantity: formatRuQuantity(totalQuantity), sum: formatRuAmount(totalSum) },
     };
 
     const result = await this.documentService.generateSpecification(companyId, productionOrderId, uploadedBy, data);

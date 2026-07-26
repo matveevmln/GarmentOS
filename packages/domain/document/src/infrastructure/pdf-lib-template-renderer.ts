@@ -125,13 +125,12 @@ function drawTable(ctx: DrawContext, template: SpecificationTemplateDefinition, 
       name: item.name,
       unit: item.unit,
       size: item.size,
-      tnVed: item.tnVed,
       quantity: item.quantity,
       unitPrice: item.unitPrice,
       sum: item.sum,
     });
   });
-  drawDataRow({ name: "Итого:", quantity: data.totals.quantity, sum: data.totals.sum }, true);
+  drawDataRow({ name: "Итого", quantity: data.totals.quantity, sum: data.totals.sum }, true);
   ctx.y -= 12;
 }
 
@@ -144,34 +143,40 @@ export class PdfLibTemplateRenderer implements DocumentRenderAdapter {
 
     const ctx: DrawContext = { pdfDoc, font, boldFont, page: pdfDoc.addPage([PAGE_WIDTH, PAGE_HEIGHT]), y: PAGE_HEIGHT - MARGIN };
 
-    for (const line of template.headerLines) {
-      drawParagraph(ctx, applyPlaceholders(line, data.fields), { align: "right", size: 10 });
+    // Заголовок — три центрированные строки жирным (эталон 2026-07-26), без
+    // отдельного правого блока реквизитов сверху.
+    for (const line of template.titleLines) {
+      drawParagraph(ctx, applyPlaceholders(line, data.fields), { bold: true, size: 12, align: "center", gapAfter: 2 });
     }
     ctx.y -= 10;
-    drawParagraph(ctx, applyPlaceholders(template.title, data.fields), { bold: true, size: 13, align: "center", gapAfter: 14 });
     drawParagraph(ctx, applyPlaceholders(template.introParagraph, data.fields), { gapAfter: 16 });
 
     drawTable(ctx, template, data);
 
     for (const line of template.footerLines) {
-      drawParagraph(ctx, applyPlaceholders(line, data.fields), { gapAfter: 4 });
+      drawParagraph(ctx, applyPlaceholders(line, data.fields), { gapAfter: 6 });
     }
-    ctx.y -= 24;
+    ctx.y -= 20;
 
     // Подписи без печатей — только места под подпись (требование владельца
-    // проекта 2026-07-26: "без печатей, без подписей, места под подписи оставить").
-    ensureSpace(ctx, 90);
+    // проекта 2026-07-26: "без печатей, без подписей, места под подписи
+    // оставить"). Заголовок → название стороны → пустое место под подпись/
+    // печать → должность+ФИО → "М.П." (структура эталона).
+    ensureSpace(ctx, 110);
     const columnWidth = CONTENT_WIDTH / 2;
     const signatureTop = ctx.y;
     for (const [index, block] of [template.signatures.left, template.signatures.right].entries()) {
       const x = MARGIN + index * columnWidth;
-      ctx.page.drawText(block.roleLine, { x, y: signatureTop, size: 11, font: boldFont, color: rgb(0, 0, 0) });
-      let lineY = signatureTop - 18;
-      for (const line of applyPlaceholders(block.nameLine, data.fields).split("\n")) {
-        ctx.page.drawText(line, { x, y: lineY, size: 10, font, color: rgb(0, 0, 0) });
+      let lineY = signatureTop;
+      ctx.page.drawText(block.headerLine, { x, y: lineY, size: 10.5, font: boldFont, color: rgb(0, 0, 0) });
+      lineY -= 15;
+      ctx.page.drawText(applyPlaceholders(block.companyLine, data.fields), { x, y: lineY, size: 10, font, color: rgb(0, 0, 0) });
+      lineY -= 34; // пустое место под подпись/печать
+      for (const line of block.nameLines) {
+        ctx.page.drawText(applyPlaceholders(line, data.fields), { x, y: lineY, size: 10, font, color: rgb(0, 0, 0) });
         lineY -= 15;
       }
-      ctx.page.drawLine({ start: { x, y: lineY - 10 }, end: { x: x + columnWidth - 20, y: lineY - 10 }, thickness: 0.75, color: rgb(0, 0, 0) });
+      ctx.page.drawText(block.stampLabel, { x, y: lineY, size: 10, font, color: rgb(0, 0, 0) });
     }
 
     return pdfDoc.save();

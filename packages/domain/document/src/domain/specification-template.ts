@@ -9,7 +9,7 @@
 // получают разные SpecificationTemplateDefinition (раздел 6 требования),
 // рендерер (infrastructure/pdf-lib-template-renderer.ts) не меняется.
 
-export type SpecificationColumnKey = "index" | "name" | "unit" | "size" | "tnVed" | "quantity" | "unitPrice" | "sum";
+export type SpecificationColumnKey = "index" | "name" | "unit" | "size" | "quantity" | "unitPrice" | "sum";
 
 export interface SpecificationTemplateColumn {
   key: SpecificationColumnKey;
@@ -18,9 +18,15 @@ export interface SpecificationTemplateColumn {
   align: "left" | "center" | "right";
 }
 
+// Блок подписи — точно повторяет эталон (2026-07-26): заголовок ("Исполнитель:"/
+// "Заказчик:") → название стороны → пустое место под подпись/печать (без
+// самих печатей/подписей — требование владельца проекта) → должность+ФИО
+// подписанта → "М.П.".
 export interface SpecificationSignatureBlock {
-  roleLine: string; // например "Исполнитель:" — статический текст, не шаблонизируется
-  nameLine: string; // например "{{contractorSignerRole}}\n{{contractorSignerName}}"
+  headerLine: string;
+  companyLine: string;
+  nameLines: string[];
+  stampLabel: string;
 }
 
 export interface SpecificationTemplateDefinition {
@@ -28,9 +34,10 @@ export interface SpecificationTemplateDefinition {
   version: number;
   name: string;
   // Каждая строка — с {{placeholder}}, подставляется из
-  // SpecificationDocumentData.fields (raздел ниже).
-  headerLines: string[];
-  title: string;
+  // SpecificationDocumentData.fields (раздел ниже). Заголовочный блок —
+  // 3 центрированные строки (номер/дата спецификации + стороны), без
+  // отдельного правого блока реквизитов сверху (эталон 2026-07-26).
+  titleLines: string[];
   introParagraph: string;
   table: { columns: SpecificationTemplateColumn[] };
   footerLines: string[];
@@ -41,7 +48,6 @@ export interface SpecificationLineItem {
   name: string;
   unit: string;
   size: string;
-  tnVed: string;
   quantity: string;
   unitPrice: string;
   sum: string;
@@ -58,50 +64,54 @@ export function applyPlaceholders(text: string, fields: Record<string, string>):
 }
 
 // Эталонный шаблон (docs/DOCUMENT_ENGINE_ARCHITECTURE.md) — структура точно
-// повторяет образец, присланный владельцем проекта: приложение к договору,
-// номер/дата спецификации, стороны, таблица (Товары/Ед.измер./Размер/ТН
-// ВЭД/Кол-во/Цена/Сумма) с итоговой строкой, условия оплаты и допустимое
-// отклонение, срок поставки, реквизиты производителя/грузополучателя,
-// подписи без печатей (места под подпись остаются пустыми — раздел 4
-// требования: "без печатей, без подписей, места под подписи оставить").
+// повторяет образец, присланный владельцем проекта 2026-07-26 (спецификация
+// №1 к договору № П-22-04, ОсОО "Ак-Сарай Текстиль" / ИП Гашов А.А.): заголовок
+// в три строки, вводный пункт "1.", таблица (Товары/Ед.измер./Размер/Кол-во/
+// Цена/Сумма) без ТН ВЭД, итоговая строка, пункты 2-6 (условия оплаты, сроки
+// и способ поставки, экземпляры на русском языке, вступление в силу), подписи
+// без печатей (только место под подпись).
 export const DEFAULT_SPECIFICATION_TEMPLATE: SpecificationTemplateDefinition = {
   id: "default-ru",
-  version: 1,
+  version: 2,
   name: "Спецификация к договору пошива (RU, по умолчанию)",
-  headerLines: [
-    "Приложение к договору № {{contractNumber}}, от {{contractDate}}",
-    'Между {{customerName}} и {{contractorName}}',
+  titleLines: [
+    "Спецификация №{{specNumber}} к договору № {{contractNumber}}",
+    "от {{contractDate}} г.",
+    "Между {{contractorName}} и {{customerName}}",
   ],
-  title: "СПЕЦИФИКАЦИЯ №{{specNumber}} от {{specDate}} г.",
   introParagraph:
-    'Заказчик в лице {{customerRepresentative}}, действующего на основании договора № {{contractNumber}} от {{contractDate}} г., ' +
-    'именуемый в дальнейшем "Заказчик", с одной стороны, и Исполнитель - {{contractorName}} в лице {{contractorRepresentative}}, ' +
-    'действующего на основании {{contractorBasis}}, именуемое в дальнейшем "Исполнитель", с другой стороны, ' +
-    "заключили настоящую Спецификацию о нижеследующем:",
+    "1. В соответствии с Договором № {{contractNumber}} от {{contractDate}} г., {{contractorName}} (Далее - Исполнитель) " +
+    "поставляет, а {{customerName}} (Далее - Заказчик) оплачивает следующие товары:",
   table: {
     columns: [
-      { key: "index", label: "№", width: 28, align: "center" },
-      { key: "name", label: "Товары", width: 175, align: "left" },
-      { key: "unit", label: "Ед. измер.", width: 55, align: "center" },
+      { key: "index", label: "№", width: 25, align: "center" },
+      { key: "name", label: "Товары", width: 190, align: "left" },
+      { key: "unit", label: "Ед. измер.", width: 45, align: "center" },
       { key: "size", label: "Размер", width: 55, align: "center" },
-      { key: "tnVed", label: "ТН ВЭД", width: 70, align: "center" },
-      { key: "quantity", label: "Кол-во", width: 50, align: "right" },
-      { key: "unitPrice", label: "Цена (рубль)", width: 65, align: "right" },
-      { key: "sum", label: "Сумма (рубль)", width: 70, align: "right" },
+      { key: "quantity", label: "Кол-во", width: 45, align: "right" },
+      { key: "unitPrice", label: "Цена (руб)", width: 65, align: "right" },
+      { key: "sum", label: "Сумма (руб)", width: 80, align: "right" },
     ],
   },
   footerLines: [
-    "Общая сумма Спецификации №{{specNumber}} составляет: {{totalSumWords}}",
-    "Условия оплаты: {{paymentTerms}}",
-    "±10% отклонение: Допускается отклонение фактического количества товара от указанного в настоящей Спецификации в пределах ±10% без составления дополнительного соглашения.",
-    "Период поставки: до {{deliveryDeadline}}.",
-    "Производитель: {{producerAddress}}.",
-    "Грузополучатель: {{consignee}}.",
-    "Товар ненадлежащего качества подлежит возврату Исполнителю и повторному пошиву за счёт Исполнителя.",
-    "Настоящая спецификация №{{specNumber}} является неотъемлемой частью к Договору № {{contractNumber}}, от {{contractDate}} г.",
+    "2. Условия платежа: {{paymentTerms}}",
+    "3. Сроки поставки: {{deliveryDeadline}}",
+    "4. Способ доставки товаров: {{deliveryMethod}}",
+    "5. Настоящая Спецификация составлена в двух экземплярах для каждой стороны на русском языке, причём оба текста аутентичны.",
+    "6. Настоящая Спецификация вступает в силу с момента её подписания.",
   ],
   signatures: {
-    left: { roleLine: "Исполнитель:", nameLine: "{{contractorName}}\n\n{{contractorSignerRole}}\n{{contractorSignerName}}" },
-    right: { roleLine: "Заказчик:", nameLine: "{{customerName}}\n\n{{customerSignerName}}" },
+    left: {
+      headerLine: "Исполнитель:",
+      companyLine: "{{contractorName}}",
+      nameLines: ["{{contractorSignerRole}}", "{{contractorSignerName}}"],
+      stampLabel: "М.П.",
+    },
+    right: {
+      headerLine: "Заказчик:",
+      companyLine: "{{customerName}}",
+      nameLines: ["{{customerSignerName}}"],
+      stampLabel: "М.П.",
+    },
   },
 };
