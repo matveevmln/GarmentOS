@@ -12,6 +12,10 @@ export interface CreateWorkshopInput {
   // (docs/INBOX_ARCHITECTURE.md, раздел 2.1) — тот же use case для AI и
   // человека (PRINCIPLES.md, принцип 15).
   status?: WorkshopStatus;
+  // Рамочный договор с цехом — если ещё не заключён/не введён, остаётся
+  // пустым (не изобретается); спецификации нумеруются относительно него.
+  contractNumber?: string;
+  contractDate?: string;
   createdBy?: string;
 }
 
@@ -30,6 +34,8 @@ export async function createWorkshop(deps: CreateWorkshopDeps, input: CreateWork
     contactInfo: input.contactInfo?.trim() ?? null,
     specialization: input.specialization?.trim() ?? null,
     status: input.status ?? "active",
+    contractNumber: input.contractNumber?.trim() ?? null,
+    contractDate: input.contractDate?.trim() ?? null,
     createdBy: input.createdBy ?? null,
   });
 }

@@ -17,6 +17,12 @@ export interface Workshop {
   // Telegram (docs/TELEGRAM_INTEGRATION_ARCHITECTURE.md) — Bot API не
   // позволяет проактивно написать в чат, который не взаимодействовал с ботом.
   telegramChatId: string | null;
+  // Рамочный договор с этим цехом — спецификации нумеруются как приложения
+  // к нему (эталон 2026-07-26: "Спецификация №N к договору №X от Y г.").
+  // nullable, пока договор не заведён — не изобретается.
+  contractNumber: string | null;
+  contractDate: string | null;
+  nextSpecificationNumber: number;
   createdBy: string | null;
   createdAt: Date;
   updatedAt: Date;

@@ -1,4 +1,4 @@
-import { boolean, date, numeric, pgEnum, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { boolean, date, integer, numeric, pgEnum, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 import { auditColumns, id, softDelete } from "./_shared";
 import { companies, users } from "./identity";
 import { products, productVariants } from "./catalog";
@@ -39,6 +39,15 @@ export const workshops = pgTable("workshops", {
   // цех должен сначала перейти по приглашению (telegram_invite_codes),
   // только тогда бот узнаёт chat_id и может присылать сюда PDF-спецификации.
   telegramChatId: text("telegram_chat_id"),
+  // Рамочный договор с этим цехом (номер/дата) — спецификации нумеруются
+  // как приложения к нему ("Спецификация №N к договору №X от Y г.", эталон
+  // 2026-07-26). Не отдельный модуль договоров — минимум, нужный только для
+  // корректного заголовка спецификации; nullable, пока договор не заведён.
+  contractNumber: text("contract_number"),
+  contractDate: text("contract_date"),
+  // Следующий номер спецификации по этому договору — атомарно увеличивается
+  // при каждой генерации (docs/DOCUMENT_ENGINE_ARCHITECTURE.md, Итерация 7).
+  nextSpecificationNumber: integer("next_specification_number").notNull().default(1),
   createdBy: uuid("created_by").references(() => users.id),
   ...auditColumns,
   ...softDelete,

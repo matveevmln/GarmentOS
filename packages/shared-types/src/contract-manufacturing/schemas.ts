@@ -12,6 +12,11 @@ export const createWorkshopSchema = z.object({
   contactInfo: z.string().optional(),
   specialization: z.string().optional(),
   status: workshopStatusSchema.optional(),
+  // Рамочный договор с цехом — спецификации нумеруются как приложения к нему
+  // (Document Template Engine, эталон 2026-07-26). Необязательны — заполняются,
+  // когда договор с этим цехом уже заключён.
+  contractNumber: z.string().optional(),
+  contractDate: z.string().optional(),
   createdBy: z.string().uuid().optional(),
 });
 export type CreateWorkshopDto = z.infer<typeof createWorkshopSchema>;
@@ -25,6 +30,9 @@ export const workshopResponseSchema = z.object({
   specialization: z.string().nullable(),
   status: workshopStatusSchema,
   telegramChatId: z.string().nullable(),
+  contractNumber: z.string().nullable(),
+  contractDate: z.string().nullable(),
+  nextSpecificationNumber: z.number(),
   createdBy: z.string().uuid().nullable(),
   createdAt: z.date(),
   updatedAt: z.date(),

@@ -4,7 +4,7 @@ import {
   workshops,
   type DbOrTx,
 } from "@garmentos/db-schema";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import type { Workshop } from "../domain/workshop";
 import type { ProductionOrder, ProductionOrderStatus, ProductionOrderVariant } from "../domain/production-order";
 import type {
@@ -28,6 +28,9 @@ function toWorkshop(row: WorkshopRow): Workshop {
     specialization: row.specialization,
     status: row.status,
     telegramChatId: row.telegramChatId,
+    contractNumber: row.contractNumber,
+    contractDate: row.contractDate,
+    nextSpecificationNumber: row.nextSpecificationNumber,
     createdBy: row.createdBy,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
@@ -97,6 +100,19 @@ export class DrizzleWorkshopRepository implements WorkshopRepository {
       .returning();
     if (!row) throw new Error(`UPDATE workshops не нашёл строку id=${id}`);
     return toWorkshop(row);
+  }
+
+  async reserveNextSpecificationNumber(id: string): Promise<number> {
+    // Атомарный UPDATE...RETURNING — исключает гонку при параллельной
+    // генерации двух спецификаций для одного цеха (обычный UPDATE с
+    // прочитанным заранее значением был бы уязвим к read-then-write race).
+    const [row] = await this.db
+      .update(workshops)
+      .set({ nextSpecificationNumber: sql`${workshops.nextSpecificationNumber} + 1`, updatedAt: new Date() })
+      .where(eq(workshops.id, id))
+      .returning({ nextSpecificationNumber: workshops.nextSpecificationNumber });
+    if (!row) throw new Error(`UPDATE workshops не нашёл строку id=${id}`);
+    return row.nextSpecificationNumber - 1;
   }
 }
 

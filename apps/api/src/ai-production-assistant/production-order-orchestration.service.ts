@@ -154,17 +154,22 @@ export class ProductionOrderOrchestrationService {
       });
     }
 
-    // Реквизиты договора (номер/дата контракта, условия оплаты) не
-    // моделируются как отдельная сущность сегодня (glossary,
-    // docs/DATABASE_SCHEMA.md) — оставлены пустыми до появления модуля
-    // договоров, не изобретаются.
+    // Номер спецификации — атомарно резервируется по договору цеха (каждая
+    // генерация получает следующий номер, не переиспользует прежний —
+    // "на каждую модель спецификация должна быть разная, соответственно
+    // нумерация и даты", требование владельца проекта 2026-07-26).
+    const specNumber = await this.contractManufacturingService.reserveNextSpecificationNumber(workshop.id);
+
+    // Условия оплаты/способ доставки не моделируются как отдельная сущность
+    // сегодня — оставлены пустыми до появления соответствующих полей у
+    // заказа/договора, не изобретаются.
     const data: SpecificationDocumentData = {
       fields: {
-        contractNumber: "",
-        contractDate: "",
+        contractNumber: workshop.contractNumber ?? "",
+        contractDate: workshop.contractDate ?? "",
         customerName: company.legalName ?? company.name,
         contractorName: workshop.name,
-        specNumber: order.id.slice(0, 8),
+        specNumber: String(specNumber),
         paymentTerms: "",
         deliveryDeadline: order.dueDate ?? "",
         deliveryMethod: "",

@@ -12,6 +12,8 @@ export interface NewWorkshopInput {
   contactInfo: string | null;
   specialization: string | null;
   status: WorkshopStatus;
+  contractNumber: string | null;
+  contractDate: string | null;
   createdBy: string | null;
 }
 
@@ -20,6 +22,12 @@ export interface WorkshopRepository {
   findById(companyId: string, id: string): Promise<Workshop | null>;
   findByTelegramChatId(chatId: string): Promise<Workshop | null>;
   setTelegramChatId(id: string, chatId: string): Promise<Workshop>;
+  // Атомарно резервирует следующий номер спецификации по договору этого
+  // цеха и возвращает именно тот номер, который нужно использовать сейчас
+  // (не значение счётчика после инкремента) — docs/DOCUMENT_ENGINE_ARCHITECTURE.md,
+  // Итерация 7: "на каждую модель спецификация должна быть разная,
+  // соответственно нумерация и даты".
+  reserveNextSpecificationNumber(id: string): Promise<number>;
 }
 
 export interface NewProductionOrderInput {

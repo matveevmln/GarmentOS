@@ -57,4 +57,8 @@ export class ContractManufacturingService {
       { companyId, workshopId, status },
     );
   }
+
+  async reserveNextSpecificationNumber(workshopId: string): Promise<number> {
+    return this.workshops.reserveNextSpecificationNumber(workshopId);
+  }
 }

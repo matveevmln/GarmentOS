@@ -78,6 +78,13 @@
       "when": 1785099749907,
       "tag": "0010_telegram_invite_company_id",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1785103654461,
+      "tag": "0011_workshop_contract_and_spec_numbering",
+      "breakpoints": true
     }
   ]
 }

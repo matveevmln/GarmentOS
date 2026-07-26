@@ -14,8 +14,11 @@ import type { DocumentRenderAdapter } from "../application/ports";
 // вызывает этот же рендерер с другим объектом-шаблоном.
 //
 // Стандартные 14 PDF-шрифтов не умеют кириллицу (проверено вручную —
-// см. git-историю) — DejaVu Sans встроен из assets/fonts/, не зависит от
+// см. git-историю) — Liberation Serif встроен из assets/fonts/, не зависит от
 // шрифтов, установленных в ОС (cloud-agnostic, docs/INFRASTRUCTURE.md).
+// Liberation Serif — метрически совместим с Times New Roman и содержит
+// кириллицу (SIL Open Font License 1.1, свободно распространяется) — тот же
+// шрифт, что и в эталонном образце документа (2026-07-26).
 const FONTS_DIR = join(__dirname, "..", "..", "assets", "fonts");
 const PAGE_WIDTH = 595.28; // A4
 const PAGE_HEIGHT = 841.89;
@@ -138,8 +141,8 @@ export class PdfLibTemplateRenderer implements DocumentRenderAdapter {
   async renderSpecification(template: SpecificationTemplateDefinition, data: SpecificationDocumentData): Promise<Uint8Array> {
     const pdfDoc = await PDFDocument.create();
     pdfDoc.registerFontkit(fontkit);
-    const font = await pdfDoc.embedFont(readFileSync(join(FONTS_DIR, "DejaVuSans.ttf")), { subset: true });
-    const boldFont = await pdfDoc.embedFont(readFileSync(join(FONTS_DIR, "DejaVuSans-Bold.ttf")), { subset: true });
+    const font = await pdfDoc.embedFont(readFileSync(join(FONTS_DIR, "LiberationSerif-Regular.ttf")), { subset: true });
+    const boldFont = await pdfDoc.embedFont(readFileSync(join(FONTS_DIR, "LiberationSerif-Bold.ttf")), { subset: true });
 
     const ctx: DrawContext = { pdfDoc, font, boldFont, page: pdfDoc.addPage([PAGE_WIDTH, PAGE_HEIGHT]), y: PAGE_HEIGHT - MARGIN };
 

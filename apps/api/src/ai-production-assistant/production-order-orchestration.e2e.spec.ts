@@ -161,13 +161,14 @@ describe("Вертикальный сценарий Итерации 7 (e2e): т
       .set(...authHeader(accessToken))
       .expect(201);
 
-    // Цех.
+    // Цех — с рамочным договором, к которому нумеруются спецификации.
     const workshopResponse = await request(httpServer)
       .post("/v1/workshops")
       .set(...authHeader(accessToken))
-      .send({ name: "Ак-Сарай Текстиль" })
+      .send({ name: "Ак-Сарай Текстиль", contractNumber: "П-22-04", contractDate: "22.04.2026" })
       .expect(201);
     const workshop = workshopResponse.body as WorkshopResponseDto;
+    expect(workshop.nextSpecificationNumber).toBe(1);
 
     // Шаг 1: текстовый запрос → разбор в объёмы по SKU (без ANTHROPIC_API_KEY
     // — RuleBasedAIClassifier, узкий размеченный формат).
@@ -236,6 +237,23 @@ describe("Вертикальный сценарий Итерации 7 (e2e): т
     const linkedDocuments = listDocsResponse.body as DocumentResponseDto[];
     expect(linkedDocuments).toHaveLength(1);
     expect(linkedDocuments[0]?.id).toBe(specDocument.id);
+
+    // Каждая генерация — новая, отличная спецификация: номер по договору
+    // цеха реально увеличивается, не переиспользуется (требование владельца
+    // проекта 2026-07-26: "на каждую модель спецификация была разная
+    // соответственно данные нумерация и даты").
+    const [workshopAfterFirstSpec] = await db.select().from(workshops).where(eq(workshops.id, workshop.id));
+    expect(workshopAfterFirstSpec?.nextSpecificationNumber).toBe(2);
+
+    const secondSpecResponse = await request(httpServer)
+      .post(`/v1/production-orders/${order.id}/generate-specification`)
+      .set(...authHeader(accessToken))
+      .expect(201);
+    const secondSpecDocument = secondSpecResponse.body as DocumentResponseDto;
+    expect(secondSpecDocument.id).not.toBe(specDocument.id);
+
+    const [workshopAfterSecondSpec] = await db.select().from(workshops).where(eq(workshops.id, workshop.id));
+    expect(workshopAfterSecondSpec?.nextSpecificationNumber).toBe(3);
 
     // Шаг 5: привязка цеха к Telegram (инвайт-код → /start) + простой
     // текстовый ответ цеха → автоматическое обновление статуса заказа.
