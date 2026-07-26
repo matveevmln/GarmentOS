@@ -70,7 +70,8 @@ packages/domain/
 ├── marketplace-integration/    # оркестрация коннекторов (использует packages/connectors)
 ├── honest-sign/                # учёт кодов маркировки
 ├── finance/                    # себестоимость, проводки
-└── notifications/              # уведомления
+├── notifications/              # уведомления
+└── audit/                      # единый журнал аудита критичных операций (Итерация 6, см. ARCHITECTURE.md п.7)
 ```
 
 Внутри каждого модуля — единообразная структура (пример на `warehouse/`):
