@@ -12,8 +12,17 @@ import {
 } from "drizzle-orm/pg-core";
 import { auditColumns, id } from "./_shared";
 import { companies, users } from "./identity";
+import { inboxSuggestions } from "./inbox";
 
-// docs/DATABASE_SCHEMA.md, раздел 15 (Общие/сквозные).
+// docs/DATABASE_SCHEMA.md, раздел 15 (Общие/сквозные); источник записи и
+// AI-происхождение — docs/AUTH_ARCHITECTURE.md, раздел 13 (Итерация 6).
+
+// Через какой канал вызова произошло действие — не про то, кто выполнил
+// (userId ниже — всегда конкретный человек, AI/CLI/Telegram не получают
+// собственных прав, docs/AUTH_ARCHITECTURE.md раздел 13), а про то, откуда
+// пришёл вызов use case: обычный HTTP API, CLI-бутстрап, Telegram-бот
+// (Итерация 9) или подтверждённое через Inbox предложение AI.
+export const auditSourceEnum = pgEnum("audit_source", ["http_api", "cli", "telegram", "ai"]);
 
 export const auditLog = pgTable("audit_log", {
   id: id(),
@@ -21,11 +30,16 @@ export const auditLog = pgTable("audit_log", {
     .notNull()
     .references(() => companies.id),
   userId: uuid("user_id").references(() => users.id),
+  source: auditSourceEnum("source").notNull().default("http_api"),
   entityType: text("entity_type").notNull(),
   entityId: uuid("entity_id").notNull(),
   action: text("action").notNull(),
   beforeJson: jsonb("before_json"),
   afterJson: jsonb("after_json"),
+  // Nullable-ссылка на предложение AI, которое подтвердил userId выше — не
+  // заполняется для обычных ручных операций (docs/AUTH_ARCHITECTURE.md,
+  // раздел 13, пункт (2) "что именно предложил AI").
+  inboxSuggestionId: uuid("inbox_suggestion_id").references(() => inboxSuggestions.id),
   occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
