@@ -37,6 +37,10 @@
 | [`docs/USER_JOURNEY_AUDIT.md`](./docs/USER_JOURNEY_AUDIT.md) | Аудит дня владельца бизнеса в системе (11 шагов) — источник найденных пробелов и приоритетов |
 | [`docs/INBOX_ARCHITECTURE.md`](./docs/INBOX_ARCHITECTURE.md) | Universal Inbox — AI-классификация входящих сообщений, Zero Input |
 | [`docs/AUTH_ARCHITECTURE.md`](./docs/AUTH_ARCHITECTURE.md) | Аутентификация и авторизация (Итерация 5): JWT, refresh-токены, роли, permissions, мультитенантность на уровне API |
+| [`docs/AI_PRODUCTION_ASSISTANT_ARCHITECTURE.md`](./docs/AI_PRODUCTION_ASSISTANT_ARCHITECTURE.md) | AI Production Assistant (Фаза 2, спроектировано заранее) — расчёт спецификаций/материалов из текста/голоса, генерация документов, согласование, обмен с цехом через Telegram |
+| [`docs/TELEGRAM_INTEGRATION_ARCHITECTURE.md`](./docs/TELEGRAM_INTEGRATION_ARCHITECTURE.md) | Telegram-бот как транспорт: один бот на всю систему, входящий/исходящий поток, привязка компаний и внешних участников (цех/поставщик) |
+| [`docs/DOCUMENT_ENGINE_ARCHITECTURE.md`](./docs/DOCUMENT_ENGINE_ARCHITECTURE.md) | Document Engine — владение `documents`/`document_links`/`document_derivatives`, генерация PDF, подготовка к электронной подписи |
+| [`docs/WORKFLOW_ENGINE_ARCHITECTURE.md`](./docs/WORKFLOW_ENGINE_ARCHITECTURE.md) | Workflow Engine — узкоспециализированный механизм многошагового согласования документов (не общий BPMN-движок) |
 | [`docs/ROADMAP.md`](./docs/ROADMAP.md) | Дорожная карта разработки по фазам |
 | [`docs/PRINCIPLES.md`](./docs/PRINCIPLES.md) | Принципы разработки (инженерные и продуктовые) |
 | [`docs/QUALITY_STANDARDS.md`](./docs/QUALITY_STANDARDS.md) | Стандарты качества кода, тестирования, CI/CD |
