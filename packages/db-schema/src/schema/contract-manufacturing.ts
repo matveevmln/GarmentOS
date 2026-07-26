@@ -34,6 +34,11 @@ export const workshops = pgTable("workshops", {
   // черновик, создаваемый Inbox при первом упоминании незнакомого цеха
   // (docs/INBOX_ARCHITECTURE.md, раздел 2.1).
   status: partnerStatusEnum("status").notNull().default("active"),
+  // Telegram Bot API не позволяет проактивно написать в чат, который ни разу
+  // не взаимодействовал с ботом (docs/TELEGRAM_INTEGRATION_ARCHITECTURE.md) —
+  // цех должен сначала перейти по приглашению (telegram_invite_codes),
+  // только тогда бот узнаёт chat_id и может присылать сюда PDF-спецификации.
+  telegramChatId: text("telegram_chat_id"),
   createdBy: uuid("created_by").references(() => users.id),
   ...auditColumns,
   ...softDelete,

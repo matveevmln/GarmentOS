@@ -64,6 +64,13 @@
       "when": 1785090512031,
       "tag": "0008_add_audit_log_source_and_ai_link",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1785099098260,
+      "tag": "0009_telegram_integration",
+      "breakpoints": true
     }
   ]
 }

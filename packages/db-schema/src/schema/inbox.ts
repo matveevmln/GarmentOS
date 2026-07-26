@@ -6,6 +6,7 @@ import {
   pgTable,
   text,
   timestamp,
+  uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
 import { auditColumns, id } from "./_shared";
@@ -52,26 +53,37 @@ export const inboxChannels = pgTable("inbox_channels", {
   ...auditColumns,
 });
 
-export const inboxItems = pgTable("inbox_items", {
-  id: id(),
-  companyId: uuid("company_id")
-    .notNull()
-    .references(() => companies.id),
-  inboxChannelId: uuid("inbox_channel_id")
-    .notNull()
-    .references(() => inboxChannels.id),
-  // Кто прислал — телефон/Telegram-хэндл отправителя (может отличаться от
-  // владельца канала при пересланных сообщениях, docs/INBOX_ARCHITECTURE.md
-  // раздел 1) — используется для entity linking (раздел 7).
-  sourceIdentifier: text("source_identifier"),
-  rawText: text("raw_text"),
-  // Через StorageAdapter (docs/INFRASTRUCTURE.md, п.2.3); для ZIP/email с
-  // несколькими вложениями — один inbox_item на файл после распаковки.
-  fileUrl: text("file_url"),
-  receivedAt: timestamp("received_at", { withTimezone: true }).notNull().defaultNow(),
-  status: inboxItemStatusEnum("status").notNull().default("new"),
-  ...auditColumns,
-});
+export const inboxItems = pgTable(
+  "inbox_items",
+  {
+    id: id(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id),
+    inboxChannelId: uuid("inbox_channel_id")
+      .notNull()
+      .references(() => inboxChannels.id),
+    // Кто прислал — телефон/Telegram-хэндл отправителя (может отличаться от
+    // владельца канала при пересланных сообщениях, docs/INBOX_ARCHITECTURE.md
+    // раздел 1) — используется для entity linking (раздел 7).
+    sourceIdentifier: text("source_identifier"),
+    rawText: text("raw_text"),
+    // Через StorageAdapter (docs/INFRASTRUCTURE.md, п.2.3); для ZIP/email с
+    // несколькими вложениями — один inbox_item на файл после распаковки.
+    fileUrl: text("file_url"),
+    // Telegram может повторно доставить update при таймауте ответа webhook
+    // (docs/TELEGRAM_INTEGRATION_ARCHITECTURE.md, раздел 5) — nullable
+    // (заполняется только для канала telegram), уникальность в паре с
+    // inbox_channel_id защищает от дублирования одного и того же сообщения.
+    telegramUpdateId: text("telegram_update_id"),
+    receivedAt: timestamp("received_at", { withTimezone: true }).notNull().defaultNow(),
+    status: inboxItemStatusEnum("status").notNull().default("new"),
+    ...auditColumns,
+  },
+  (table) => [
+    uniqueIndex("inbox_items_channel_telegram_update_idx").on(table.inboxChannelId, table.telegramUpdateId),
+  ],
+);
 
 export const inboxSuggestions = pgTable("inbox_suggestions", {
   id: id(),

@@ -53,6 +53,7 @@ const EXPECTED_TABLES = [
   "inbox_channels",
   "inbox_items",
   "inbox_suggestions",
+  "telegram_invite_codes",
 ];
 
 function collectTables(): Record<string, unknown> {
@@ -104,6 +105,10 @@ describe("schema", () => {
       "marking_code_events",
       "inbox_suggestions",
       "document_derivatives",
+      // targetId полиморфен (company|workshop, docs/TELEGRAM_INTEGRATION_ARCHITECTURE.md)
+      // — companyId не имеет смысла напрямую на этой строке, как и entity_type/
+      // entity_id таблицы document_links/notes/audit_log выше.
+      "telegram_invite_codes",
     ]);
 
     for (const [key, table] of Object.entries(tables)) {

@@ -11,3 +11,4 @@ export * from "./honest-sign";
 export * from "./finance";
 export * from "./common";
 export * from "./inbox";
+export * from "./telegram";
