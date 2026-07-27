@@ -163,31 +163,40 @@ export class PdfLibTemplateRenderer implements DocumentRenderAdapter {
 
     // Подписи без печатей — только места под подпись (требование владельца
     // проекта 2026-07-26: "без печатей, без подписей, места под подписи
-    // оставить"). Заголовок → название стороны → пустое место под подпись/
-    // печать → строка-линия для росписи от руки → должность+ФИО → "М.П."
-    // (структура эталона; линия для росписи добавлена 2026-07-27 — в исходном
-    // пустом месте не было видно, где именно расписываться).
+    // оставить"). Заголовок → название стороны → пустое место под реквизиты →
+    // должность (если есть) → строка для росписи ВПЛОТНУЮ ПЕРЕД расшифровкой
+    // подписи (ФИО), на одной строке с ней → "М.П." — официальный формат
+    // ("_________________ Фамилия И.О."), поправлено 2026-07-27: линия должна
+    // стоять напротив фамилии, а не отдельной строкой над всем блоком.
     ensureSpace(ctx, 110);
     const columnWidth = CONTENT_WIDTH / 2;
     const signatureTop = ctx.y;
+    const signatureLineWidth = 90; // pt — место для росписи от руки перед ФИО
+    const signatureLineGap = 6; // pt — отступ между линией и напечатанным ФИО
     for (const [index, block] of [template.signatures.left, template.signatures.right].entries()) {
       const x = MARGIN + index * columnWidth;
       let lineY = signatureTop;
       ctx.page.drawText(block.headerLine, { x, y: lineY, size: 10.5, font: boldFont, color: rgb(0, 0, 0) });
       lineY -= 15;
       ctx.page.drawText(applyPlaceholders(block.companyLine, data.fields), { x, y: lineY, size: 10, font, color: rgb(0, 0, 0) });
-      lineY -= 34; // пустое место под подпись/печать
-      const signatureLineWidth = columnWidth - 60;
-      ctx.page.drawLine({
-        start: { x, y: lineY + 8 },
-        end: { x: x + signatureLineWidth, y: lineY + 8 },
-        thickness: 0.75,
-        color: rgb(0, 0, 0),
-      });
-      for (const line of block.nameLines) {
-        ctx.page.drawText(applyPlaceholders(line, data.fields), { x, y: lineY, size: 10, font, color: rgb(0, 0, 0) });
+      lineY -= 34; // пустое место под реквизиты стороны
+
+      block.nameLines.forEach((line, lineIndex) => {
+        const text = applyPlaceholders(line, data.fields);
+        const isSignerNameLine = lineIndex === block.nameLines.length - 1;
+        if (isSignerNameLine) {
+          ctx.page.drawLine({
+            start: { x, y: lineY + 3 },
+            end: { x: x + signatureLineWidth, y: lineY + 3 },
+            thickness: 0.75,
+            color: rgb(0, 0, 0),
+          });
+          ctx.page.drawText(text, { x: x + signatureLineWidth + signatureLineGap, y: lineY, size: 10, font, color: rgb(0, 0, 0) });
+        } else {
+          ctx.page.drawText(text, { x, y: lineY, size: 10, font, color: rgb(0, 0, 0) });
+        }
         lineY -= 15;
-      }
+      });
       ctx.page.drawText(block.stampLabel, { x, y: lineY, size: 10, font, color: rgb(0, 0, 0) });
     }
 
