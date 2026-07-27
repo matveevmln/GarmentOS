@@ -11,7 +11,9 @@ export const companies = pgTable("companies", {
   legalName: text("legal_name"),
   inn: text("inn"),
   timezone: text("timezone").notNull().default("UTC"),
-  defaultCurrency: text("default_currency").notNull().default("RUB"),
+  // KGS по умолчанию (docs/PRINCIPLES.md, принцип 21) — валюта учёта
+  // компании; спецификации для цехов всегда в RUB независимо от этого поля.
+  defaultCurrency: text("default_currency").notNull().default("KGS"),
   ...auditColumns,
 });
 

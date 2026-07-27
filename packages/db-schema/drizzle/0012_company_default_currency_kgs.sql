@@ -1,0 +1,1 @@
+ALTER TABLE "companies" ALTER COLUMN "default_currency" SET DEFAULT 'KGS';

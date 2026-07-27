@@ -85,6 +85,13 @@
       "when": 1785103654461,
       "tag": "0011_workshop_contract_and_spec_numbering",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1785131074845,
+      "tag": "0012_company_default_currency_kgs",
+      "breakpoints": true
     }
   ]
 }

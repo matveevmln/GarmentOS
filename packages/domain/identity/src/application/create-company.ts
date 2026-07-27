@@ -25,6 +25,9 @@ export async function createCompany(deps: CreateCompanyDeps, input: CreateCompan
     legalName: input.legalName?.trim() ?? null,
     inn: input.inn?.trim() ?? null,
     timezone: input.timezone ?? "UTC",
-    defaultCurrency: input.defaultCurrency ?? "RUB",
+    // KGS — валюта учёта компании по умолчанию (docs/PRINCIPLES.md, принцип
+    // 21, уточнено владельцем проекта 2026-07-27). Не путать с валютой
+    // спецификаций для цехов — те всегда в RUB, независимо от этого поля.
+    defaultCurrency: input.defaultCurrency ?? "KGS",
   });
 }

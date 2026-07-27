@@ -43,7 +43,7 @@ describe("domain/identity", () => {
 
       expect(company.name).toBe("ООО Ромашка");
       expect(company.timezone).toBe("UTC");
-      expect(company.defaultCurrency).toBe("RUB");
+      expect(company.defaultCurrency).toBe("KGS");
     });
   });
 
