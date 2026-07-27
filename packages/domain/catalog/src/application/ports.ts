@@ -35,6 +35,10 @@ export interface ProductRepository {
   // придумать модель, только найти уже существующую по имени
   // (docs/AI_PRODUCTION_ASSISTANT_ARCHITECTURE.md, раздел 2, пункт 4).
   findByName(companyId: string, name: string): Promise<Product | null>;
+  // "Возможно, вы имели в виду..." — нужен, когда точное совпадение не
+  // найдено (Итерация 7: предпросмотр текстового запроса перед созданием
+  // заказа, не гадаем — предлагаем варианты человеку на подтверждение).
+  findSimilarByName(companyId: string, name: string, limit: number): Promise<Product[]>;
 }
 
 export interface NewProductVariantInput {

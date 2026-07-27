@@ -1,31 +1,20 @@
 import { Module } from "@nestjs/common";
+import { AiProductionAssistantModule } from "../ai-production-assistant/ai-production-assistant.module";
 import { ContractManufacturingModule } from "../contract-manufacturing/contract-manufacturing.module";
 import { TelegramInviteCodeRepository } from "./telegram-invite-code.repository";
-import { HttpTelegramClient, LoggingTelegramClient, type TelegramClient } from "./telegram-client";
+import { TelegramClientModule } from "./telegram-client.module";
 import { TelegramController } from "./telegram.controller";
 import { TelegramService } from "./telegram.service";
-import { TELEGRAM_CLIENT } from "./telegram.tokens";
 
+// TelegramModule — тонкий транспортный слой (принцип владельца проекта
+// 2026-07-26: "Telegram должен быть тонким интерфейсом. Вся логика должна
+// жить в GarmentOS"). Импортирует AiProductionAssistantModule для сценария
+// "текст → предпросмотр → подтверждение → заказ" — вся бизнес-логика этого
+// сценария живёт в ProductionOrderOrchestrationService, TelegramService
+// только маршрутизирует входящие сообщения и форматирует ответ.
 @Module({
-  imports: [ContractManufacturingModule],
+  imports: [ContractManufacturingModule, TelegramClientModule, AiProductionAssistantModule],
   controllers: [TelegramController],
-  providers: [
-    TelegramService,
-    TelegramInviteCodeRepository,
-    {
-      provide: TELEGRAM_CLIENT,
-      // TELEGRAM_BOT_TOKEN пока не настроен ни в одном окружении (решение
-      // владельца проекта 2026-07-26 — собрать код заранее, подключить
-      // реальный токен позже без изменения вызывающего кода) — до этого
-      // момента исходящие сообщения только логируются.
-      useFactory: (): TelegramClient => {
-        const botToken = process.env.TELEGRAM_BOT_TOKEN;
-        return botToken ? new HttpTelegramClient(botToken) : new LoggingTelegramClient();
-      },
-    },
-  ],
-  // TELEGRAM_CLIENT нужен ai-production-assistant (отправка сгенерированной
-  // спецификации цеху, Итерация 7) — тот же провайдер, не отдельный экземпляр.
-  exports: [TELEGRAM_CLIENT],
+  providers: [TelegramService, TelegramInviteCodeRepository],
 })
 export class TelegramModule {}

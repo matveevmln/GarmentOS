@@ -50,4 +50,9 @@ export class CatalogService {
   async findProductVariantById(id: string): Promise<ProductVariant | null> {
     return this.productVariants.findById(id);
   }
+
+  async findSimilarProductNames(companyId: string, name: string, limit = 3): Promise<string[]> {
+    const matches = await this.products.findSimilarByName(companyId, name, limit);
+    return matches.map((product) => product.name);
+  }
 }

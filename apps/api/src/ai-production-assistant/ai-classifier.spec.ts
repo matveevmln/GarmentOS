@@ -10,12 +10,22 @@ describe("RuleBasedAIClassifier", () => {
     const fields = await classifier.extractProductionRequestFields(text);
 
     expect(fields.modelName).toBe("Двойка");
+    expect(fields.workshopName).toBeNull();
     expect(fields.colors).toEqual([
       { colorName: "Петроль", quantity: 1000 },
       { colorName: "Бордо", quantity: 500 },
     ]);
     expect(fields.sizes).toEqual(["48–50", "52–54", "56–58", "60–62", "64–66"]);
     expect(fields.unitPrice).toBe(720);
+  });
+
+  it("разбирает необязательное поле «Цех:», если оно указано", async () => {
+    const classifier = new RuleBasedAIClassifier();
+    const text = "Модель: Двойка. Цех: Ак-Сарай Текстиль. Цвета: Петроль — 100 шт. Размеры: M, L.";
+
+    const fields = await classifier.extractProductionRequestFields(text);
+
+    expect(fields.workshopName).toBe("Ак-Сарай Текстиль");
   });
 
   it("разбирает модель в кавычках и один цвет", async () => {

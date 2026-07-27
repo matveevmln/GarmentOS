@@ -5,6 +5,7 @@ describe("buildParsedProductionRequest", () => {
   it("разворачивает цвета × размеры в объёмы по SKU (пример владельца проекта)", () => {
     const fields: ExtractedProductionRequestFields = {
       modelName: "Двойка",
+      workshopName: null,
       colors: [
         { colorName: "Петроль", quantity: 1000 },
         { colorName: "Бордо", quantity: 500 },

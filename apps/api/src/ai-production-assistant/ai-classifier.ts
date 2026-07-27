@@ -22,13 +22,14 @@ export interface AIClassifier {
 }
 
 interface LabelMatch {
-  key: "modelName" | "colors" | "sizes" | "unitPrice";
+  key: "modelName" | "workshopName" | "colors" | "sizes" | "unitPrice";
   start: number;
   contentStart: number;
 }
 
 const LABEL_PATTERNS: Array<{ key: LabelMatch["key"]; pattern: RegExp }> = [
   { key: "modelName", pattern: /модель\s*:/iu },
+  { key: "workshopName", pattern: /цех\s*:/iu },
   { key: "colors", pattern: /цвета\s*:/iu },
   { key: "sizes", pattern: /размеры\s*:/iu },
   { key: "unitPrice", pattern: /цена\s+пошива\s*[:—-]*/iu },
@@ -106,11 +107,12 @@ export class RuleBasedAIClassifier implements AIClassifier {
     }
 
     const modelName = segments.modelName.replace(/^['"«]+|['"»]+$/gu, "").trim();
+    const workshopName = segments.workshopName?.replace(/^['"«]+|['"»]+$/gu, "").trim() ?? null;
     const colors = parseColors(segments.colors);
     const sizes = parseSizes(segments.sizes);
     const unitPrice = parseUnitPrice(segments.unitPrice);
 
-    return { modelName, colors, sizes, unitPrice };
+    return { modelName, workshopName, colors, sizes, unitPrice };
   }
 }
 
@@ -119,8 +121,8 @@ const ANTHROPIC_MODEL = "claude-sonnet-5";
 
 const SYSTEM_PROMPT = `Ты извлекаешь структурированные данные производственного запроса на пошив одежды из свободного текста на русском языке.
 Верни ТОЛЬКО валидный JSON (без markdown-разметки, без пояснений) следующей формы:
-{"modelName": string, "colors": [{"colorName": string, "quantity": number}], "sizes": [string], "unitPrice": number | null}
-Если размеры не указаны — верни пустой массив sizes. Если цена не указана — верни null. Не придумывай данные, которых нет в тексте.`;
+{"modelName": string, "workshopName": string | null, "colors": [{"colorName": string, "quantity": number}], "sizes": [string], "unitPrice": number | null}
+Если размеры не указаны — верни пустой массив sizes. Если цена не указана — верни null. Если цех явно не назван — верни null для workshopName. Не придумывай данные, которых нет в тексте.`;
 
 interface AnthropicMessageResponse {
   content: Array<{ type: string; text?: string }>;

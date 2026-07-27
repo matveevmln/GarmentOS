@@ -5,6 +5,12 @@ import { and, eq } from "drizzle-orm";
 import { DATABASE_CONNECTION } from "../database/database.module";
 import { WORKSHOP_REPOSITORY } from "../contract-manufacturing/contract-manufacturing.tokens";
 import { ContractManufacturingService } from "../contract-manufacturing/contract-manufacturing.service";
+import {
+  ProductionRequestOrchestrationError,
+  type ProductionRequestPreview,
+  ProductionOrderOrchestrationService,
+} from "../ai-production-assistant/production-order-orchestration.service";
+import { ProductionRequestParseError } from "../ai-production-assistant/ai-classifier";
 import { TelegramInviteCodeRepository } from "./telegram-invite-code.repository";
 import { TELEGRAM_CLIENT } from "./telegram.tokens";
 import type { TelegramClient } from "./telegram-client";
@@ -19,6 +25,45 @@ function interpretWorkshopStatusUpdate(text: string): "in_progress" | "ready_for
   if (/готов/u.test(normalized)) return "ready_for_pickup";
   if (/в работ|начал|приступ/u.test(normalized)) return "in_progress";
   return null;
+}
+
+function isConfirmationReply(text: string): boolean {
+  return /^(да|подтверждаю|верно|ок|окей)[.!]?$/iu.test(text.trim());
+}
+
+// Форматирование предпросмотра в читаемое сообщение (требование владельца
+// проекта 2026-07-26: "AI должен показать, что именно понял, какие данные
+// нашёл автоматически, какие данные отсутствуют и какие потенциальные
+// проблемы обнаружил" — не просто Да/Нет). Только форматирование текста —
+// все решения (что найдено/чего не хватает/можно ли создавать) уже принял
+// ProductionOrderOrchestrationService, это не бизнес-логика.
+function formatPreviewMessage(preview: ProductionRequestPreview): string {
+  const colorTotals = new Map<string, number>();
+  for (const item of preview.items) {
+    colorTotals.set(item.colorName, (colorTotals.get(item.colorName) ?? 0) + item.quantity);
+  }
+
+  const lines: string[] = ["Я понял заказ:", "", `• Модель: ${preview.modelName}`];
+  lines.push(`• Цех: ${preview.workshopName ?? "не определён"}`);
+  for (const [colorName, quantity] of colorTotals) {
+    lines.push(`• Цвет ${colorName} — ${quantity} шт.`);
+  }
+  if (preview.unitPrice !== null) lines.push(`• Цена пошива: ${preview.unitPrice} руб.`);
+  lines.push("");
+
+  if (preview.warnings.length > 0) {
+    lines.push(...preview.warnings.map((warning) => `⚠ ${warning}`));
+    lines.push("");
+  }
+
+  if (preview.canCreate) {
+    lines.push("Будет создано:", "• Производственный заказ", "• Спецификация PDF", "• Документы", "");
+    lines.push('Ответьте «Да», чтобы продолжить, или пришлите исправленные данные.');
+  } else {
+    lines.push("Пришлите исправленный текст запроса — заказ пока не может быть создан.");
+  }
+
+  return lines.join("\n");
 }
 
 export interface CreateWorkshopInviteResult {
@@ -40,6 +85,7 @@ export class TelegramService {
     @Inject(TELEGRAM_CLIENT) private readonly telegramClient: TelegramClient,
     private readonly inviteCodes: TelegramInviteCodeRepository,
     private readonly contractManufacturingService: ContractManufacturingService,
+    private readonly orchestrationService: ProductionOrderOrchestrationService,
   ) {}
 
   async createWorkshopInvite(companyId: string, workshopId: string): Promise<CreateWorkshopInviteResult> {
@@ -48,6 +94,15 @@ export class TelegramService {
       throw new Error(`Цех ${workshopId} не найден в этой компании`);
     }
     const invite = await this.inviteCodes.create(companyId, "workshop", workshopId);
+    return { code: invite.code, expiresAt: invite.expiresAt, deepLink: this.buildDeepLink(invite.code) };
+  }
+
+  // Привязка собственного чата компании — без этого сценарий "текст в
+  // Telegram → заказ" (Итерация 7) недостижим: цеха получают приглашение
+  // через createWorkshopInvite выше, но у владельца/менеджера компании не
+  // было симметричного способа привязать свой чат.
+  async createCompanyInvite(companyId: string): Promise<CreateWorkshopInviteResult> {
+    const invite = await this.inviteCodes.create(companyId, "company", companyId);
     return { code: invite.code, expiresAt: invite.expiresAt, deepLink: this.buildDeepLink(invite.code) };
   }
 
@@ -78,7 +133,62 @@ export class TelegramService {
       return;
     }
 
-    await this.recordIncomingMessage(chatId, text, update.update_id);
+    const channel = await this.findCompanyChannel(chatId);
+    if (channel) {
+      await this.handleCompanyMessage(channel.companyId, chatId, text, update.update_id);
+      return;
+    }
+
+    this.logger.warn(`Сообщение от непривязанного Telegram-чата ${chatId} — проигнорировано`);
+  }
+
+  // Сценарий "текст → предпросмотр → подтверждение → заказ" (требование
+  // владельца проекта 2026-07-26): Telegram — тонкий интерфейс, вся бизнес-
+  // логика (разбор, резолв модели/BOM/цеха/SKU, создание заказа, генерация
+  // спецификации, отправка цеху) — в ProductionOrderOrchestrationService,
+  // этот метод только маршрутизирует и форматирует ответ.
+  private async handleCompanyMessage(companyId: string, chatId: string, text: string, telegramUpdateId: number): Promise<void> {
+    if (isConfirmationReply(text)) {
+      if (!this.orchestrationService.hasPendingRequest(chatId)) {
+        await this.telegramClient.sendMessage(chatId, "Нет запроса, ожидающего подтверждения. Опишите, что нужно сшить.");
+        return;
+      }
+      try {
+        const { order, document } = await this.orchestrationService.confirmPendingRequest(chatId, null);
+        await this.telegramClient.sendMessage(
+          chatId,
+          `Готово. Заказ пошива создан и подтверждён (статус: ${order.status}). Спецификация сформирована и отправлена цеху.`,
+        );
+        this.logger.log(`Создан заказ ${order.id}, документ спецификации ${document.id} (чат ${chatId})`);
+      } catch (error) {
+        const message = error instanceof ProductionRequestOrchestrationError ? error.message : "Не удалось создать заказ — попробуйте ещё раз.";
+        await this.telegramClient.sendMessage(chatId, message);
+      }
+      return;
+    }
+
+    try {
+      const preview = await this.orchestrationService.previewFromTextForChannel(companyId, chatId, text);
+      await this.telegramClient.sendMessage(chatId, formatPreviewMessage(preview));
+    } catch (error) {
+      if (error instanceof ProductionRequestParseError) {
+        // Свободный текст вне строгого формата — сохраняем как inbox_item,
+        // не пытаемся угадать (полноценная классификация свободного текста —
+        // Итерация 9, Universal Inbox).
+        await this.recordIncomingMessage(chatId, text, telegramUpdateId);
+        return;
+      }
+      throw error;
+    }
+  }
+
+  private async findCompanyChannel(chatId: string): Promise<{ companyId: string; id: string } | null> {
+    const [channel] = await this.db
+      .select()
+      .from(inboxChannels)
+      .where(and(eq(inboxChannels.type, "telegram"), eq(inboxChannels.externalIdentifier, chatId)))
+      .limit(1);
+    return channel ?? null;
   }
 
   // Простой входящий ответ цеха → обновление статуса самого свежего активного
@@ -133,16 +243,11 @@ export class TelegramService {
     await this.inviteCodes.markUsed(invite.id);
   }
 
-  // Сообщение вне /start — либо от уже привязанного канала компании
-  // (заказ на пошив, дальше по конвейеру AIClassifier, Итерация 7 таск #53),
-  // либо от неизвестного отправителя (пока игнорируется — полноценная
-  // AI-классификация всех входящих без привязки, Итерация 9).
+  // Сообщение вне строгого формата производственного запроса — сохраняем
+  // как inbox_item (полноценная AI-классификация всех входящих без привязки
+  // к конкретному сценарию — Итерация 9, Universal Inbox).
   private async recordIncomingMessage(chatId: string, text: string, telegramUpdateId: number): Promise<void> {
-    const [channel] = await this.db
-      .select()
-      .from(inboxChannels)
-      .where(and(eq(inboxChannels.type, "telegram"), eq(inboxChannels.externalIdentifier, chatId)))
-      .limit(1);
+    const channel = await this.findCompanyChannel(chatId);
     if (!channel) {
       this.logger.warn(`Сообщение от непривязанного Telegram-чата ${chatId} — проигнорировано`);
       return;

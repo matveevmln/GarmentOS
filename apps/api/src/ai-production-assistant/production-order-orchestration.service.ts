@@ -24,6 +24,36 @@ export class ProductionRequestOrchestrationError extends Error {
   }
 }
 
+// Предпросмотр перед созданием (требование владельца проекта 2026-07-26):
+// "перед созданием заказа AI должен показать, что именно понял, какие
+// данные нашёл автоматически, какие отсутствуют и какие потенциальные
+// проблемы обнаружил" — не просто Да/Нет. warnings — не блокируют показ
+// предпросмотра, но canCreate=false, если чего-то критичного не хватает
+// (модель/BOM/цех/цена/SKU) — тогда подтверждение ("Да") ничего не создаст,
+// а объяснит, чего не хватает (та же ошибка, что бросил бы createFromText).
+export interface ProductionRequestPreview {
+  modelName: string;
+  productFound: boolean;
+  productSuggestions: string[];
+  bomFound: boolean;
+  workshopId: string | null;
+  workshopName: string | null;
+  workshopCandidates: string[];
+  unitPrice: number | null;
+  items: Array<{ colorName: string; size: string; quantity: number; skuFound: boolean }>;
+  warnings: string[];
+  canCreate: boolean;
+}
+
+interface PendingProductionRequest {
+  companyId: string;
+  text: string;
+  workshopId: string;
+  expiresAt: number;
+}
+
+const PENDING_REQUEST_TTL_MS = 15 * 60 * 1000; // 15 минут — разумное окно на "Да" в переписке
+
 // Оркестрация вертикального сценария Итерации 7 (docs/ROADMAP.md): текст →
 // разбор (AIClassifier) → резолв модели/BOM/SKU из каталога (уже
 // существующих — AI не придумывает недостающее, только сообщает) →
@@ -33,6 +63,15 @@ export class ProductionRequestOrchestrationError extends Error {
 // существующему application-сервису соответствующего модуля.
 @Injectable()
 export class ProductionOrderOrchestrationService {
+  // Состояние "запрос ждёт подтверждения" — временное, в памяти процесса (не
+  // отдельная таблица БД: это разговорное состояние на несколько минут, не
+  // бизнес-запись; при перезапуске процесса пользователь просто напишет
+  // запрос заново). channelKey — обобщённый ключ канала (для Telegram это
+  // chatId), не завязан на конкретный транспорт, чтобы Web/WhatsApp позже
+  // использовали тот же механизм (требование владельца проекта 2026-07-26:
+  // "Telegram — только интерфейс, вся логика должна жить в GarmentOS").
+  private readonly pendingByChannel = new Map<string, PendingProductionRequest>();
+
   constructor(
     private readonly productionRequestService: ProductionRequestService,
     private readonly catalogService: CatalogService,
@@ -97,6 +136,142 @@ export class ProductionOrderOrchestrationService {
       variants,
       createdBy: userId ?? undefined,
     });
+  }
+
+  // Строит предпросмотр без создания каких-либо записей — "показать, что
+  // понял, что нашёл, чего не хватает" (требование владельца проекта
+  // 2026-07-26). Резолвит цех автоматически: если он назван в тексте
+  // ("Цех: ...") или у компании ровно один активный цех — выбирается сам;
+  // иначе перечисляется как проблема (AI не имеет права придумать цех).
+  async buildPreview(companyId: string, text: string): Promise<ProductionRequestPreview> {
+    const parsed = await this.productionRequestService.parse(text);
+    const warnings: string[] = [];
+
+    const product = await this.catalogService.findProductByName(companyId, parsed.modelName);
+    let productSuggestions: string[] = [];
+    if (!product) {
+      productSuggestions = await this.catalogService.findSimilarProductNames(companyId, parsed.modelName);
+      warnings.push(
+        `Модель "${parsed.modelName}" не найдена в каталоге` +
+          (productSuggestions.length > 0 ? ` — возможно, вы имели в виду: ${productSuggestions.join(", ")}` : ""),
+      );
+    }
+
+    let bomFound = false;
+    if (product) {
+      const bom = await this.bomService.getApproved(companyId, { productId: product.id });
+      bomFound = !!bom;
+      if (!bomFound) warnings.push(`У модели "${parsed.modelName}" нет утверждённого BOM`);
+    }
+
+    const workshops = await this.contractManufacturingService.listActiveWorkshops(companyId);
+    let workshopId: string | null = null;
+    let workshopName: string | null = null;
+    const workshopCandidates: string[] = [];
+    if (parsed.workshopName) {
+      const named = workshops.find((w) => w.name.toLowerCase().includes(parsed.workshopName!.toLowerCase()));
+      if (named) {
+        workshopId = named.id;
+        workshopName = named.name;
+      } else {
+        warnings.push(`Цех "${parsed.workshopName}" не найден среди активных цехов`);
+      }
+    } else if (workshops.length === 1 && workshops[0]) {
+      workshopId = workshops[0].id;
+      workshopName = workshops[0].name;
+    } else if (workshops.length === 0) {
+      warnings.push("В системе нет ни одного активного цеха");
+    } else {
+      workshopCandidates.push(...workshops.map((w) => w.name));
+      warnings.push(`Уточните цех — активны: ${workshopCandidates.join(", ")}`);
+    }
+    if (workshopId) {
+      const workshop = workshops.find((w) => w.id === workshopId);
+      if (workshop && !workshop.contractNumber) {
+        warnings.push(`Для цеха "${workshop.name}" не указан действующий договор`);
+      }
+    }
+
+    if (parsed.unitPrice === null) {
+      warnings.push("Не указана цена пошива");
+    }
+
+    const items: ProductionRequestPreview["items"] = [];
+    for (const item of parsed.items) {
+      let skuFound = false;
+      if (product) {
+        const variant = await this.catalogService.findProductVariant(product.id, item.size, item.colorName);
+        skuFound = !!variant;
+        if (!skuFound) warnings.push(`SKU не найден: цвет "${item.colorName}", размер "${item.size}"`);
+      }
+      items.push({ colorName: item.colorName, size: item.size, quantity: item.quantity, skuFound });
+    }
+
+    const canCreate =
+      !!product && bomFound && !!workshopId && parsed.unitPrice !== null && items.every((item) => item.skuFound);
+
+    return {
+      modelName: parsed.modelName,
+      productFound: !!product,
+      productSuggestions,
+      bomFound,
+      workshopId,
+      workshopName,
+      workshopCandidates,
+      unitPrice: parsed.unitPrice,
+      items,
+      warnings,
+      canCreate,
+    };
+  }
+
+  // Предпросмотр, адресованный конкретному разговорному каналу (Telegram-чат
+  // и т.п.) — хранит состояние "ждёт подтверждения" отдельно на каждый канал,
+  // не глобально на компанию (два чата одной компании не должны путать друг
+  // друга предложениями).
+  async previewFromTextForChannel(companyId: string, channelKey: string, text: string): Promise<ProductionRequestPreview> {
+    const preview = await this.buildPreview(companyId, text);
+    if (preview.canCreate && preview.workshopId) {
+      this.pendingByChannel.set(channelKey, {
+        companyId,
+        text,
+        workshopId: preview.workshopId,
+        expiresAt: Date.now() + PENDING_REQUEST_TTL_MS,
+      });
+    } else {
+      this.pendingByChannel.delete(channelKey);
+    }
+    return preview;
+  }
+
+  hasPendingRequest(channelKey: string): boolean {
+    const pending = this.pendingByChannel.get(channelKey);
+    return !!pending && pending.expiresAt > Date.now();
+  }
+
+  // Вызывается после того, как человек ответил "Да" — только теперь система
+  // реально создаёт заказ, рассчитывает потребность (Итерация 8+, пока не
+  // реализовано), формирует PDF и отправляет спецификацию цеху (требование
+  // владельца проекта 2026-07-26: подтверждение должно быть осмысленным, не
+  // просто Да/Нет "в никуда", и весь путь выполняется одним подтверждением).
+  async confirmPendingRequest(
+    channelKey: string,
+    userId: string | null,
+  ): Promise<{ order: ProductionOrder; document: DocumentEntity }> {
+    const pending = this.pendingByChannel.get(channelKey);
+    if (!pending || pending.expiresAt < Date.now()) {
+      this.pendingByChannel.delete(channelKey);
+      throw new ProductionRequestOrchestrationError(
+        "Нет запроса, ожидающего подтверждения, или он устарел — опишите заказ заново",
+        "NO_PENDING_PRODUCTION_REQUEST",
+      );
+    }
+    this.pendingByChannel.delete(channelKey);
+
+    const draft = await this.createFromText(pending.companyId, userId, pending.workshopId, pending.text);
+    const order = await this.contractManufacturingService.confirmProductionOrder(pending.companyId, draft.id);
+    const document = await this.generateAndSendSpecification(pending.companyId, order.id, userId);
+    return { order, document };
   }
 
   async generateAndSendSpecification(

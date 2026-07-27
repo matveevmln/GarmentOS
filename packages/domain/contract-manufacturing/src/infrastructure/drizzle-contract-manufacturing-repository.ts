@@ -92,6 +92,14 @@ export class DrizzleWorkshopRepository implements WorkshopRepository {
     return row ? toWorkshop(row) : null;
   }
 
+  async listActiveByCompany(companyId: string): Promise<Workshop[]> {
+    const rows = await this.db
+      .select()
+      .from(workshops)
+      .where(and(eq(workshops.companyId, companyId), eq(workshops.status, "active")));
+    return rows.map(toWorkshop);
+  }
+
   async setTelegramChatId(id: string, chatId: string): Promise<Workshop> {
     const [row] = await this.db
       .update(workshops)

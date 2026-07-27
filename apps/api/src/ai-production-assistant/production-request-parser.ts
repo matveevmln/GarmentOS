@@ -11,6 +11,11 @@ export interface ExtractedProductionRequestColor {
 
 export interface ExtractedProductionRequestFields {
   modelName: string;
+  // Цех — необязательное поле: в большинстве сообщений не называется явно
+  // (пользователь пишет только что шить, не куда) — резолвится отдельно
+  // (единственный активный цех компании, либо явное совпадение с этим
+  // именем), см. ProductionOrderOrchestrationService.
+  workshopName: string | null;
   colors: ExtractedProductionRequestColor[];
   sizes: string[];
   unitPrice: number | null;
@@ -24,6 +29,7 @@ export interface ParsedProductionRequestItem {
 
 export interface ParsedProductionRequest {
   modelName: string;
+  workshopName: string | null;
   unitPrice: number | null;
   items: ParsedProductionRequestItem[];
 }
@@ -42,5 +48,5 @@ export function buildParsedProductionRequest(fields: ExtractedProductionRequestF
     });
   }
 
-  return { modelName: fields.modelName, unitPrice: fields.unitPrice, items };
+  return { modelName: fields.modelName, workshopName: fields.workshopName, unitPrice: fields.unitPrice, items };
 }

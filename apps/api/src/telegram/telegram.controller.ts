@@ -13,8 +13,7 @@ export class TelegramController {
   constructor(private readonly telegramService: TelegramService) {}
 
   // Одноразовый инвайт для конкретного цеха (docs/TELEGRAM_INTEGRATION_ARCHITECTURE.md,
-  // раздел 1-2) — узкий сценарий Итерации 7 не включает инвайт для
-  // пользователей компании (владелец получает его отдельно, вне API).
+  // раздел 1-2).
   @RequirePermissions("contract_manufacturing.write")
   @Post("invites/workshop/:workshopId")
   async createWorkshopInvite(
@@ -22,6 +21,16 @@ export class TelegramController {
     @CurrentUser() currentUser: AuthenticatedRequestUser,
   ): Promise<TelegramInviteResponseDto> {
     const invite = await this.telegramService.createWorkshopInvite(currentUser.companyId, workshopId);
+    return telegramInviteResponseSchema.parse(invite);
+  }
+
+  // Привязка собственного чата компании — симметрично цеховому инвайту
+  // выше, нужна для сценария "текст в Telegram → предпросмотр →
+  // подтверждение → заказ" (Итерация 7).
+  @RequirePermissions("contract_manufacturing.write")
+  @Post("invites/company")
+  async createCompanyInvite(@CurrentUser() currentUser: AuthenticatedRequestUser): Promise<TelegramInviteResponseDto> {
+    const invite = await this.telegramService.createCompanyInvite(currentUser.companyId);
     return telegramInviteResponseSchema.parse(invite);
   }
 

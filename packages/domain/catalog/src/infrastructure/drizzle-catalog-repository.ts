@@ -117,6 +117,19 @@ export class DrizzleProductRepository implements ProductRepository {
       .limit(1);
     return row ? toProduct(row) : null;
   }
+
+  async findSimilarByName(companyId: string, name: string, limit: number): Promise<Product[]> {
+    // Каталог бренда на этой стадии некрупный (MVP) — простое клиентское
+    // сравнение подстрок в обе стороны надёжнее хрупкого SQL-трюка ради
+    // редкого "не нашли точное совпадение" пути.
+    const rows = await this.db.select().from(products).where(eq(products.companyId, companyId));
+    const query = name.trim().toLowerCase();
+    const matches = rows.filter((row) => {
+      const candidate = row.name.trim().toLowerCase();
+      return candidate.includes(query) || query.includes(candidate);
+    });
+    return matches.slice(0, limit).map(toProduct);
+  }
 }
 
 export class DrizzleProductVariantRepository implements ProductVariantRepository {
