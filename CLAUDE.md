@@ -41,7 +41,7 @@
 | [`docs/TELEGRAM_INTEGRATION_ARCHITECTURE.md`](./docs/TELEGRAM_INTEGRATION_ARCHITECTURE.md) | Telegram-бот как транспорт: один бот на всю систему, входящий/исходящий поток, привязка компаний и внешних участников (цех/поставщик) |
 | [`docs/DOCUMENT_ENGINE_ARCHITECTURE.md`](./docs/DOCUMENT_ENGINE_ARCHITECTURE.md) | Document Engine — владение `documents`/`document_links`/`document_derivatives`, генерация PDF, подготовка к электронной подписи |
 | [`docs/WORKFLOW_ENGINE_ARCHITECTURE.md`](./docs/WORKFLOW_ENGINE_ARCHITECTURE.md) | Workflow Engine — узкоспециализированный механизм многошагового согласования документов (не общий BPMN-движок) |
-| [`docs/PRODUCTION_BATCH_LIFECYCLE_ARCHITECTURE.md`](./docs/PRODUCTION_BATCH_LIFECYCLE_ARCHITECTURE.md) | Баланс производственной партии — полный жизненный цикл партии от заказа до закрытия (крой → пошив → ОТК → отправка → приёмка → брак → компенсационная допоставка → финансовая сверка), предотвращение повторной оплаты компенсированного брака (предложено 2026-07-27, ждёт утверждения) |
+| [`docs/PRODUCTION_BATCH_LIFECYCLE_ARCHITECTURE.md`](./docs/PRODUCTION_BATCH_LIFECYCLE_ARCHITECTURE.md) | Баланс производственной партии — полный жизненный цикл партии от заказа до закрытия (крой → пошив → ОТК → отправка → приёмка → брак → устранение: дошив/перешив/скидка/списание → финансовая сверка), предотвращение повторной оплаты, причины и место выявления брака, обязательства цеха, KPI цехов (предложено 2026-07-27, ждёт утверждения) |
 | [`docs/ROADMAP.md`](./docs/ROADMAP.md) | Дорожная карта разработки по фазам |
 | [`docs/PRINCIPLES.md`](./docs/PRINCIPLES.md) | Принципы разработки (инженерные и продуктовые) |
 | [`docs/QUALITY_STANDARDS.md`](./docs/QUALITY_STANDARDS.md) | Стандарты качества кода, тестирования, CI/CD |
