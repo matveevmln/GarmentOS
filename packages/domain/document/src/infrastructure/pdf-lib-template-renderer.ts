@@ -181,6 +181,11 @@ export class PdfLibTemplateRenderer implements DocumentRenderAdapter {
     const signatureLineWidth = 90; // pt — место для росписи от руки перед ФИО
     const signatureLineGap = 6; // pt — отступ между линией и напечатанным ФИО
     const nameLineHeight = 15; // pt — единая высота строки во всём блоке подписи
+    // Отступ перед самой строкой росписи (между "должностью" и линией для
+    // подписи) сделан больше обычной высоты строки — иначе от руки просто
+    // негде расписаться (владелец проекта, 2026-07-27: "ширина между ними
+    // должна быть больше, чтобы было место под роспись").
+    const signatureRowGap = 32;
     const nameRowCount = Math.max(template.signatures.left.nameLines.length, template.signatures.right.nameLines.length);
     for (const [index, block] of [template.signatures.left, template.signatures.right].entries()) {
       const x = MARGIN + index * columnWidth;
@@ -195,6 +200,7 @@ export class PdfLibTemplateRenderer implements DocumentRenderAdapter {
       paddedNameLines.forEach((line, lineIndex) => {
         const text = applyPlaceholders(line, data.fields);
         const isSignerNameLine = lineIndex === paddedNameLines.length - 1;
+        const isRowBeforeSigner = lineIndex === paddedNameLines.length - 2;
         if (isSignerNameLine) {
           ctx.page.drawLine({
             start: { x, y: lineY + 3 },
@@ -206,7 +212,7 @@ export class PdfLibTemplateRenderer implements DocumentRenderAdapter {
         } else if (text) {
           ctx.page.drawText(text, { x, y: lineY, size: 10, font, color: rgb(0, 0, 0) });
         }
-        lineY -= nameLineHeight;
+        lineY -= isRowBeforeSigner ? signatureRowGap : nameLineHeight;
       });
       ctx.page.drawText(block.stampLabel, { x, y: lineY, size: 10, font, color: rgb(0, 0, 0) });
     }
