@@ -164,7 +164,9 @@ export class PdfLibTemplateRenderer implements DocumentRenderAdapter {
     // Подписи без печатей — только места под подпись (требование владельца
     // проекта 2026-07-26: "без печатей, без подписей, места под подписи
     // оставить"). Заголовок → название стороны → пустое место под подпись/
-    // печать → должность+ФИО → "М.П." (структура эталона).
+    // печать → строка-линия для росписи от руки → должность+ФИО → "М.П."
+    // (структура эталона; линия для росписи добавлена 2026-07-27 — в исходном
+    // пустом месте не было видно, где именно расписываться).
     ensureSpace(ctx, 110);
     const columnWidth = CONTENT_WIDTH / 2;
     const signatureTop = ctx.y;
@@ -175,6 +177,13 @@ export class PdfLibTemplateRenderer implements DocumentRenderAdapter {
       lineY -= 15;
       ctx.page.drawText(applyPlaceholders(block.companyLine, data.fields), { x, y: lineY, size: 10, font, color: rgb(0, 0, 0) });
       lineY -= 34; // пустое место под подпись/печать
+      const signatureLineWidth = columnWidth - 60;
+      ctx.page.drawLine({
+        start: { x, y: lineY + 8 },
+        end: { x: x + signatureLineWidth, y: lineY + 8 },
+        thickness: 0.75,
+        color: rgb(0, 0, 0),
+      });
       for (const line of block.nameLines) {
         ctx.page.drawText(applyPlaceholders(line, data.fields), { x, y: lineY, size: 10, font, color: rgb(0, 0, 0) });
         lineY -= 15;
