@@ -168,22 +168,33 @@ export class PdfLibTemplateRenderer implements DocumentRenderAdapter {
     // подписи (ФИО), на одной строке с ней → "М.П." — официальный формат
     // ("_________________ Фамилия И.О."), поправлено 2026-07-27: линия должна
     // стоять напротив фамилии, а не отдельной строкой над всем блоком.
+    //
+    // Левый и правый блок могут иметь разное число строк до подписи (у
+    // Исполнителя — "должность" + ФИО, у Заказчика-ИП — только ФИО). Чтобы обе
+    // строки для росписи и "М.П." оказались строго на одной горизонтали
+    // (владелец проекта, 2026-07-27: "должно быть всё ровно, как под
+    // линейку"), более короткий блок дополняется пустыми строками СВЕРХУ —
+    // строка подписи всегда последняя и всегда на одной и той же высоте.
     ensureSpace(ctx, 110);
     const columnWidth = CONTENT_WIDTH / 2;
     const signatureTop = ctx.y;
     const signatureLineWidth = 90; // pt — место для росписи от руки перед ФИО
     const signatureLineGap = 6; // pt — отступ между линией и напечатанным ФИО
+    const nameLineHeight = 15; // pt — единая высота строки во всём блоке подписи
+    const nameRowCount = Math.max(template.signatures.left.nameLines.length, template.signatures.right.nameLines.length);
     for (const [index, block] of [template.signatures.left, template.signatures.right].entries()) {
       const x = MARGIN + index * columnWidth;
       let lineY = signatureTop;
       ctx.page.drawText(block.headerLine, { x, y: lineY, size: 10.5, font: boldFont, color: rgb(0, 0, 0) });
-      lineY -= 15;
+      lineY -= nameLineHeight;
       ctx.page.drawText(applyPlaceholders(block.companyLine, data.fields), { x, y: lineY, size: 10, font, color: rgb(0, 0, 0) });
       lineY -= 34; // пустое место под реквизиты стороны
 
-      block.nameLines.forEach((line, lineIndex) => {
+      const padding = nameRowCount - block.nameLines.length;
+      const paddedNameLines = [...Array<string>(padding).fill(""), ...block.nameLines];
+      paddedNameLines.forEach((line, lineIndex) => {
         const text = applyPlaceholders(line, data.fields);
-        const isSignerNameLine = lineIndex === block.nameLines.length - 1;
+        const isSignerNameLine = lineIndex === paddedNameLines.length - 1;
         if (isSignerNameLine) {
           ctx.page.drawLine({
             start: { x, y: lineY + 3 },
@@ -192,10 +203,10 @@ export class PdfLibTemplateRenderer implements DocumentRenderAdapter {
             color: rgb(0, 0, 0),
           });
           ctx.page.drawText(text, { x: x + signatureLineWidth + signatureLineGap, y: lineY, size: 10, font, color: rgb(0, 0, 0) });
-        } else {
+        } else if (text) {
           ctx.page.drawText(text, { x, y: lineY, size: 10, font, color: rgb(0, 0, 0) });
         }
-        lineY -= 15;
+        lineY -= nameLineHeight;
       });
       ctx.page.drawText(block.stampLabel, { x, y: lineY, size: 10, font, color: rgb(0, 0, 0) });
     }
