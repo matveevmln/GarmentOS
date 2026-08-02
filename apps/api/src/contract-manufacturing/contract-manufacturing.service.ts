@@ -3,6 +3,7 @@ import {
   confirmProductionOrder,
   createProductionOrderDraft,
   createWorkshop,
+  receiveProductionOrder as receiveProductionOrderUseCase,
   updateProductionOrderStatusFromWorkshop,
   type BomApprovalPort,
   type ProductionOrder,
@@ -11,6 +12,8 @@ import {
   type WorkshopRepository,
 } from "@garmentos/domain-contract-manufacturing";
 import type { CreateProductionOrderDto, CreateWorkshopDto } from "@garmentos/shared-types";
+import type { AuthenticatedRequestUser } from "../auth/current-user.decorator";
+import { WarehouseService } from "../warehouse/warehouse.service";
 import { BOM_APPROVAL_PORT, PRODUCTION_ORDER_REPOSITORY, WORKSHOP_REPOSITORY } from "./contract-manufacturing.tokens";
 
 // Тонкий presentation-адаптер поверх packages/domain/contract-manufacturing
@@ -22,6 +25,7 @@ export class ContractManufacturingService {
     @Inject(WORKSHOP_REPOSITORY) private readonly workshops: WorkshopRepository,
     @Inject(PRODUCTION_ORDER_REPOSITORY) private readonly productionOrders: ProductionOrderRepository,
     @Inject(BOM_APPROVAL_PORT) private readonly bomApproval: BomApprovalPort,
+    private readonly warehouseService: WarehouseService,
   ) {}
 
   async createWorkshop(companyId: string, input: CreateWorkshopDto): Promise<Workshop> {
@@ -56,6 +60,34 @@ export class ContractManufacturingService {
       { productionOrders: this.productionOrders },
       { companyId, workshopId, status },
     );
+  }
+
+  // Приёмка партии от цеха на склад (Итерация 10) — переводит заказ в
+  // received и зачисляет каждый SKU (variants) на выбранный склад через
+  // WarehouseService.receiveStock, тот же принцип композиции на границе
+  // модулей, что и ProcurementService.receivePurchaseOrder (материалы).
+  async receiveProductionOrder(
+    currentUser: AuthenticatedRequestUser,
+    productionOrderId: string,
+    warehouseId: string,
+  ): Promise<ProductionOrder> {
+    const order = await receiveProductionOrderUseCase(
+      { productionOrders: this.productionOrders },
+      { companyId: currentUser.companyId, productionOrderId },
+    );
+
+    for (const variant of order.variants) {
+      await this.warehouseService.receiveStock(currentUser, {
+        warehouseId,
+        productVariantId: variant.productVariantId,
+        quantity: Number(variant.quantity),
+        referenceType: "production_order",
+        referenceId: order.id,
+        createdBy: currentUser.id,
+      });
+    }
+
+    return order;
   }
 
   async reserveNextSpecificationNumber(workshopId: string): Promise<number> {

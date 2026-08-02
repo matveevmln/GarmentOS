@@ -104,6 +104,21 @@ export function assertCanConfirm(status: ProductionOrderStatus): void {
   }
 }
 
+// Приёмка партии на наш склад (Итерация 10) — подтверждается нашей стороной
+// после того, как цех сообщил "готово к отгрузке"; нельзя принять черновик,
+// уже размещённый в работе заказ или уже принятую/отменённую партию. Для
+// MVP "received" — терминальный статус заказа (закрытие заказа = приёмка),
+// разбор по партиям/браку сознательно отложен до Баланса производственной
+// партии (docs/PRODUCTION_BATCH_LIFECYCLE_ARCHITECTURE.md).
+export function assertCanReceive(status: ProductionOrderStatus): void {
+  if (status !== "ready_for_pickup") {
+    throw new DomainError(
+      `Нельзя принять заказ пошива в статусе "${status}" — приёмка доступна только когда цех сообщил "готово к отгрузке"`,
+      "PRODUCTION_ORDER_NOT_READY_FOR_PICKUP",
+    );
+  }
+}
+
 // Статус, который цех сообщает сам (простой текстовый ответ в Telegram,
 // docs/TELEGRAM_INTEGRATION_ARCHITECTURE.md, раздел 4) — узкий набор,
 // достаточный для Итерации 7: "начали шить"/"готово". "received" — это

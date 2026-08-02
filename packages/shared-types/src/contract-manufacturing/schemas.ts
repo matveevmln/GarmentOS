@@ -81,6 +81,15 @@ export const createProductionOrderSchema = z.object({
 });
 export type CreateProductionOrderDto = z.infer<typeof createProductionOrderSchema>;
 
+// Приёмка партии на склад (Итерация 10) — склад, на который зачисляются все
+// SKU заказа, выбирается человеком при приёмке (в отличие от материалов,
+// авторезолв единственного склада компании здесь не подходит: заказ пошива —
+// это готовая продукция, которая может приходить на другой склад, чем сырьё).
+export const receiveProductionOrderSchema = z.object({
+  warehouseId: z.string().uuid(),
+});
+export type ReceiveProductionOrderDto = z.infer<typeof receiveProductionOrderSchema>;
+
 export const productionOrderVariantResponseSchema = z.object({
   id: z.string().uuid(),
   productionOrderId: z.string().uuid(),

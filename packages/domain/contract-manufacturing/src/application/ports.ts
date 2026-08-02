@@ -56,6 +56,10 @@ export interface ProductionOrderRepository {
   create(input: NewProductionOrderInput): Promise<ProductionOrder>;
   findById(companyId: string, id: string): Promise<ProductionOrder | null>;
   updateStatus(id: string, status: ProductionOrderStatus): Promise<ProductionOrder>;
+  // Приёмка партии (Итерация 10) — статус и receivedAt устанавливаются
+  // одной атомарной операцией, в отличие от updateStatus, который не знает
+  // о receivedAt.
+  markReceived(id: string): Promise<ProductionOrder>;
   // Нужен для обработки входящего статус-обновления от цеха через Telegram
   // (Итерация 7) — сообщение не ссылается на конкретный productionOrderId
   // (простой текстовый ответ, не структурированная команда), поэтому

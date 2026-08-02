@@ -37,6 +37,11 @@ export {
   type UpdateProductionOrderStatusFromWorkshopDeps,
   type UpdateProductionOrderStatusFromWorkshopInput,
 } from "./application/update-production-order-status-from-workshop";
+export {
+  receiveProductionOrder,
+  type ReceiveProductionOrderDeps,
+  type ReceiveProductionOrderInput,
+} from "./application/receive-production-order";
 
 export {
   DrizzleProductionOrderRepository,

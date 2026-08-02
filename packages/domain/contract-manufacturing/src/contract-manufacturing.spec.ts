@@ -19,6 +19,7 @@ import { confirmProductionOrder } from "./application/confirm-production-order";
 import { createProductionOrderDraft } from "./application/create-production-order";
 import { createWorkshop } from "./application/create-workshop";
 import type { BomApprovalPort } from "./application/ports";
+import { receiveProductionOrder } from "./application/receive-production-order";
 import { updateProductionOrderStatusFromWorkshop } from "./application/update-production-order-status-from-workshop";
 import { DomainError } from "./domain/errors";
 import {
@@ -219,6 +220,60 @@ describe("domain/contract-manufacturing", () => {
           { productionOrders },
           { companyId: company.id, workshopId: workshop.id, status: "in_progress" },
         ),
+      ).rejects.toThrow(DomainError);
+    });
+  });
+
+  it("принимает партию (received) только из статуса 'готово к отгрузке', устанавливая receivedAt", async () => {
+    await runInRolledBackTransaction(async (tx) => {
+      const { company, product, variant, boms, approvedBom, workshops, workshop } = await seedApprovedBomAndVariant(tx);
+      const productionOrders = new DrizzleProductionOrderRepository(tx);
+      const bomApproval = makeBomApprovalPort(boms);
+
+      const draft = await createProductionOrderDraft(
+        { productionOrders, workshops, bomApproval },
+        {
+          companyId: company.id,
+          productId: product.id,
+          bomId: approvedBom.id,
+          workshopId: workshop.id,
+          plannedQuantity: 100,
+          agreedUnitPrice: 450,
+          variants: [{ productVariantId: variant.id, quantity: 100 }],
+        },
+      );
+
+      // Нельзя принять черновик.
+      await expect(
+        receiveProductionOrder({ productionOrders }, { companyId: company.id, productionOrderId: draft.id }),
+      ).rejects.toThrow(/готово к отгрузке/);
+
+      await confirmProductionOrder({ productionOrders }, { companyId: company.id, productionOrderId: draft.id });
+      await updateProductionOrderStatusFromWorkshop(
+        { productionOrders },
+        { companyId: company.id, workshopId: workshop.id, status: "in_progress" },
+      );
+
+      // Нельзя принять заказ "в работе" — только "готово к отгрузке".
+      await expect(
+        receiveProductionOrder({ productionOrders }, { companyId: company.id, productionOrderId: draft.id }),
+      ).rejects.toThrow(DomainError);
+
+      await updateProductionOrderStatusFromWorkshop(
+        { productionOrders },
+        { companyId: company.id, workshopId: workshop.id, status: "ready_for_pickup" },
+      );
+
+      const received = await receiveProductionOrder(
+        { productionOrders },
+        { companyId: company.id, productionOrderId: draft.id },
+      );
+      expect(received.status).toBe("received");
+      expect(received.receivedAt).not.toBeNull();
+
+      // Повторная приёмка уже принятой партии запрещена.
+      await expect(
+        receiveProductionOrder({ productionOrders }, { companyId: company.id, productionOrderId: draft.id }),
       ).rejects.toThrow(DomainError);
     });
   });

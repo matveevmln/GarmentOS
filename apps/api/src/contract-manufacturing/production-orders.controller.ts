@@ -4,6 +4,7 @@ import { createZodDto } from "nestjs-zod";
 import {
   createProductionOrderSchema,
   productionOrderResponseSchema,
+  receiveProductionOrderSchema,
   type ProductionOrderResponseDto,
 } from "@garmentos/shared-types";
 import { CurrentUser, type AuthenticatedRequestUser } from "../auth/current-user.decorator";
@@ -11,6 +12,7 @@ import { RequirePermissions } from "../auth/require-permissions.decorator";
 import { ContractManufacturingService } from "./contract-manufacturing.service";
 
 class CreateProductionOrderDto extends createZodDto(createProductionOrderSchema) {}
+class ReceiveProductionOrderDto extends createZodDto(receiveProductionOrderSchema) {}
 
 @ApiTags("production-orders")
 @Controller("production-orders")
@@ -39,6 +41,24 @@ export class ProductionOrdersController {
     const productionOrder = await this.contractManufacturingService.confirmProductionOrder(
       currentUser.companyId,
       id,
+    );
+    return productionOrderResponseSchema.parse(productionOrder);
+  }
+
+  // Приёмка партии на склад (Итерация 10) — доступна только когда цех
+  // сообщил "готово к отгрузке" (assertCanReceive), склад выбирается тем, кто
+  // принимает партию физически.
+  @RequirePermissions("contract_manufacturing.write")
+  @Post(":id/receive")
+  async receive(
+    @Param("id") id: string,
+    @Body() body: ReceiveProductionOrderDto,
+    @CurrentUser() currentUser: AuthenticatedRequestUser,
+  ): Promise<ProductionOrderResponseDto> {
+    const productionOrder = await this.contractManufacturingService.receiveProductionOrder(
+      currentUser,
+      id,
+      body.warehouseId,
     );
     return productionOrderResponseSchema.parse(productionOrder);
   }

@@ -26,6 +26,8 @@ import {
   purchaseOrderItems,
   purchaseOrders,
   refreshTokens,
+  stockItems,
+  stockMovements,
   suppliers,
   telegramInviteCodes,
   userRoles,
@@ -36,6 +38,7 @@ import {
 import type {
   BomResponseDto,
   MaterialResponseDto,
+  ProductionOrderResponseDto,
   ProductResponseDto,
   PurchaseOrderResponseDto,
   SupplierResponseDto,
@@ -59,6 +62,12 @@ if (!databaseUrl) {
 const db = createDb(databaseUrl);
 
 const SIZES = ["48-50", "52-54"];
+
+interface ErrorResponseBody {
+  statusCode: number;
+  code?: string;
+  message: string;
+}
 
 // Полный разговорный сценарий владельца проекта (2026-07-26): "Telegram —
 // тонкий интерфейс, вся логика в GarmentOS". Пользователь пишет текст,
@@ -136,6 +145,14 @@ describe("Telegram: текст → предпросмотр → подтверж
             await db.delete(materialStockMovements).where(eq(materialStockMovements.materialStockItemId, stockItem.id));
           }
           await db.delete(materialStockItems).where(eq(materialStockItems.warehouseId, warehouse.id));
+          const finishedStockItemsForWarehouse = await db
+            .select()
+            .from(stockItems)
+            .where(eq(stockItems.warehouseId, warehouse.id));
+          for (const stockItem of finishedStockItemsForWarehouse) {
+            await db.delete(stockMovements).where(eq(stockMovements.stockItemId, stockItem.id));
+          }
+          await db.delete(stockItems).where(eq(stockItems.warehouseId, warehouse.id));
         }
         await db.delete(warehouses).where(eq(warehouses.companyId, company.id));
         const companyPurchaseOrders = await db.select().from(purchaseOrders).where(eq(purchaseOrders.companyId, company.id));
@@ -334,6 +351,40 @@ describe("Telegram: текст → предпросмотр → подтверж
     const notification = sentMessages.slice(messagesBeforeStatus).find((sent) => sent.chatId === chatId);
     expect(notification?.text).toContain("Цех Единственный");
     expect(notification?.text).toContain("готово к отгрузке");
+
+    // Шаг 4: приёмка партии на склад (Итерация 10) — доступна только теперь,
+    // когда цех сообщил "готово к отгрузке"; зачисляет каждый SKU заказа на
+    // склад и переводит заказ в терминальный статус received.
+    const receiveResponse = await request(httpServer)
+      .post(`/v1/production-orders/${orderId}/receive`)
+      .set(...authHeader(accessToken))
+      .send({ warehouseId: warehouse.id })
+      .expect(201);
+    const received = receiveResponse.body as ProductionOrderResponseDto;
+    expect(received.status).toBe("received");
+    expect(received.receivedAt).not.toBeNull();
+
+    const totalReceivedQuantity = received.variants.reduce((sum, variant) => sum + Number(variant.quantity), 0);
+    expect(totalReceivedQuantity).toBe(100);
+
+    let stockOnHandAcrossVariants = 0;
+    for (const variant of received.variants) {
+      const [stockItem] = await db
+        .select()
+        .from(stockItems)
+        .where(and(eq(stockItems.warehouseId, warehouse.id), eq(stockItems.productVariantId, variant.productVariantId)));
+      stockOnHandAcrossVariants += Number(stockItem?.quantityOnHand ?? 0);
+    }
+    expect(stockOnHandAcrossVariants).toBe(100);
+
+    // Повторная приёмка уже принятой партии запрещена.
+    const repeatReceiveResponse = await request(httpServer)
+      .post(`/v1/production-orders/${orderId}/receive`)
+      .set(...authHeader(accessToken))
+      .send({ warehouseId: warehouse.id })
+      .expect(409);
+    const repeatReceiveBody = repeatReceiveResponse.body as ErrorResponseBody;
+    expect(repeatReceiveBody.code).toBe("PRODUCTION_ORDER_NOT_READY_FOR_PICKUP");
   });
 
   it("предпросмотр содержит inline-кнопки, подтверждение и отмена работают через нажатие кнопки", async () => {

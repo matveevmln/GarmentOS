@@ -197,6 +197,22 @@ export class DrizzleProductionOrderRepository implements ProductionOrderReposito
     return toProductionOrder(orderRow, variantRows);
   }
 
+  async markReceived(id: string): Promise<ProductionOrder> {
+    const [orderRow] = await this.db
+      .update(productionOrders)
+      .set({ status: "received", receivedAt: new Date(), updatedAt: new Date() })
+      .where(eq(productionOrders.id, id))
+      .returning();
+    if (!orderRow) throw new Error(`UPDATE production_orders не нашёл строку id=${id}`);
+
+    const variantRows = await this.db
+      .select()
+      .from(productionOrderVariants)
+      .where(eq(productionOrderVariants.productionOrderId, orderRow.id));
+
+    return toProductionOrder(orderRow, variantRows);
+  }
+
   async findLatestActiveByWorkshop(companyId: string, workshopId: string): Promise<ProductionOrder | null> {
     const [orderRow] = await this.db
       .select()
