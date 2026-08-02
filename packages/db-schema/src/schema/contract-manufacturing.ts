@@ -1,4 +1,4 @@
-import { boolean, date, integer, numeric, pgEnum, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { boolean, date, index, integer, numeric, pgEnum, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 import { auditColumns, id, softDelete } from "./_shared";
 import { companies, users } from "./identity";
 import { products, productVariants } from "./catalog";
@@ -63,31 +63,40 @@ export const workshops = pgTable("workshops", {
   ...softDelete,
 });
 
-export const productionOrders = pgTable("production_orders", {
-  id: id(),
-  companyId: uuid("company_id")
-    .notNull()
-    .references(() => companies.id),
-  productId: uuid("product_id")
-    .notNull()
-    .references(() => products.id),
-  bomId: uuid("bom_id")
-    .notNull()
-    .references(() => boms.id),
-  workshopId: uuid("workshop_id")
-    .notNull()
-    .references(() => workshops.id),
-  plannedQuantity: numeric("planned_quantity", { precision: 12, scale: 3 }).notNull(),
-  agreedUnitPrice: numeric("agreed_unit_price", { precision: 14, scale: 2 }).notNull(),
-  materialsProvidedByUs: boolean("materials_provided_by_us").notNull().default(true),
-  status: productionOrderStatusEnum("status").notNull().default("placed"),
-  dueDate: date("due_date"),
-  // Фактическая дата завершения — без неё нельзя сравнить план (due_date) и
-  // факт для рейтинга цеха и алертов о просрочке (USER_JOURNEY_AUDIT.md, пробел №5).
-  receivedAt: timestamp("received_at", { withTimezone: true }),
-  createdBy: uuid("created_by").references(() => users.id),
-  ...auditColumns,
-});
+export const productionOrders = pgTable(
+  "production_orders",
+  {
+    id: id(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id),
+    productId: uuid("product_id")
+      .notNull()
+      .references(() => products.id),
+    bomId: uuid("bom_id")
+      .notNull()
+      .references(() => boms.id),
+    workshopId: uuid("workshop_id")
+      .notNull()
+      .references(() => workshops.id),
+    plannedQuantity: numeric("planned_quantity", { precision: 12, scale: 3 }).notNull(),
+    agreedUnitPrice: numeric("agreed_unit_price", { precision: 14, scale: 2 }).notNull(),
+    materialsProvidedByUs: boolean("materials_provided_by_us").notNull().default(true),
+    status: productionOrderStatusEnum("status").notNull().default("placed"),
+    dueDate: date("due_date"),
+    // Фактическая дата завершения — без неё нельзя сравнить план (due_date) и
+    // факт для рейтинга цеха и алертов о просрочке (USER_JOURNEY_AUDIT.md, пробел №5).
+    receivedAt: timestamp("received_at", { withTimezone: true }),
+    createdBy: uuid("created_by").references(() => users.id),
+    ...auditColumns,
+  },
+  (table) => [
+    // docs/DATABASE_SCHEMA.md, раздел 17 — «заказы с риском просрочки»
+    // (ARCHITECTURE_REVIEW.md, находка 4.1: отсутствовал в фактической
+    // миграции, хотя был задокументирован как обязательный).
+    index("production_orders_company_status_due_idx").on(table.companyId, table.status, table.dueDate),
+  ],
+);
 
 export const productionOrderVariants = pgTable("production_order_variants", {
   id: id(),

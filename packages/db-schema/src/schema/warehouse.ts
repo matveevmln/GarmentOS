@@ -1,4 +1,4 @@
-import { numeric, pgEnum, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { index, numeric, pgEnum, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import { auditColumns, id } from "./_shared";
 import { companies, users } from "./identity";
 import { productVariants } from "./catalog";
@@ -79,21 +79,30 @@ export const stockItems = pgTable(
   ],
 );
 
-export const stockMovements = pgTable("stock_movements", {
-  id: id(),
-  stockItemId: uuid("stock_item_id")
-    .notNull()
-    .references(() => stockItems.id),
-  type: stockMovementTypeEnum("type").notNull(),
-  quantity: numeric("quantity", { precision: 12, scale: 3 }).notNull(),
-  // Полиморфная ссылка на источник движения (production_order, purchase_order,
-  // shipment, order, inventory_count, ...) — см. соглашение в _shared.ts/documents.
-  referenceType: text("reference_type"),
-  referenceId: uuid("reference_id"),
-  occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull().defaultNow(),
-  createdBy: uuid("created_by").references(() => users.id),
-  ...auditColumns,
-});
+export const stockMovements = pgTable(
+  "stock_movements",
+  {
+    id: id(),
+    stockItemId: uuid("stock_item_id")
+      .notNull()
+      .references(() => stockItems.id),
+    type: stockMovementTypeEnum("type").notNull(),
+    quantity: numeric("quantity", { precision: 12, scale: 3 }).notNull(),
+    // Полиморфная ссылка на источник движения (production_order, purchase_order,
+    // shipment, order, inventory_count, ...) — см. соглашение в _shared.ts/documents.
+    referenceType: text("reference_type"),
+    referenceId: uuid("reference_id"),
+    occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull().defaultNow(),
+    createdBy: uuid("created_by").references(() => users.id),
+    ...auditColumns,
+  },
+  (table) => [
+    // docs/DATABASE_SCHEMA.md, раздел 17 — история движений по конкретному
+    // остатку (карточка SKU/материала); самая быстрорастущая таблица после
+    // audit_log (ARCHITECTURE_REVIEW.md, находка 4.1).
+    index("stock_movements_stock_item_occurred_idx").on(table.stockItemId, table.occurredAt),
+  ],
+);
 
 export const materialStockItems = pgTable(
   "material_stock_items",
