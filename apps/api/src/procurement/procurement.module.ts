@@ -6,6 +6,7 @@ import {
   DrizzleSupplierRepository,
 } from "@garmentos/domain-procurement";
 import { DATABASE_CONNECTION } from "../database/database.module";
+import { WarehouseModule } from "../warehouse/warehouse.module";
 import { MaterialsController } from "./materials.controller";
 import { SuppliersController } from "./suppliers.controller";
 import { PurchaseOrdersController } from "./purchase-orders.controller";
@@ -13,6 +14,10 @@ import { MATERIAL_REPOSITORY, PURCHASE_ORDER_REPOSITORY, SUPPLIER_REPOSITORY } f
 import { ProcurementService } from "./procurement.service";
 
 @Module({
+  // WarehouseModule — приёмка закупки увеличивает остаток материала на
+  // складе (Итерация 9, владелец проекта 2026-08-02); Procurement не
+  // дублирует складскую логику, а вызывает уже существующий WarehouseService.
+  imports: [WarehouseModule],
   controllers: [MaterialsController, SuppliersController, PurchaseOrdersController],
   providers: [
     ProcurementService,
@@ -32,5 +37,8 @@ import { ProcurementService } from "./procurement.service";
       inject: [DATABASE_CONNECTION],
     },
   ],
+  // ProcurementService нужен ai-production-assistant (проверка наличия
+  // материалов по названию, Итерация 9) — переиспользуется, не дублируется.
+  exports: [ProcurementService],
 })
 export class ProcurementModule {}

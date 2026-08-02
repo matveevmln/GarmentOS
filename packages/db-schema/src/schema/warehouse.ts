@@ -3,6 +3,7 @@ import { auditColumns, id } from "./_shared";
 import { companies, users } from "./identity";
 import { productVariants } from "./catalog";
 import { workshops } from "./contract-manufacturing";
+import { materials } from "./procurement";
 
 // docs/DATABASE_SCHEMA.md, раздел 9 (Warehouse & Inventory).
 
@@ -24,6 +25,16 @@ export const inventoryCountStatusEnum = pgEnum("inventory_count_status", [
   "in_progress",
   "completed",
   "cancelled",
+]);
+
+// Материалы не резервируются (в отличие от готовых SKU) — только приёмка (из
+// закупки), расход (при подтверждении заказа пошива) и корректировка
+// (владелец проекта, 2026-08-02: "проверить наличие ткани и фурнитуры" —
+// до этой правки остатки материалов нигде не отслеживались).
+export const materialStockMovementTypeEnum = pgEnum("material_stock_movement_type", [
+  "receipt",
+  "consumption",
+  "adjustment",
 ]);
 
 export const warehouses = pgTable(
@@ -77,6 +88,40 @@ export const stockMovements = pgTable("stock_movements", {
   quantity: numeric("quantity", { precision: 12, scale: 3 }).notNull(),
   // Полиморфная ссылка на источник движения (production_order, purchase_order,
   // shipment, order, inventory_count, ...) — см. соглашение в _shared.ts/documents.
+  referenceType: text("reference_type"),
+  referenceId: uuid("reference_id"),
+  occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull().defaultNow(),
+  createdBy: uuid("created_by").references(() => users.id),
+  ...auditColumns,
+});
+
+export const materialStockItems = pgTable(
+  "material_stock_items",
+  {
+    id: id(),
+    warehouseId: uuid("warehouse_id")
+      .notNull()
+      .references(() => warehouses.id),
+    materialId: uuid("material_id")
+      .notNull()
+      .references(() => materials.id),
+    quantityOnHand: numeric("quantity_on_hand", { precision: 12, scale: 3 }).notNull().default("0"),
+    ...auditColumns,
+  },
+  (table) => [
+    uniqueIndex("material_stock_items_warehouse_material_idx").on(table.warehouseId, table.materialId),
+  ],
+);
+
+export const materialStockMovements = pgTable("material_stock_movements", {
+  id: id(),
+  materialStockItemId: uuid("material_stock_item_id")
+    .notNull()
+    .references(() => materialStockItems.id),
+  type: materialStockMovementTypeEnum("type").notNull(),
+  quantity: numeric("quantity", { precision: 12, scale: 3 }).notNull(),
+  // Полиморфная ссылка на источник движения (purchase_order, production_order,
+  // ...) — то же соглашение, что и stockMovements.referenceType/referenceId.
   referenceType: text("reference_type"),
   referenceId: uuid("reference_id"),
   occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull().defaultNow(),

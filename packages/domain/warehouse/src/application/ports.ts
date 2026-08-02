@@ -1,5 +1,6 @@
 import type { Warehouse, WarehouseType } from "../domain/warehouse";
 import type { StockItem } from "../domain/stock";
+import type { MaterialStockItem } from "../domain/material-stock";
 import type { Shipment, ShipmentItemDraft, ShipmentStatus } from "../domain/shipment";
 import type { InventoryCount, InventoryCountStatus } from "../domain/inventory-count";
 
@@ -15,6 +16,11 @@ export interface NewWarehouseInput {
 export interface WarehouseRepository {
   create(input: NewWarehouseInput): Promise<Warehouse>;
   findById(companyId: string, id: string): Promise<Warehouse | null>;
+  // Нужен для авторезолва склада при проверке наличия материалов в
+  // предпросмотре заказа пошива (Итерация 9, владелец проекта, 2026-08-02):
+  // если у компании ровно один склад, выбирается автоматически — тот же
+  // принцип, что listActiveByCompany у цехов (contract-manufacturing).
+  listByCompany(companyId: string): Promise<Warehouse[]>;
 }
 
 export interface StockMovementMeta {
@@ -46,6 +52,20 @@ export interface StockRepository {
     actualQuantity: number,
     createdBy: string | null,
   ): Promise<{ stockItem: StockItem; discrepancy: number }>;
+}
+
+export interface MaterialStockMovementMeta {
+  referenceType?: string | null;
+  referenceId?: string | null;
+  createdBy?: string | null;
+}
+
+// Материалы не резервируются (в отличие от готовых SKU) — только приёмка
+// (из закупки), расход (при подтверждении заказа пошива) и корректировка.
+export interface MaterialStockRepository {
+  findMaterialStockItem(warehouseId: string, materialId: string): Promise<MaterialStockItem | null>;
+  receive(warehouseId: string, materialId: string, quantity: number, meta: MaterialStockMovementMeta): Promise<MaterialStockItem>;
+  consume(warehouseId: string, materialId: string, quantity: number, meta: MaterialStockMovementMeta): Promise<MaterialStockItem>;
 }
 
 export interface NewShipmentInput {

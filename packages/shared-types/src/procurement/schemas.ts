@@ -100,3 +100,12 @@ export const purchaseOrderResponseSchema = z.object({
 });
 export type PurchaseOrderResponseDto = z.infer<typeof purchaseOrderResponseSchema>;
 
+// Приёмка закупки — материалы поступают на указанный склад (не угадывается,
+// владелец проекта, 2026-08-02): каждая позиция закупки увеличивает остаток
+// материала на этом складе на заказанное количество (MVP: приёмка только
+// "всё и сразу", без частичных количеств по строкам).
+export const receivePurchaseOrderSchema = z.object({
+  warehouseId: z.string().uuid(),
+});
+export type ReceivePurchaseOrderDto = z.infer<typeof receivePurchaseOrderSchema>;
+

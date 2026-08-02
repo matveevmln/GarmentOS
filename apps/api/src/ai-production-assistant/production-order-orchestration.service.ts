@@ -1,13 +1,17 @@
-import { Inject, Injectable } from "@nestjs/common";
+import { Inject, Injectable, Logger } from "@nestjs/common";
+import type { BomItem } from "@garmentos/domain-bom";
 import type { ProductionOrder } from "@garmentos/domain-contract-manufacturing";
 import type { DocumentEntity, SpecificationDocumentData, SpecificationLineItem } from "@garmentos/domain-document";
+import { DomainError as WarehouseDomainError } from "@garmentos/domain-warehouse";
 import { BomService } from "../bom/bom.service";
 import { CatalogService } from "../catalog/catalog.service";
 import { ContractManufacturingService } from "../contract-manufacturing/contract-manufacturing.service";
 import { DocumentService } from "../document/document.service";
 import { IdentityService } from "../identity/identity.service";
+import { ProcurementService } from "../procurement/procurement.service";
 import type { TelegramClient } from "../telegram/telegram-client";
 import { TELEGRAM_CLIENT } from "../telegram/telegram.tokens";
+import { WarehouseService } from "../warehouse/warehouse.service";
 import { ProductionRequestService } from "./production-request.service";
 import { formatRuAmount, formatRuQuantity } from "./ru-number-format";
 
@@ -71,6 +75,7 @@ export class ProductionOrderOrchestrationService {
   // использовали тот же механизм (требование владельца проекта 2026-07-26:
   // "Telegram — только интерфейс, вся логика должна жить в GarmentOS").
   private readonly pendingByChannel = new Map<string, PendingProductionRequest>();
+  private readonly logger = new Logger(ProductionOrderOrchestrationService.name);
 
   constructor(
     private readonly productionRequestService: ProductionRequestService,
@@ -79,6 +84,8 @@ export class ProductionOrderOrchestrationService {
     private readonly contractManufacturingService: ContractManufacturingService,
     private readonly documentService: DocumentService,
     private readonly identityService: IdentityService,
+    private readonly procurementService: ProcurementService,
+    private readonly warehouseService: WarehouseService,
     @Inject(TELEGRAM_CLIENT) private readonly telegramClient: TelegramClient,
   ) {}
 
@@ -158,9 +165,11 @@ export class ProductionOrderOrchestrationService {
     }
 
     let bomFound = false;
+    let bomItems: BomItem[] = [];
     if (product) {
       const bom = await this.bomService.getApproved(companyId, { productId: product.id });
       bomFound = !!bom;
+      if (bom) bomItems = bom.items;
       if (!bomFound) warnings.push(`У модели "${parsed.modelName}" нет утверждённого BOM`);
     }
 
@@ -207,6 +216,11 @@ export class ProductionOrderOrchestrationService {
       items.push({ colorName: item.colorName, size: item.size, quantity: item.quantity, skuFound });
     }
 
+    if (bomFound && bomItems.length > 0) {
+      const totalQuantity = parsed.items.reduce((sum, item) => sum + item.quantity, 0);
+      warnings.push(...(await this.checkMaterialAvailability(companyId, bomItems, totalQuantity)));
+    }
+
     const canCreate =
       !!product && bomFound && !!workshopId && parsed.unitPrice !== null && items.every((item) => item.skuFound);
 
@@ -223,6 +237,73 @@ export class ProductionOrderOrchestrationService {
       warnings,
       canCreate,
     };
+  }
+
+  // Проверка наличия материалов — предупреждение, не блокирует создание
+  // заказа (в отличие от отсутствующей модели/BOM/цеха/SKU): нехватка
+  // материала — бизнес-риск, устранимый закупкой позже, а не структурная
+  // невозможность создать заказ (владелец проекта, 2026-08-02: "проверить
+  // наличие ткани и фурнитуры"). Склад резолвится автоматически, только если
+  // у компании ровно один — тот же принцип, что и авторезолв цеха.
+  private async checkMaterialAvailability(companyId: string, bomItems: BomItem[], totalQuantity: number): Promise<string[]> {
+    const warehouses = await this.warehouseService.listWarehouses(companyId);
+    if (warehouses.length === 0) {
+      return ["В системе нет ни одного склада — не удалось проверить наличие материалов"];
+    }
+    if (warehouses.length > 1) {
+      return ["У компании несколько складов — не удалось однозначно проверить наличие материалов"];
+    }
+    const warehouse = warehouses[0];
+    if (!warehouse) return [];
+
+    const warnings: string[] = [];
+    for (const bomItem of bomItems) {
+      const required = totalQuantity * Number(bomItem.quantityPerUnit) * (1 + Number(bomItem.wastePercent) / 100);
+      const stockItem = await this.warehouseService.findMaterialStockItem(warehouse.id, bomItem.materialId);
+      const onHand = stockItem ? Number(stockItem.quantityOnHand) : 0;
+      if (onHand < required) {
+        const material = await this.procurementService.findMaterialById(companyId, bomItem.materialId);
+        warnings.push(
+          `Недостаточно материала "${material?.name ?? bomItem.materialId}": требуется ${formatRuQuantity(required)}` +
+            `${material ? ` ${material.unit}` : ""}, на складе ${formatRuQuantity(onHand)}`,
+        );
+      }
+    }
+    return warnings;
+  }
+
+  // Расход материала при подтверждении заказа — вызывается только если
+  // материалы предоставляет компания (production_orders.materials_provided_by_us,
+  // по умолчанию true — CLAUDE.md, глоссарий: цех шьёт из наших материалов).
+  // Недостаток на складе не блокирует уже подтверждённый заказ (он был
+  // видимым предупреждением ещё в предпросмотре) — записывается расход по
+  // тому, что реально есть, остальное просто не списывается, ошибка логируется.
+  private async consumeMaterialsForOrder(companyId: string, order: ProductionOrder): Promise<void> {
+    if (!order.materialsProvidedByUs) return;
+
+    const bom = await this.bomService.getApproved(companyId, { productId: order.productId });
+    if (!bom) return;
+
+    const warehouses = await this.warehouseService.listWarehouses(companyId);
+    const warehouse = warehouses.length === 1 ? warehouses[0] : undefined;
+    if (!warehouse) return;
+
+    const totalQuantity = order.variants.reduce((sum, variant) => sum + Number(variant.quantity), 0);
+    for (const bomItem of bom.items) {
+      const required = totalQuantity * Number(bomItem.quantityPerUnit) * (1 + Number(bomItem.wastePercent) / 100);
+      try {
+        await this.warehouseService.consumeMaterialStock(warehouse.id, bomItem.materialId, required, {
+          referenceType: "production_order",
+          referenceId: order.id,
+        });
+      } catch (error) {
+        if (error instanceof WarehouseDomainError) {
+          this.logger.warn(`Недостаточно материала ${bomItem.materialId} для заказа ${order.id}: ${error.message}`);
+          continue;
+        }
+        throw error;
+      }
+    }
   }
 
   // Предпросмотр, адресованный конкретному разговорному каналу (Telegram-чат
@@ -250,8 +331,8 @@ export class ProductionOrderOrchestrationService {
   }
 
   // Вызывается после того, как человек ответил "Да" — только теперь система
-  // реально создаёт заказ, рассчитывает потребность (Итерация 8+, пока не
-  // реализовано), формирует PDF и отправляет спецификацию цеху (требование
+  // реально создаёт заказ, списывает расход материалов (consumeMaterialsForOrder,
+  // Итерация 9), формирует PDF и отправляет спецификацию цеху (требование
   // владельца проекта 2026-07-26: подтверждение должно быть осмысленным, не
   // просто Да/Нет "в никуда", и весь путь выполняется одним подтверждением).
   async confirmPendingRequest(
@@ -270,6 +351,7 @@ export class ProductionOrderOrchestrationService {
 
     const draft = await this.createFromText(pending.companyId, userId, pending.workshopId, pending.text);
     const order = await this.contractManufacturingService.confirmProductionOrder(pending.companyId, draft.id);
+    await this.consumeMaterialsForOrder(pending.companyId, order);
     const document = await this.generateAndSendSpecification(pending.companyId, order.id, userId);
     return { order, document };
   }

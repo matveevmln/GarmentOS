@@ -99,6 +99,13 @@
       "when": 1785660360714,
       "tag": "0013_hard_dazzler",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1785662534068,
+      "tag": "0014_zippy_malice",
+      "breakpoints": true
     }
   ]
 }

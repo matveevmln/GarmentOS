@@ -7,6 +7,7 @@ import type { INestApplication } from "@nestjs/common";
 import { VersioningType } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import {
+  auditLog,
   bomItems,
   boms,
   companies,
@@ -16,18 +17,33 @@ import {
   documents,
   inboxChannels,
   materials,
+  materialStockItems,
+  materialStockMovements,
   productionOrders,
   productionOrderVariants,
   productVariants,
   products,
+  purchaseOrderItems,
+  purchaseOrders,
   refreshTokens,
+  suppliers,
   telegramInviteCodes,
   userRoles,
   users,
+  warehouses,
   workshops,
 } from "@garmentos/db-schema";
-import type { BomResponseDto, MaterialResponseDto, ProductResponseDto, TelegramInviteResponseDto, WorkshopResponseDto } from "@garmentos/shared-types";
-import { eq } from "drizzle-orm";
+import type {
+  BomResponseDto,
+  MaterialResponseDto,
+  ProductResponseDto,
+  PurchaseOrderResponseDto,
+  SupplierResponseDto,
+  TelegramInviteResponseDto,
+  WarehouseResponseDto,
+  WorkshopResponseDto,
+} from "@garmentos/shared-types";
+import { and, eq } from "drizzle-orm";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { AppModule } from "../app.module";
@@ -103,12 +119,31 @@ describe("Telegram: текст → предпросмотр → подтверж
           await db.delete(bomItems).where(eq(bomItems.bomId, bom.id));
         }
         await db.delete(boms).where(eq(boms.companyId, company.id));
+        const companyWarehouses = await db.select().from(warehouses).where(eq(warehouses.companyId, company.id));
+        for (const warehouse of companyWarehouses) {
+          const stockItemsForWarehouse = await db
+            .select()
+            .from(materialStockItems)
+            .where(eq(materialStockItems.warehouseId, warehouse.id));
+          for (const stockItem of stockItemsForWarehouse) {
+            await db.delete(materialStockMovements).where(eq(materialStockMovements.materialStockItemId, stockItem.id));
+          }
+          await db.delete(materialStockItems).where(eq(materialStockItems.warehouseId, warehouse.id));
+        }
+        await db.delete(warehouses).where(eq(warehouses.companyId, company.id));
+        const companyPurchaseOrders = await db.select().from(purchaseOrders).where(eq(purchaseOrders.companyId, company.id));
+        for (const purchaseOrder of companyPurchaseOrders) {
+          await db.delete(purchaseOrderItems).where(eq(purchaseOrderItems.purchaseOrderId, purchaseOrder.id));
+        }
+        await db.delete(purchaseOrders).where(eq(purchaseOrders.companyId, company.id));
+        await db.delete(suppliers).where(eq(suppliers.companyId, company.id));
         await db.delete(materials).where(eq(materials.companyId, company.id));
         const companyProducts = await db.select().from(products).where(eq(products.companyId, company.id));
         for (const product of companyProducts) {
           await db.delete(productVariants).where(eq(productVariants.productId, product.id));
         }
         await db.delete(products).where(eq(products.companyId, company.id));
+        await db.delete(auditLog).where(eq(auditLog.companyId, company.id));
         const companyUsers = await db.select().from(users).where(eq(users.companyId, company.id));
         for (const user of companyUsers) {
           await db.delete(refreshTokens).where(eq(refreshTokens.userId, user.id));
@@ -160,6 +195,47 @@ describe("Telegram: текст → предпросмотр → подтверж
       .set(...authHeader(accessToken))
       .expect(201);
 
+    // Остаток материала — проверка наличия ткани/фурнитуры в предпросмотре и
+    // расход при подтверждении заказа (владелец проекта, 2026-08-02).
+    // Единственный склад компании резолвится автоматически, так же как и цех.
+    const warehouseResponse = await request(httpServer)
+      .post("/v1/warehouses")
+      .set(...authHeader(accessToken))
+      .send({ name: "Склад материалов" })
+      .expect(201);
+    const warehouse = warehouseResponse.body as WarehouseResponseDto;
+
+    const supplierResponse = await request(httpServer)
+      .post("/v1/suppliers")
+      .set(...authHeader(accessToken))
+      .send({ name: "Поставщик тканей", type: "fabric" })
+      .expect(201);
+    const supplier = supplierResponse.body as SupplierResponseDto;
+
+    // Заказано 100 шт (Молочный), норма расхода 1.1 м/шт без отходов —
+    // требуется 110 м. Приходуем 150 м — заведомо достаточно.
+    const purchaseOrderResponse = await request(httpServer)
+      .post("/v1/purchase-orders")
+      .set(...authHeader(accessToken))
+      .send({ supplierId: supplier.id, items: [{ materialId: material.id, quantity: 150, unitPrice: 200 }] })
+      .expect(201);
+    const purchaseOrder = purchaseOrderResponse.body as PurchaseOrderResponseDto;
+    await request(httpServer)
+      .post(`/v1/purchase-orders/${purchaseOrder.id}/confirm`)
+      .set(...authHeader(accessToken))
+      .expect(201);
+    await request(httpServer)
+      .post(`/v1/purchase-orders/${purchaseOrder.id}/receive`)
+      .set(...authHeader(accessToken))
+      .send({ warehouseId: warehouse.id })
+      .expect(201);
+
+    const [stockAfterReceive] = await db
+      .select()
+      .from(materialStockItems)
+      .where(and(eq(materialStockItems.warehouseId, warehouse.id), eq(materialStockItems.materialId, material.id)));
+    expect(Number(stockAfterReceive?.quantityOnHand)).toBe(150);
+
     // Единственный активный цех компании — резолвится автоматически, без
     // явного упоминания в тексте.
     const workshopResponse = await request(httpServer)
@@ -198,6 +274,11 @@ describe("Telegram: текст → предпросмотр → подтверж
     const ordersAfterPreview = await db.select().from(productionOrders).where(eq(productionOrders.workshopId, workshop.id));
     expect(ordersAfterPreview).toHaveLength(0);
 
+    // Материала достаточно (150 на складе, требуется 110) — предупреждения о
+    // нехватке в предпросмотре быть не должно.
+    const previewMessage = sentMessages.find((sent) => sent.chatId === chatId && sent.text.includes("Я понял заказ"));
+    expect(previewMessage?.text).not.toContain("Недостаточно материала");
+
     // Шаг 2: подтверждение — только теперь создаётся заказ, подтверждается и
     // генерируется спецификация.
     await request(httpServer)
@@ -213,6 +294,14 @@ describe("Telegram: текст → предпросмотр → подтверж
     const orderId = ordersAfterConfirm[0]?.id;
     const specLinks = await db.select().from(documentLinks).where(eq(documentLinks.entityId, orderId ?? ""));
     expect(specLinks).toHaveLength(1);
+
+    // Расход материала при подтверждении: 100 шт × 1.1 м/шт = 110 м списано
+    // со склада (150 - 110 = 40) — владелец проекта, 2026-08-02.
+    const [stockAfterConfirm] = await db
+      .select()
+      .from(materialStockItems)
+      .where(and(eq(materialStockItems.warehouseId, warehouse.id), eq(materialStockItems.materialId, material.id)));
+    expect(Number(stockAfterConfirm?.quantityOnHand)).toBe(40);
 
     // Шаг 3: цех отвечает "Готово" — компания должна узнать об этом в своём
     // Telegram-чате, а не только запросив статус напрямую через API (владелец

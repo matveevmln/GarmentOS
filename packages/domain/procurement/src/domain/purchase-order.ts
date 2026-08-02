@@ -64,3 +64,16 @@ export function assertCanConfirm(status: PurchaseOrderStatus): void {
     );
   }
 }
+
+// Приёмка материала возможна только после отправки поставщику — нельзя
+// принять то, что ещё не заказано, и нельзя принять отменённый заказ
+// (владелец проекта, 2026-08-02: остатки материалов должны появляться из
+// реальной приёмки закупки, а не из воздуха).
+export function assertCanReceive(status: PurchaseOrderStatus): void {
+  if (status !== "sent" && status !== "partially_received") {
+    throw new DomainError(
+      `Нельзя принять закупку в статусе "${status}" — приёмка доступна только после отправки поставщику`,
+      "PURCHASE_ORDER_NOT_RECEIVABLE",
+    );
+  }
+}

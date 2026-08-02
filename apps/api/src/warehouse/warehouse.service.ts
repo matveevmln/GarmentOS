@@ -1,12 +1,14 @@
 import { Inject, Injectable } from "@nestjs/common";
 import {
   completeInventoryCount,
+  consumeMaterialStock as consumeMaterialStockUseCase,
   createInventoryCount,
   createShipment,
   createWarehouse,
   dispatchShipment,
   dispatchStock,
   markShipmentDelivered,
+  receiveMaterialStock as receiveMaterialStockUseCase,
   receiveStock,
   recordInventoryCountItem,
   releaseReservation,
@@ -14,6 +16,9 @@ import {
   transferStock,
   type InventoryCount,
   type InventoryCountRepository,
+  type MaterialStockItem,
+  type MaterialStockMovementMeta,
+  type MaterialStockRepository,
   type Shipment,
   type ShipmentRepository,
   type StockItem,
@@ -35,6 +40,7 @@ import type { AuthenticatedRequestUser } from "../auth/current-user.decorator";
 import { AuditService } from "../audit/audit.service";
 import {
   INVENTORY_COUNT_REPOSITORY,
+  MATERIAL_STOCK_REPOSITORY,
   SHIPMENT_REPOSITORY,
   STOCK_REPOSITORY,
   WAREHOUSE_REPOSITORY,
@@ -42,6 +48,10 @@ import {
 
 function stockSnapshot(item: StockItem | null): unknown {
   return item ? { quantityOnHand: item.quantityOnHand, quantityReserved: item.quantityReserved } : null;
+}
+
+function materialStockSnapshot(item: MaterialStockItem | null): unknown {
+  return item ? { quantityOnHand: item.quantityOnHand } : null;
 }
 
 // Тонкий presentation-адаптер поверх packages/domain/warehouse
@@ -59,6 +69,7 @@ export class WarehouseService {
   constructor(
     @Inject(WAREHOUSE_REPOSITORY) private readonly warehouses: WarehouseRepository,
     @Inject(STOCK_REPOSITORY) private readonly stock: StockRepository,
+    @Inject(MATERIAL_STOCK_REPOSITORY) private readonly materialStock: MaterialStockRepository,
     @Inject(SHIPMENT_REPOSITORY) private readonly shipments: ShipmentRepository,
     @Inject(INVENTORY_COUNT_REPOSITORY) private readonly inventoryCounts: InventoryCountRepository,
     private readonly auditService: AuditService,
@@ -66,6 +77,51 @@ export class WarehouseService {
 
   async createWarehouse(companyId: string, input: CreateWarehouseDto): Promise<Warehouse> {
     return createWarehouse({ warehouses: this.warehouses }, { ...input, companyId });
+  }
+
+  // Авторезолв единственного склада компании (Итерация 9, владелец проекта
+  // 2026-08-02) — тот же принцип, что listActiveByCompany у цехов.
+  async listWarehouses(companyId: string): Promise<Warehouse[]> {
+    return this.warehouses.listByCompany(companyId);
+  }
+
+  async findMaterialStockItem(warehouseId: string, materialId: string): Promise<MaterialStockItem | null> {
+    return this.materialStock.findMaterialStockItem(warehouseId, materialId);
+  }
+
+  async receiveMaterialStock(
+    currentUser: AuthenticatedRequestUser,
+    warehouseId: string,
+    materialId: string,
+    quantity: number,
+    meta: MaterialStockMovementMeta = {},
+  ): Promise<MaterialStockItem> {
+    const before = await this.materialStock.findMaterialStockItem(warehouseId, materialId);
+    const item = await receiveMaterialStockUseCase(
+      { materialStock: this.materialStock },
+      { warehouseId, materialId, quantity, meta: { ...meta, createdBy: currentUser.id } },
+    );
+    await this.auditService.recordForUser(currentUser, {
+      entityType: "material_stock_item",
+      entityId: item.id,
+      action: "warehouse.material_stock_receive",
+      beforeJson: materialStockSnapshot(before),
+      afterJson: materialStockSnapshot(item),
+    });
+    return item;
+  }
+
+  // Расход материала при подтверждении заказа пошива — вызывается из
+  // ProductionOrderOrchestrationService (Telegram — тонкий интерфейс, эта
+  // операция не имеет отдельного HTTP-эндпоинта и аутентифицированного
+  // currentUser, тот же принцип, что и обновление статуса заказа от цеха).
+  async consumeMaterialStock(
+    warehouseId: string,
+    materialId: string,
+    quantity: number,
+    meta: MaterialStockMovementMeta = {},
+  ): Promise<MaterialStockItem> {
+    return consumeMaterialStockUseCase({ materialStock: this.materialStock }, { warehouseId, materialId, quantity, meta });
   }
 
   async receiveStock(currentUser: AuthenticatedRequestUser, input: ReceiveStockDto): Promise<StockItem> {

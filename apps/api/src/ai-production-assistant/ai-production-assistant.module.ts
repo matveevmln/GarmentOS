@@ -4,7 +4,9 @@ import { CatalogModule } from "../catalog/catalog.module";
 import { ContractManufacturingModule } from "../contract-manufacturing/contract-manufacturing.module";
 import { DocumentModule } from "../document/document.module";
 import { IdentityModule } from "../identity/identity.module";
+import { ProcurementModule } from "../procurement/procurement.module";
 import { TelegramClientModule } from "../telegram/telegram-client.module";
+import { WarehouseModule } from "../warehouse/warehouse.module";
 import { AnthropicAIClassifier, RuleBasedAIClassifier } from "./ai-classifier";
 import { AI_CLASSIFIER } from "./ai-production-assistant.tokens";
 import { ProductionOrderOrchestrationService } from "./production-order-orchestration.service";
@@ -23,7 +25,16 @@ import { ProductionRequestService } from "./production-request.service";
 // подтверждение → заказ" (Telegram — тонкий интерфейс над этой
 // оркестрацией, не наоборот), обратный импорт создал бы цикл.
 @Module({
-  imports: [CatalogModule, BomModule, ContractManufacturingModule, DocumentModule, TelegramClientModule, IdentityModule],
+  imports: [
+    CatalogModule,
+    BomModule,
+    ContractManufacturingModule,
+    DocumentModule,
+    TelegramClientModule,
+    IdentityModule,
+    ProcurementModule,
+    WarehouseModule,
+  ],
   controllers: [ProductionRequestController, ProductionOrderSpecificationController],
   providers: [
     ProductionRequestService,

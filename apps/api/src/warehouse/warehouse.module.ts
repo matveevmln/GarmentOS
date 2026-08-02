@@ -2,6 +2,7 @@ import { Module } from "@nestjs/common";
 import type { Database } from "@garmentos/db-schema";
 import {
   DrizzleInventoryCountRepository,
+  DrizzleMaterialStockRepository,
   DrizzleShipmentRepository,
   DrizzleStockRepository,
   DrizzleWarehouseRepository,
@@ -13,6 +14,7 @@ import { ShipmentsController } from "./shipments.controller";
 import { InventoryCountsController } from "./inventory-counts.controller";
 import {
   INVENTORY_COUNT_REPOSITORY,
+  MATERIAL_STOCK_REPOSITORY,
   SHIPMENT_REPOSITORY,
   STOCK_REPOSITORY,
   WAREHOUSE_REPOSITORY,
@@ -34,6 +36,11 @@ import { WarehouseService } from "./warehouse.service";
       inject: [DATABASE_CONNECTION],
     },
     {
+      provide: MATERIAL_STOCK_REPOSITORY,
+      useFactory: (db: Database) => new DrizzleMaterialStockRepository(db),
+      inject: [DATABASE_CONNECTION],
+    },
+    {
       provide: SHIPMENT_REPOSITORY,
       useFactory: (db: Database) => new DrizzleShipmentRepository(db),
       inject: [DATABASE_CONNECTION],
@@ -44,5 +51,10 @@ import { WarehouseService } from "./warehouse.service";
       inject: [DATABASE_CONNECTION],
     },
   ],
+  // WarehouseService нужен ai-production-assistant (проверка наличия
+  // материалов в предпросмотре + расход материалов при подтверждении заказа
+  // пошива, Итерация 9, владелец проекта 2026-08-02) — переиспользуется, не
+  // дублируется.
+  exports: [WarehouseService],
 })
 export class WarehouseModule {}

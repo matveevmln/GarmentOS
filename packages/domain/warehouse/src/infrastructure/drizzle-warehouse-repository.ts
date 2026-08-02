@@ -1,11 +1,31 @@
-import { warehouses, stockItems, stockMovements, type DbOrTx } from "@garmentos/db-schema";
+import { warehouses, stockItems, stockMovements, materialStockItems, materialStockMovements, type DbOrTx } from "@garmentos/db-schema";
 import { and, eq } from "drizzle-orm";
 import type { Warehouse } from "../domain/warehouse";
 import type { StockItem } from "../domain/stock";
-import type { NewWarehouseInput, StockMovementMeta, StockRepository, WarehouseRepository } from "../application/ports";
+import type { MaterialStockItem } from "../domain/material-stock";
+import type {
+  MaterialStockMovementMeta,
+  MaterialStockRepository,
+  NewWarehouseInput,
+  StockMovementMeta,
+  StockRepository,
+  WarehouseRepository,
+} from "../application/ports";
 
 type WarehouseRow = typeof warehouses.$inferSelect;
 type StockItemRow = typeof stockItems.$inferSelect;
+type MaterialStockItemRow = typeof materialStockItems.$inferSelect;
+
+function toMaterialStockItem(row: MaterialStockItemRow): MaterialStockItem {
+  return {
+    id: row.id,
+    warehouseId: row.warehouseId,
+    materialId: row.materialId,
+    quantityOnHand: row.quantityOnHand,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  };
+}
 
 function toWarehouse(row: WarehouseRow): Warehouse {
   return {
@@ -49,6 +69,11 @@ export class DrizzleWarehouseRepository implements WarehouseRepository {
       .where(and(eq(warehouses.companyId, companyId), eq(warehouses.id, id)))
       .limit(1);
     return row ? toWarehouse(row) : null;
+  }
+
+  async listByCompany(companyId: string): Promise<Warehouse[]> {
+    const rows = await this.db.select().from(warehouses).where(eq(warehouses.companyId, companyId));
+    return rows.map(toWarehouse);
   }
 }
 
@@ -284,6 +309,87 @@ export class DrizzleStockRepository implements StockRepository {
       }
 
       return { stockItem: toStockItem(stockItemRow), discrepancy };
+    });
+  }
+}
+
+export class DrizzleMaterialStockRepository implements MaterialStockRepository {
+  constructor(private readonly db: DbOrTx) {}
+
+  async findMaterialStockItem(warehouseId: string, materialId: string): Promise<MaterialStockItem | null> {
+    const [row] = await this.db
+      .select()
+      .from(materialStockItems)
+      .where(and(eq(materialStockItems.warehouseId, warehouseId), eq(materialStockItems.materialId, materialId)))
+      .limit(1);
+    return row ? toMaterialStockItem(row) : null;
+  }
+
+  async receive(warehouseId: string, materialId: string, quantity: number, meta: MaterialStockMovementMeta): Promise<MaterialStockItem> {
+    return this.db.transaction(async (tx) => {
+      const [existing] = await tx
+        .select()
+        .from(materialStockItems)
+        .where(and(eq(materialStockItems.warehouseId, warehouseId), eq(materialStockItems.materialId, materialId)))
+        .limit(1);
+
+      const row = existing
+        ? (
+            await tx
+              .update(materialStockItems)
+              .set({ quantityOnHand: String(Number(existing.quantityOnHand) + quantity), updatedAt: new Date() })
+              .where(eq(materialStockItems.id, existing.id))
+              .returning()
+          )[0]
+        : (
+            await tx
+              .insert(materialStockItems)
+              .values({ warehouseId, materialId, quantityOnHand: String(quantity) })
+              .returning()
+          )[0];
+      if (!row) throw new Error("receive: не удалось создать/обновить material_stock_items");
+
+      await tx.insert(materialStockMovements).values({
+        materialStockItemId: row.id,
+        type: "receipt",
+        quantity: String(quantity),
+        referenceType: meta.referenceType ?? null,
+        referenceId: meta.referenceId ?? null,
+        createdBy: meta.createdBy ?? null,
+      });
+
+      return toMaterialStockItem(row);
+    });
+  }
+
+  async consume(warehouseId: string, materialId: string, quantity: number, meta: MaterialStockMovementMeta): Promise<MaterialStockItem> {
+    return this.db.transaction(async (tx) => {
+      const [existing] = await tx
+        .select()
+        .from(materialStockItems)
+        .where(and(eq(materialStockItems.warehouseId, warehouseId), eq(materialStockItems.materialId, materialId)))
+        .limit(1);
+      if (!existing) {
+        throw new Error(`consume: material_stock_items не найден (warehouse=${warehouseId}, material=${materialId})`);
+      }
+
+      const [row] = await tx
+        .update(materialStockItems)
+        .set({ quantityOnHand: String(Number(existing.quantityOnHand) - quantity), updatedAt: new Date() })
+        .where(eq(materialStockItems.id, existing.id))
+        .returning();
+      if (!row) throw new Error("consume: UPDATE material_stock_items не вернул строку");
+
+      await tx.insert(materialStockMovements).values({
+        materialStockItemId: row.id,
+        type: "consumption",
+        quantity: String(quantity),
+        referenceType: meta.referenceType ?? null,
+        referenceId: meta.referenceId ?? null,
+        createdBy: meta.createdBy ?? null,
+      });
+
+      return toMaterialStockItem(row);
     });
   }
 }

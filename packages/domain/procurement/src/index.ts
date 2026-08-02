@@ -30,6 +30,11 @@ export {
   type ConfirmPurchaseOrderDeps,
   type ConfirmPurchaseOrderInput,
 } from "./application/confirm-purchase-order";
+export {
+  receivePurchaseOrder,
+  type ReceivePurchaseOrderDeps,
+  type ReceivePurchaseOrderInput,
+} from "./application/receive-purchase-order";
 
 export {
   DrizzleMaterialRepository,
