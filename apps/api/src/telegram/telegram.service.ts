@@ -3,6 +3,7 @@ import { inboxChannels, inboxItems, type Database } from "@garmentos/db-schema";
 import { linkWorkshopTelegramChat, type WorkshopRepository } from "@garmentos/domain-contract-manufacturing";
 import { and, eq } from "drizzle-orm";
 import { DATABASE_CONNECTION } from "../database/database.module";
+import { CatalogService } from "../catalog/catalog.service";
 import { WORKSHOP_REPOSITORY } from "../contract-manufacturing/contract-manufacturing.tokens";
 import { ContractManufacturingService } from "../contract-manufacturing/contract-manufacturing.service";
 import {
@@ -26,6 +27,13 @@ function interpretWorkshopStatusUpdate(text: string): "in_progress" | "ready_for
   if (/в работ|начал|приступ/u.test(normalized)) return "in_progress";
   return null;
 }
+
+const STATUS_LABELS: Record<string, string> = {
+  in_progress: "в работе",
+  ready_for_pickup: "готово к отгрузке",
+  received: "принято",
+  cancelled: "отменён",
+};
 
 function isConfirmationReply(text: string): boolean {
   return /^(да|подтверждаю|верно|ок|окей)[.!]?$/iu.test(text.trim());
@@ -86,6 +94,7 @@ export class TelegramService {
     private readonly inviteCodes: TelegramInviteCodeRepository,
     private readonly contractManufacturingService: ContractManufacturingService,
     private readonly orchestrationService: ProductionOrderOrchestrationService,
+    private readonly catalogService: CatalogService,
   ) {}
 
   async createWorkshopInvite(companyId: string, workshopId: string): Promise<CreateWorkshopInviteResult> {
@@ -210,10 +219,44 @@ export class TelegramService {
         status,
       );
       await this.telegramClient.sendMessage(chatId, `Статус заказа обновлён: ${order.status}.`);
+      await this.notifyCompanyOfWorkshopStatus(companyId, workshopId, order.productId, order.status);
     } catch (error) {
       this.logger.warn(`Не удалось обновить статус заказа для цеха ${workshopId}: ${String(error)}`);
       await this.telegramClient.sendMessage(chatId, "Принято.");
     }
+  }
+
+  // Без этого владелец узнавал о статусе заказа, только запросив его напрямую
+  // через API (владелец проекта, 2026-08-02: "я вообще не должен заходить в
+  // Swagger или Postman") — рассылается во все привязанные Telegram-каналы
+  // компании (обычно один, но не ограничиваемся этим).
+  private async notifyCompanyOfWorkshopStatus(
+    companyId: string,
+    workshopId: string,
+    productId: string,
+    status: string,
+  ): Promise<void> {
+    const [workshop, product, channels] = await Promise.all([
+      this.workshops.findById(companyId, workshopId),
+      this.catalogService.findProductById(companyId, productId),
+      this.findActiveChannelsByCompany(companyId),
+    ]);
+    if (channels.length === 0) return;
+
+    const statusLabel = STATUS_LABELS[status] ?? status;
+    const message = `Цех «${workshop?.name ?? workshopId}»: заказ «${product?.name ?? productId}» — ${statusLabel}.`;
+    for (const channel of channels) {
+      await this.telegramClient.sendMessage(channel.externalIdentifier, message);
+    }
+  }
+
+  private async findActiveChannelsByCompany(companyId: string): Promise<{ externalIdentifier: string }[]> {
+    return this.db
+      .select({ externalIdentifier: inboxChannels.externalIdentifier })
+      .from(inboxChannels)
+      .where(
+        and(eq(inboxChannels.companyId, companyId), eq(inboxChannels.type, "telegram"), eq(inboxChannels.isActive, true)),
+      );
   }
 
   private async handleInviteStart(chatId: string, code: string): Promise<void> {

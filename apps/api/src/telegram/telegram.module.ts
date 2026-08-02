@@ -1,5 +1,6 @@
 import { Module } from "@nestjs/common";
 import { AiProductionAssistantModule } from "../ai-production-assistant/ai-production-assistant.module";
+import { CatalogModule } from "../catalog/catalog.module";
 import { ContractManufacturingModule } from "../contract-manufacturing/contract-manufacturing.module";
 import { TelegramInviteCodeRepository } from "./telegram-invite-code.repository";
 import { TelegramClientModule } from "./telegram-client.module";
@@ -13,7 +14,7 @@ import { TelegramService } from "./telegram.service";
 // сценария живёт в ProductionOrderOrchestrationService, TelegramService
 // только маршрутизирует входящие сообщения и форматирует ответ.
 @Module({
-  imports: [ContractManufacturingModule, TelegramClientModule, AiProductionAssistantModule],
+  imports: [ContractManufacturingModule, TelegramClientModule, AiProductionAssistantModule, CatalogModule],
   controllers: [TelegramController],
   providers: [TelegramService, TelegramInviteCodeRepository],
 })

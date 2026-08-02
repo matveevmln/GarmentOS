@@ -32,6 +32,8 @@ import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { AppModule } from "../app.module";
 import { authHeader, setupAuthenticatedCompany } from "../test-support/auth-test-helper";
+import { TELEGRAM_CLIENT } from "./telegram.tokens";
+import type { TelegramClient } from "./telegram-client";
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) {
@@ -51,12 +53,27 @@ describe("Telegram: текст → предпросмотр → подтверж
   let httpServer: Server;
   const createdCompanyNames: string[] = [];
   const originalS3Endpoint = process.env.S3_ENDPOINT;
+  const sentMessages: { chatId: string; text: string }[] = [];
+  // Подменяем реальный клиент шпионом — LoggingTelegramClient (по умолчанию,
+  // без TELEGRAM_BOT_TOKEN) только логирует и не даёт проверить, что именно
+  // отправлено; для проверки уведомления компании о статусе от цеха
+  // (владелец проекта, 2026-08-02) нужно перехватить фактические сообщения.
+  const telegramClientSpy: TelegramClient = {
+    sendMessage: (chatId: string, text: string) => {
+      sentMessages.push({ chatId, text });
+      return Promise.resolve();
+    },
+    sendDocument: () => Promise.resolve(),
+  };
 
   beforeAll(async () => {
     // MinIO не запущен в этой песочнице — LocalFileStorageAdapter (тот же
     // принцип, что LoggingTelegramClient), см. production-order-orchestration.e2e.spec.ts.
     delete process.env.S3_ENDPOINT;
-    const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
+    const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
+      .overrideProvider(TELEGRAM_CLIENT)
+      .useValue(telegramClientSpy)
+      .compile();
     app = moduleRef.createNestApplication();
     app.enableVersioning({ type: VersioningType.URI, defaultVersion: "1" });
     await app.init();
@@ -196,6 +213,31 @@ describe("Telegram: текст → предпросмотр → подтверж
     const orderId = ordersAfterConfirm[0]?.id;
     const specLinks = await db.select().from(documentLinks).where(eq(documentLinks.entityId, orderId ?? ""));
     expect(specLinks).toHaveLength(1);
+
+    // Шаг 3: цех отвечает "Готово" — компания должна узнать об этом в своём
+    // Telegram-чате, а не только запросив статус напрямую через API (владелец
+    // проекта, 2026-08-02: "я вообще не должен заходить в Swagger или Postman").
+    const workshopInviteResponse = await request(httpServer)
+      .post(`/v1/telegram/invites/workshop/${workshop.id}`)
+      .set(...authHeader(accessToken))
+      .expect(201);
+    const workshopInvite = workshopInviteResponse.body as TelegramInviteResponseDto;
+
+    const workshopChatId = "555000999";
+    await request(httpServer)
+      .post("/v1/telegram/webhook")
+      .send({ update_id: 4, message: { message_id: 4, chat: { id: workshopChatId }, text: `/start ${workshopInvite.code}` } })
+      .expect(200);
+
+    const messagesBeforeStatus = sentMessages.length;
+    await request(httpServer)
+      .post("/v1/telegram/webhook")
+      .send({ update_id: 5, message: { message_id: 5, chat: { id: workshopChatId }, text: "Готово, можно забирать" } })
+      .expect(200);
+
+    const notification = sentMessages.slice(messagesBeforeStatus).find((sent) => sent.chatId === chatId);
+    expect(notification?.text).toContain("Цех Единственный");
+    expect(notification?.text).toContain("готово к отгрузке");
   });
 
   it("не создаёт заказ, если модель не найдена — сообщает об этом и предлагает похожие названия", async () => {
