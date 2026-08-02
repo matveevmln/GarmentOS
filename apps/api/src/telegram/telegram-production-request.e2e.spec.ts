@@ -49,6 +49,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { AppModule } from "../app.module";
 import { authHeader, setupAuthenticatedCompany } from "../test-support/auth-test-helper";
 import { TELEGRAM_CLIENT } from "./telegram.tokens";
+import { CANCEL_CALLBACK_DATA, CONFIRM_CALLBACK_DATA } from "./telegram.service";
 import type { TelegramClient } from "./telegram-client";
 
 const databaseUrl = process.env.DATABASE_URL;
@@ -69,17 +70,23 @@ describe("Telegram: текст → предпросмотр → подтверж
   let httpServer: Server;
   const createdCompanyNames: string[] = [];
   const originalS3Endpoint = process.env.S3_ENDPOINT;
-  const sentMessages: { chatId: string; text: string }[] = [];
+  const sentMessages: { chatId: string; text: string; buttons: string[] }[] = [];
+  const answeredCallbackQueryIds: string[] = [];
   // Подменяем реальный клиент шпионом — LoggingTelegramClient (по умолчанию,
   // без TELEGRAM_BOT_TOKEN) только логирует и не даёт проверить, что именно
-  // отправлено; для проверки уведомления компании о статусе от цеха
-  // (владелец проекта, 2026-08-02) нужно перехватить фактические сообщения.
+  // отправлено; для проверки уведомления компании о статусе от цеха и
+  // inline-кнопок предпросмотра (владелец проекта, 2026-08-02) нужно
+  // перехватить фактические сообщения.
   const telegramClientSpy: TelegramClient = {
-    sendMessage: (chatId: string, text: string) => {
-      sentMessages.push({ chatId, text });
+    sendMessage: (chatId, text, options) => {
+      sentMessages.push({ chatId, text, buttons: options?.inlineKeyboard?.flat().map((button) => button.text) ?? [] });
       return Promise.resolve();
     },
     sendDocument: () => Promise.resolve(),
+    answerCallbackQuery: (callbackQueryId: string) => {
+      answeredCallbackQueryIds.push(callbackQueryId);
+      return Promise.resolve();
+    },
   };
 
   beforeAll(async () => {
@@ -327,6 +334,113 @@ describe("Telegram: текст → предпросмотр → подтверж
     const notification = sentMessages.slice(messagesBeforeStatus).find((sent) => sent.chatId === chatId);
     expect(notification?.text).toContain("Цех Единственный");
     expect(notification?.text).toContain("готово к отгрузке");
+  });
+
+  it("предпросмотр содержит inline-кнопки, подтверждение и отмена работают через нажатие кнопки", async () => {
+    const companyName = `E2E Telegram Buttons ${Date.now()}`;
+    createdCompanyNames.push(companyName);
+    const { accessToken } = await setupAuthenticatedCompany(db, httpServer, companyName, "owner");
+
+    const productResponse = await request(httpServer)
+      .post("/v1/products")
+      .set(...authHeader(accessToken))
+      .send({ name: "Свитшот", code: `SWEATSHIRT-${Date.now()}` })
+      .expect(201);
+    const product = productResponse.body as ProductResponseDto;
+
+    for (const size of SIZES) {
+      await request(httpServer)
+        .post("/v1/product-variants")
+        .set(...authHeader(accessToken))
+        .send({ productId: product.id, size, color: "Серый", skuCode: `SWEATSHIRT-${size}-${product.id.slice(0, 4)}` })
+        .expect(201);
+    }
+
+    const materialResponse = await request(httpServer)
+      .post("/v1/materials")
+      .set(...authHeader(accessToken))
+      .send({ name: "Футер", type: "fabric", unit: "m" })
+      .expect(201);
+    const material = materialResponse.body as MaterialResponseDto;
+
+    const bomResponse = await request(httpServer)
+      .post("/v1/boms")
+      .set(...authHeader(accessToken))
+      .send({ productId: product.id, items: [{ materialId: material.id, quantityPerUnit: 1 }] })
+      .expect(201);
+    const bomDraft = bomResponse.body as BomResponseDto;
+    await request(httpServer)
+      .post(`/v1/boms/${bomDraft.id}/approve`)
+      .set(...authHeader(accessToken))
+      .expect(201);
+
+    await request(httpServer)
+      .post("/v1/workshops")
+      .set(...authHeader(accessToken))
+      .send({ name: "Цех Кнопки" })
+      .expect(201);
+
+    const inviteResponse = await request(httpServer)
+      .post("/v1/telegram/invites/company")
+      .set(...authHeader(accessToken))
+      .expect(201);
+    const invite = inviteResponse.body as TelegramInviteResponseDto;
+
+    const chatId = "555000333";
+    await request(httpServer)
+      .post("/v1/telegram/webhook")
+      .send({ update_id: 20, message: { message_id: 20, chat: { id: chatId }, text: `/start ${invite.code}` } })
+      .expect(200);
+
+    const requestText = "Модель: Свитшот. Цвета: Серый — 20 шт. Размеры: 48-50, 52-54. Цена пошива — 600 рублей.";
+
+    // Раунд 1: предпросмотр → отмена кнопкой "❌ Отменить" — заказ не создаётся.
+    await request(httpServer)
+      .post("/v1/telegram/webhook")
+      .send({ update_id: 21, message: { message_id: 21, chat: { id: chatId }, text: requestText } })
+      .expect(200);
+
+    const firstPreview = sentMessages.find((sent) => sent.chatId === chatId && sent.text.includes("Я понял заказ"));
+    expect(firstPreview?.buttons).toEqual(["✅ Подтвердить", "❌ Отменить"]);
+
+    await request(httpServer)
+      .post("/v1/telegram/webhook")
+      .send({
+        update_id: 22,
+        callback_query: { id: "callback-cancel-1", data: CANCEL_CALLBACK_DATA, message: { message_id: 22, chat: { id: chatId } } },
+      })
+      .expect(200);
+    expect(answeredCallbackQueryIds).toContain("callback-cancel-1");
+
+    const [companyAfterCancel] = await db.select().from(companies).where(eq(companies.name, companyName));
+    const ordersAfterCancel = await db
+      .select()
+      .from(productionOrders)
+      .where(eq(productionOrders.companyId, companyAfterCancel?.id ?? ""));
+    expect(ordersAfterCancel).toHaveLength(0);
+
+    // Раунд 2: новый предпросмотр → подтверждение кнопкой "✅ Подтвердить" —
+    // заказ создаётся, как и при текстовом "Да".
+    await request(httpServer)
+      .post("/v1/telegram/webhook")
+      .send({ update_id: 23, message: { message_id: 23, chat: { id: chatId }, text: requestText } })
+      .expect(200);
+
+    await request(httpServer)
+      .post("/v1/telegram/webhook")
+      .send({
+        update_id: 24,
+        callback_query: { id: "callback-confirm-1", data: CONFIRM_CALLBACK_DATA, message: { message_id: 24, chat: { id: chatId } } },
+      })
+      .expect(200);
+    expect(answeredCallbackQueryIds).toContain("callback-confirm-1");
+
+    const ordersAfterConfirmButton = await db
+      .select()
+      .from(productionOrders)
+      .where(eq(productionOrders.companyId, companyAfterCancel?.id ?? ""));
+    expect(ordersAfterConfirmButton).toHaveLength(1);
+    expect(ordersAfterConfirmButton[0]?.status).toBe("placed");
   });
 
   it("не создаёт заказ, если модель не найдена — сообщает об этом и предлагает похожие названия", async () => {

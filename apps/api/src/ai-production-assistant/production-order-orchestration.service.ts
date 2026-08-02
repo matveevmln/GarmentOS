@@ -330,6 +330,15 @@ export class ProductionOrderOrchestrationService {
     return !!pending && pending.expiresAt > Date.now();
   }
 
+  // Явная отмена (кнопка "Отменить", владелец проекта 2026-08-02) — не ждёт
+  // TTL, снимает предпросмотр сразу. Возвращает false, если отменять было
+  // нечего (запрос уже истёк/отсутствовал) — вызывающий код форматирует ответ.
+  cancelPendingRequest(channelKey: string): boolean {
+    const hadPending = this.hasPendingRequest(channelKey);
+    this.pendingByChannel.delete(channelKey);
+    return hadPending;
+  }
+
   // Вызывается после того, как человек ответил "Да" — только теперь система
   // реально создаёт заказ, списывает расход материалов (consumeMaterialsForOrder,
   // Итерация 9), формирует PDF и отправляет спецификацию цеху (требование

@@ -39,6 +39,13 @@ function isConfirmationReply(text: string): boolean {
   return /^(да|подтверждаю|верно|ок|окей)[.!]?$/iu.test(text.trim());
 }
 
+// Callback_data inline-кнопок предпросмотра (владелец проекта, 2026-08-02) —
+// альтернатива текстовому "Да", не замена: пользователь может нажать кнопку
+// или написать текстом, оба пути ведут в один обработчик (confirmPending/
+// cancelPending ниже).
+export const CONFIRM_CALLBACK_DATA = "confirm_production_request";
+export const CANCEL_CALLBACK_DATA = "cancel_production_request";
+
 // Форматирование предпросмотра в читаемое сообщение (требование владельца
 // проекта 2026-07-26: "AI должен показать, что именно понял, какие данные
 // нашёл автоматически, какие данные отсутствуют и какие потенциальные
@@ -66,7 +73,7 @@ function formatPreviewMessage(preview: ProductionRequestPreview): string {
 
   if (preview.canCreate) {
     lines.push("Будет создано:", "• Производственный заказ", "• Спецификация PDF", "• Документы", "");
-    lines.push('Ответьте «Да», чтобы продолжить, или пришлите исправленные данные.');
+    lines.push("Нажмите «Подтвердить» ниже, ответьте «Да», или пришлите исправленные данные.");
   } else {
     lines.push("Пришлите исправленный текст запроса — заказ пока не может быть создан.");
   }
@@ -121,6 +128,11 @@ export class TelegramService {
   }
 
   async handleUpdate(update: TelegramUpdate): Promise<void> {
+    if (update.callback_query) {
+      await this.handleCallbackQuery(update.callback_query);
+      return;
+    }
+
     const message = update.message;
     if (!message?.text) {
       // Фото/голос/пересланные сообщения — часть обобщённого Inbox
@@ -158,27 +170,21 @@ export class TelegramService {
   // этот метод только маршрутизирует и форматирует ответ.
   private async handleCompanyMessage(companyId: string, chatId: string, text: string, telegramUpdateId: number): Promise<void> {
     if (isConfirmationReply(text)) {
-      if (!this.orchestrationService.hasPendingRequest(chatId)) {
-        await this.telegramClient.sendMessage(chatId, "Нет запроса, ожидающего подтверждения. Опишите, что нужно сшить.");
-        return;
-      }
-      try {
-        const { order, document } = await this.orchestrationService.confirmPendingRequest(chatId, null);
-        await this.telegramClient.sendMessage(
-          chatId,
-          `Готово. Заказ пошива создан и подтверждён (статус: ${order.status}). Спецификация сформирована и отправлена цеху.`,
-        );
-        this.logger.log(`Создан заказ ${order.id}, документ спецификации ${document.id} (чат ${chatId})`);
-      } catch (error) {
-        const message = error instanceof ProductionRequestOrchestrationError ? error.message : "Не удалось создать заказ — попробуйте ещё раз.";
-        await this.telegramClient.sendMessage(chatId, message);
-      }
+      await this.confirmPending(chatId);
       return;
     }
 
     try {
       const preview = await this.orchestrationService.previewFromTextForChannel(companyId, chatId, text);
-      await this.telegramClient.sendMessage(chatId, formatPreviewMessage(preview));
+      const inlineKeyboard = preview.canCreate
+        ? [
+            [
+              { text: "✅ Подтвердить", callbackData: CONFIRM_CALLBACK_DATA },
+              { text: "❌ Отменить", callbackData: CANCEL_CALLBACK_DATA },
+            ],
+          ]
+        : undefined;
+      await this.telegramClient.sendMessage(chatId, formatPreviewMessage(preview), { inlineKeyboard });
     } catch (error) {
       if (error instanceof ProductionRequestParseError) {
         // Свободный текст вне строгого формата — сохраняем как inbox_item,
@@ -188,6 +194,52 @@ export class TelegramService {
         return;
       }
       throw error;
+    }
+  }
+
+  // Общий обработчик подтверждения — вызывается и из текстового "Да", и из
+  // нажатия inline-кнопки "Подтвердить" (владелец проекта, 2026-08-02):
+  // одна и та же бизнес-логика независимо от способа подтверждения.
+  private async confirmPending(chatId: string): Promise<void> {
+    if (!this.orchestrationService.hasPendingRequest(chatId)) {
+      await this.telegramClient.sendMessage(chatId, "Нет запроса, ожидающего подтверждения. Опишите, что нужно сшить.");
+      return;
+    }
+    try {
+      const { order, document } = await this.orchestrationService.confirmPendingRequest(chatId, null);
+      await this.telegramClient.sendMessage(
+        chatId,
+        `Готово. Заказ пошива создан и подтверждён (статус: ${order.status}). Спецификация сформирована и отправлена цеху.`,
+      );
+      this.logger.log(`Создан заказ ${order.id}, документ спецификации ${document.id} (чат ${chatId})`);
+    } catch (error) {
+      const message = error instanceof ProductionRequestOrchestrationError ? error.message : "Не удалось создать заказ — попробуйте ещё раз.";
+      await this.telegramClient.sendMessage(chatId, message);
+    }
+  }
+
+  // Нажатие "Отменить" — явно снимает предпросмотр, ожидающий подтверждения
+  // (владелец проекта, 2026-08-02), не дожидаясь TTL (15 минут).
+  private async cancelPending(chatId: string): Promise<void> {
+    const cancelled = this.orchestrationService.cancelPendingRequest(chatId);
+    await this.telegramClient.sendMessage(
+      chatId,
+      cancelled ? "Отменено. Опишите новый заказ, когда будете готовы." : "Нет запроса, ожидающего подтверждения.",
+    );
+  }
+
+  // Inline-кнопки под предпросмотром ("✅ Подтвердить"/"❌ Отменить") —
+  // Telegram Bot API требует answerCallbackQuery даже когда ответ не нужен
+  // (иначе кнопка у пользователя виснет с "часиками").
+  private async handleCallbackQuery(callbackQuery: NonNullable<TelegramUpdate["callback_query"]>): Promise<void> {
+    await this.telegramClient.answerCallbackQuery(callbackQuery.id);
+    const chatId = callbackQuery.message ? String(callbackQuery.message.chat.id) : null;
+    if (!chatId) return;
+
+    if (callbackQuery.data === CONFIRM_CALLBACK_DATA) {
+      await this.confirmPending(chatId);
+    } else if (callbackQuery.data === CANCEL_CALLBACK_DATA) {
+      await this.cancelPending(chatId);
     }
   }
 

@@ -16,6 +16,23 @@ export const telegramUpdateSchema = z
       })
       .passthrough()
       .optional(),
+    // Нажатие inline-кнопки ("Подтвердить"/"Отменить" под предпросмотром
+    // заказа, владелец проекта 2026-08-02) — альтернатива текстовому "Да",
+    // не замена: обе формы подтверждения ведут в один и тот же обработчик.
+    callback_query: z
+      .object({
+        id: z.string(),
+        data: z.string().optional(),
+        message: z
+          .object({
+            message_id: z.number(),
+            chat: z.object({ id: z.union([z.number(), z.string()]) }).passthrough(),
+          })
+          .passthrough()
+          .optional(),
+      })
+      .passthrough()
+      .optional(),
   })
   .passthrough();
 
