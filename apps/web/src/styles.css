@@ -203,13 +203,20 @@ button:disabled {
   align-items: center;
 }
 
-.data-table {
+.table-scroll {
   width: 100%;
-  border-collapse: collapse;
-  background: var(--surface);
+  overflow-x: auto;
+  overflow-y: hidden;
   border: 1px solid var(--border);
   border-radius: 12px;
-  overflow: hidden;
+  -webkit-overflow-scrolling: touch;
+}
+
+.data-table {
+  width: 100%;
+  min-width: 480px;
+  border-collapse: collapse;
+  background: var(--surface);
 }
 
 .data-table th,

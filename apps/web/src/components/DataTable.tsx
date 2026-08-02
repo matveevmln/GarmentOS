@@ -16,23 +16,25 @@ export function DataTable<T>({ rows, columns, rowKey, emptyText = "Пока пу
   if (rows.length === 0) return <p className="empty-state">{emptyText}</p>;
 
   return (
-    <table className="data-table">
-      <thead>
-        <tr>
-          {columns.map((column) => (
-            <th key={column.header}>{column.header}</th>
-          ))}
-        </tr>
-      </thead>
-      <tbody>
-        {rows.map((row) => (
-          <tr key={rowKey(row)}>
+    <div className="table-scroll">
+      <table className="data-table">
+        <thead>
+          <tr>
             {columns.map((column) => (
-              <td key={column.header}>{column.render(row)}</td>
+              <th key={column.header}>{column.header}</th>
             ))}
           </tr>
-        ))}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr key={rowKey(row)}>
+              {columns.map((column) => (
+                <td key={column.header}>{column.render(row)}</td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
