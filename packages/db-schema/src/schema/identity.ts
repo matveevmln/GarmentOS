@@ -14,6 +14,10 @@ export const companies = pgTable("companies", {
   // KGS по умолчанию (docs/PRINCIPLES.md, принцип 21) — валюта учёта
   // компании; спецификации для цехов всегда в RUB независимо от этого поля.
   defaultCurrency: text("default_currency").notNull().default("KGS"),
+  // Кто подписывает спецификации со стороны компании (Заказчик) — ФИО,
+  // выводится в блок подписи документа (docs/PRINCIPLES.md, Document
+  // Template Engine); nullable, пока не задано в настройках компании.
+  signerName: text("signer_name"),
   ...auditColumns,
 });
 

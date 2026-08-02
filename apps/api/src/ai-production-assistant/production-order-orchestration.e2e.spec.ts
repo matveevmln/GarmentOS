@@ -165,10 +165,25 @@ describe("Вертикальный сценарий Итерации 7 (e2e): т
     const workshopResponse = await request(httpServer)
       .post("/v1/workshops")
       .set(...authHeader(accessToken))
-      .send({ name: "Ак-Сарай Текстиль", contractNumber: "П-22-04", contractDate: "22.04.2026" })
+      .send({
+        name: "Ак-Сарай Текстиль",
+        contractNumber: "П-22-04",
+        contractDate: "22.04.2026",
+        paymentTerms: "70% предоплата, 30% при отгрузке",
+        deliveryMethod: "Самовывоз",
+        signerRole: "Генеральный директор",
+        signerName: "Нормуродов О.А.",
+      })
       .expect(201);
     const workshop = workshopResponse.body as WorkshopResponseDto;
     expect(workshop.nextSpecificationNumber).toBe(1);
+    // Постоянные поля спецификации (владелец проекта, 2026-08-02) — заданы
+    // один раз при создании цеха, должны подставляться в каждую сгенерированную
+    // спецификацию вместо пустых строк (production-order-orchestration.service.ts).
+    expect(workshop.paymentTerms).toBe("70% предоплата, 30% при отгрузке");
+    expect(workshop.deliveryMethod).toBe("Самовывоз");
+    expect(workshop.signerRole).toBe("Генеральный директор");
+    expect(workshop.signerName).toBe("Нормуродов О.А.");
 
     // Шаг 1: текстовый запрос → разбор в объёмы по SKU (без ANTHROPIC_API_KEY
     // — RuleBasedAIClassifier, узкий размеченный формат).

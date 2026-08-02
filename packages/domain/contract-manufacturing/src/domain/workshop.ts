@@ -23,6 +23,14 @@ export interface Workshop {
   contractNumber: string | null;
   contractDate: string | null;
   nextSpecificationNumber: number;
+  // Постоянные условия спецификации (docs/PRINCIPLES.md, Document Template
+  // Engine) — заполняются один раз в настройках цеха, подставляются
+  // автоматически в каждую сгенерированную спецификацию. nullable, пока не
+  // заданы — не изобретаются.
+  paymentTerms: string | null;
+  deliveryMethod: string | null;
+  signerRole: string | null;
+  signerName: string | null;
   createdBy: string | null;
   createdAt: Date;
   updatedAt: Date;

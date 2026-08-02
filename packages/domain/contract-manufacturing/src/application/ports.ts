@@ -14,6 +14,10 @@ export interface NewWorkshopInput {
   status: WorkshopStatus;
   contractNumber: string | null;
   contractDate: string | null;
+  paymentTerms: string | null;
+  deliveryMethod: string | null;
+  signerRole: string | null;
+  signerName: string | null;
   createdBy: string | null;
 }
 

@@ -335,9 +335,10 @@ export class ProductionOrderOrchestrationService {
     // нумерация и даты", требование владельца проекта 2026-07-26).
     const specNumber = await this.contractManufacturingService.reserveNextSpecificationNumber(workshop.id);
 
-    // Условия оплаты/способ доставки не моделируются как отдельная сущность
-    // сегодня — оставлены пустыми до появления соответствующих полей у
-    // заказа/договора, не изобретаются.
+    // Условия оплаты/способ доставки/подписанты — постоянные поля,
+    // настраиваются один раз в настройках цеха/компании (workshop.paymentTerms
+    // и т.д., владелец проекта 2026-08-02) и подставляются автоматически в
+    // каждую сгенерированную спецификацию; пусто, только если ещё не заданы.
     const data: SpecificationDocumentData = {
       fields: {
         contractNumber: workshop.contractNumber ?? "",
@@ -345,12 +346,12 @@ export class ProductionOrderOrchestrationService {
         customerName: company.legalName ?? company.name,
         contractorName: workshop.name,
         specNumber: String(specNumber),
-        paymentTerms: "",
+        paymentTerms: workshop.paymentTerms ?? "",
         deliveryDeadline: order.dueDate ?? "",
-        deliveryMethod: "",
-        contractorSignerRole: "",
-        contractorSignerName: "",
-        customerSignerName: "",
+        deliveryMethod: workshop.deliveryMethod ?? "",
+        contractorSignerRole: workshop.signerRole ?? "",
+        contractorSignerName: workshop.signerName ?? "",
+        customerSignerName: company.signerName ?? "",
       },
       items,
       totals: { quantity: formatRuQuantity(totalQuantity), sum: formatRuAmount(totalSum) },

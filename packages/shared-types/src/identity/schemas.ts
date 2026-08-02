@@ -11,6 +11,9 @@ export const createCompanySchema = z.object({
   inn: z.string().optional(),
   timezone: z.string().optional(),
   defaultCurrency: z.string().optional(),
+  // Кто подписывает спецификации от лица компании (Заказчик) — ФИО,
+  // выводится в блок подписи документа (владелец проекта, 2026-08-02).
+  signerName: z.string().optional(),
 });
 export type CreateCompanyDto = z.infer<typeof createCompanySchema>;
 
@@ -21,6 +24,7 @@ export const companyResponseSchema = z.object({
   inn: z.string().nullable(),
   timezone: z.string(),
   defaultCurrency: z.string(),
+  signerName: z.string().nullable(),
   createdAt: z.date(),
   updatedAt: z.date(),
 });

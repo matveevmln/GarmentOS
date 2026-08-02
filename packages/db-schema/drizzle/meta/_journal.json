@@ -92,6 +92,13 @@
       "when": 1785131074845,
       "tag": "0012_company_default_currency_kgs",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1785660360714,
+      "tag": "0013_hard_dazzler",
+      "breakpoints": true
     }
   ]
 }

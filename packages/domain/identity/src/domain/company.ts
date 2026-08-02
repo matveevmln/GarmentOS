@@ -8,6 +8,9 @@ export interface Company {
   inn: string | null;
   timezone: string;
   defaultCurrency: string;
+  // Кто подписывает спецификации со стороны компании (Заказчик) — ФИО;
+  // nullable, пока не задано в настройках компании (Document Template Engine).
+  signerName: string | null;
   createdAt: Date;
   updatedAt: Date;
 }

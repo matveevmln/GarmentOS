@@ -15,6 +15,7 @@ function toCompany(row: CompanyRow): Company {
     inn: row.inn,
     timezone: row.timezone,
     defaultCurrency: row.defaultCurrency,
+    signerName: row.signerName,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };

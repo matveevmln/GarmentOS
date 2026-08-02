@@ -7,6 +7,9 @@ export interface CreateCompanyInput {
   inn?: string;
   timezone?: string;
   defaultCurrency?: string;
+  // Кто подписывает спецификации от лица компании — ФИО, выводится в блок
+  // подписи "Заказчик" (владелец проекта, 2026-08-02); пусто, пока не задано.
+  signerName?: string;
 }
 
 export interface CreateCompanyDeps {
@@ -29,5 +32,6 @@ export async function createCompany(deps: CreateCompanyDeps, input: CreateCompan
     // 21, уточнено владельцем проекта 2026-07-27). Не путать с валютой
     // спецификаций для цехов — те всегда в RUB, независимо от этого поля.
     defaultCurrency: input.defaultCurrency ?? "KGS",
+    signerName: input.signerName?.trim() ?? null,
   });
 }

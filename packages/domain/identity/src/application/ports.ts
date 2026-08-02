@@ -10,6 +10,7 @@ export interface NewCompanyInput {
   inn: string | null;
   timezone: string;
   defaultCurrency: string;
+  signerName: string | null;
 }
 
 export interface CompanyRepository {

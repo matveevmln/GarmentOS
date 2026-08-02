@@ -16,6 +16,13 @@ export interface CreateWorkshopInput {
   // пустым (не изобретается); спецификации нумеруются относительно него.
   contractNumber?: string;
   contractDate?: string;
+  // Постоянные условия спецификации — заполняются один раз, подставляются
+  // автоматически в каждую сгенерированную спецификацию (владелец проекта,
+  // 2026-08-02); остаются пустыми, пока не заданы.
+  paymentTerms?: string;
+  deliveryMethod?: string;
+  signerRole?: string;
+  signerName?: string;
   createdBy?: string;
 }
 
@@ -36,6 +43,10 @@ export async function createWorkshop(deps: CreateWorkshopDeps, input: CreateWork
     status: input.status ?? "active",
     contractNumber: input.contractNumber?.trim() ?? null,
     contractDate: input.contractDate?.trim() ?? null,
+    paymentTerms: input.paymentTerms?.trim() ?? null,
+    deliveryMethod: input.deliveryMethod?.trim() ?? null,
+    signerRole: input.signerRole?.trim() ?? null,
+    signerName: input.signerName?.trim() ?? null,
     createdBy: input.createdBy ?? null,
   });
 }

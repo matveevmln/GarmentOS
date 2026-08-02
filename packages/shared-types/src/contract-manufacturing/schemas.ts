@@ -17,6 +17,14 @@ export const createWorkshopSchema = z.object({
   // когда договор с этим цехом уже заключён.
   contractNumber: z.string().optional(),
   contractDate: z.string().optional(),
+  // Постоянные условия спецификации — заполняются один раз в настройках
+  // цеха, подставляются автоматически в каждую сгенерированную спецификацию
+  // (владелец проекта, 2026-08-02). Необязательны — остаются пустыми, пока
+  // не заданы.
+  paymentTerms: z.string().optional(),
+  deliveryMethod: z.string().optional(),
+  signerRole: z.string().optional(),
+  signerName: z.string().optional(),
   createdBy: z.string().uuid().optional(),
 });
 export type CreateWorkshopDto = z.infer<typeof createWorkshopSchema>;
@@ -33,6 +41,10 @@ export const workshopResponseSchema = z.object({
   contractNumber: z.string().nullable(),
   contractDate: z.string().nullable(),
   nextSpecificationNumber: z.number(),
+  paymentTerms: z.string().nullable(),
+  deliveryMethod: z.string().nullable(),
+  signerRole: z.string().nullable(),
+  signerName: z.string().nullable(),
   createdBy: z.string().uuid().nullable(),
   createdAt: z.date(),
   updatedAt: z.date(),

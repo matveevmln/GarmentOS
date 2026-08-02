@@ -48,6 +48,16 @@ export const workshops = pgTable("workshops", {
   // Следующий номер спецификации по этому договору — атомарно увеличивается
   // при каждой генерации (docs/DOCUMENT_ENGINE_ARCHITECTURE.md, Итерация 7).
   nextSpecificationNumber: integer("next_specification_number").notNull().default(1),
+  // Постоянные условия спецификации (владелец проекта, 2026-08-02: "остаются
+  // неизменными, пока пользователь сам их не изменит в настройках") — до этой
+  // правки generateAndSendSpecification подставляла сюда пустые строки, хотя
+  // поля уже присутствуют в самом шаблоне (Document Template Engine).
+  paymentTerms: text("payment_terms"),
+  deliveryMethod: text("delivery_method"),
+  // Кто подписывает спецификацию со стороны цеха — должность и ФИО,
+  // выводятся в блок подписи ("Генеральный директор" / "Нормуродов О.А.").
+  signerRole: text("signer_role"),
+  signerName: text("signer_name"),
   createdBy: uuid("created_by").references(() => users.id),
   ...auditColumns,
   ...softDelete,

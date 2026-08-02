@@ -19,24 +19,33 @@ import { IdentityService } from "./identity/identity.service";
 // Запуск (после pnpm build, скрипт компилируется вместе с main.ts):
 //   pnpm --filter @garmentos/api bootstrap-company \
 //     --name "ООО Пример" --owner-email owner@example.com \
-//     --owner-full-name "Имя Фамилия" --owner-password "секрет12345" [--inn 1234567890]
+//     --owner-full-name "Имя Фамилия" --owner-password "секрет12345" \
+//     [--inn 1234567890] [--signer-name "Иванов И.И."]
 async function run(): Promise<void> {
   const { values } = parseArgs({
     options: {
       name: { type: "string" },
       inn: { type: "string" },
+      "signer-name": { type: "string" },
       "owner-email": { type: "string" },
       "owner-full-name": { type: "string" },
       "owner-password": { type: "string" },
     },
   });
 
-  const { name, inn, "owner-email": ownerEmail, "owner-full-name": ownerFullName, "owner-password": ownerPassword } = values;
+  const {
+    name,
+    inn,
+    "signer-name": signerName,
+    "owner-email": ownerEmail,
+    "owner-full-name": ownerFullName,
+    "owner-password": ownerPassword,
+  } = values;
 
   if (!name || !ownerEmail || !ownerFullName || !ownerPassword) {
     console.error(
       "Использование: bootstrap-company --name <название> --owner-email <email> " +
-        "--owner-full-name <имя> --owner-password <пароль> [--inn <инн>]",
+        "--owner-full-name <имя> --owner-password <пароль> [--inn <инн>] [--signer-name <ФИО>]",
     );
     process.exitCode = 1;
     return;
@@ -46,7 +55,7 @@ async function run(): Promise<void> {
   try {
     const identityService = app.get(IdentityService);
 
-    const company = await identityService.createCompany({ name, inn });
+    const company = await identityService.createCompany({ name, inn, signerName });
     const owner = await identityService.createUser(
       company.id,
       { email: ownerEmail, fullName: ownerFullName, password: ownerPassword },
