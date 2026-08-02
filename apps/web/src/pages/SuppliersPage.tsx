@@ -3,7 +3,10 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { createSupplierSchema, type CreateSupplierDto, type SupplierResponseDto } from "@garmentos/shared-types";
 import { useCrudResource } from "../api/useCrudResource";
-import { DataTable } from "../components/DataTable";
+import { ListCard } from "../components/ListCard";
+import { FilterTabs, type FilterOption } from "../components/FilterTabs";
+import { SearchBar } from "../components/SearchBar";
+import { StatusBadge } from "../components/StatusBadge";
 import { ApiError } from "../api/client";
 
 const SUPPLIER_TYPES = [
@@ -13,9 +16,23 @@ const SUPPLIER_TYPES = [
   { value: "logistics", label: "Перевозчик" },
 ] as const;
 
+const SUPPLIER_ICONS: Record<string, string> = {
+  fabric: "box",
+  trim: "scissors",
+  packaging: "layers",
+  logistics: "truck",
+};
+
+const TYPE_FILTERS: FilterOption<"all" | (typeof SUPPLIER_TYPES)[number]["value"]>[] = [
+  { value: "all", label: "Все" },
+  ...SUPPLIER_TYPES.map((type) => ({ value: type.value, label: type.label })),
+];
+
 export function SuppliersPage() {
   const { items, isLoading, error, create } = useCrudResource<SupplierResponseDto, CreateSupplierDto>("/suppliers");
   const [formError, setFormError] = useState<string | null>(null);
+  const [typeFilter, setTypeFilter] = useState<(typeof TYPE_FILTERS)[number]["value"]>("all");
+  const [query, setQuery] = useState("");
   const {
     register,
     handleSubmit,
@@ -74,16 +91,20 @@ export function SuppliersPage() {
       {isLoading && <p>Загрузка…</p>}
       {error && <p className="form-error">{error}</p>}
 
-      <DataTable
-        rows={items}
-        rowKey={(row) => row.id}
-        emptyText="Пока нет ни одного поставщика — добавьте первого выше"
-        columns={[
-          { header: "Название", render: (row) => row.name },
-          { header: "Тип", render: (row) => SUPPLIER_TYPES.find((t) => t.value === row.type)?.label ?? row.type },
-          { header: "ИНН", render: (row) => row.inn ?? "—" },
-          { header: "Статус", render: (row) => row.status },
-        ]}
+      <SearchBar value={query} onChange={setQuery} placeholder="Поиск поставщика" />
+      <FilterTabs options={TYPE_FILTERS} value={typeFilter} onChange={setTypeFilter} />
+
+      <ListCard
+        items={items
+          .filter((row) => typeFilter === "all" || row.type === typeFilter)
+          .filter((row) => row.name.toLowerCase().includes(query.trim().toLowerCase()))}
+        getKey={(row) => row.id}
+        getIcon={(row) => SUPPLIER_ICONS[row.type] ?? "box"}
+        getTitle={(row) => row.name}
+        getMeta={(row) => `${SUPPLIER_TYPES.find((t) => t.value === row.type)?.label ?? row.type}${row.inn ? ` · ИНН ${row.inn}` : ""}`}
+        getTrailing={(row) => <StatusBadge status={row.status} />}
+        emptyTitle="Пока нет ни одного поставщика"
+        emptyHint="Добавьте первого поставщика в форме выше."
       />
     </section>
   );

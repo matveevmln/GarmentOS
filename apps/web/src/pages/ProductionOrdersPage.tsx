@@ -10,8 +10,17 @@ import {
 } from "@garmentos/shared-types";
 import { apiRequest, ApiError } from "../api/client";
 import { useCrudResource } from "../api/useCrudResource";
-import { DataTable } from "../components/DataTable";
+import { FilterTabs, type FilterOption } from "../components/FilterTabs";
 import { StatusBadge } from "../components/StatusBadge";
+
+const STATUS_FILTERS: FilterOption<"all" | "draft" | "placed" | "in_progress" | "ready_for_pickup" | "received">[] = [
+  { value: "all", label: "Все" },
+  { value: "draft", label: "Черновик" },
+  { value: "placed", label: "Размещён" },
+  { value: "in_progress", label: "В работе" },
+  { value: "ready_for_pickup", label: "Готово" },
+  { value: "received", label: "Принято" },
+];
 
 export function ProductionOrdersPage() {
   const { items: orders, isLoading, reload } = useCrudResource<ProductionOrderResponseDto, never>("/production-orders");
@@ -30,6 +39,7 @@ export function ProductionOrdersPage() {
   const [pendingQuantity, setPendingQuantity] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [receiveWarehouse, setReceiveWarehouse] = useState<Record<string, string>>({});
+  const [statusFilter, setStatusFilter] = useState<(typeof STATUS_FILTERS)[number]["value"]>("all");
 
   useEffect(() => {
     void apiRequest<ProductResponseDto[]>("/products").then(setProducts);
@@ -203,27 +213,29 @@ export function ProductionOrdersPage() {
 
       {isLoading && <p>Загрузка…</p>}
 
-      <DataTable
-        rows={orders}
-        rowKey={(row) => row.id}
-        emptyText="Пока нет ни одного заказа пошива"
-        columns={[
-          { header: "Модель", render: (row) => productName(row.productId) },
-          { header: "Цех", render: (row) => workshopName(row.workshopId) },
-          { header: "Количество", render: (row) => row.plannedQuantity },
-          { header: "Статус", render: (row) => <StatusBadge status={row.status} /> },
-          {
-            header: "Действие",
-            render: (row) => {
-              if (row.status === "draft") {
-                return (
+      <FilterTabs options={STATUS_FILTERS} value={statusFilter} onChange={setStatusFilter} />
+
+      <div>
+        {orders
+          .filter((row) => statusFilter === "all" || row.status === statusFilter)
+          .map((row) => (
+            <div key={row.id} className="card list-card" style={{ flexWrap: "wrap" }}>
+              <span className="thumb" style={{ background: "var(--warning-tint)", color: "var(--warning)" }}>
+                {productName(row.productId).slice(0, 2).toUpperCase()}
+              </span>
+              <span className="body">
+                <span className="title">{productName(row.productId)}</span>
+                <span className="meta">
+                  {workshopName(row.workshopId)} · {row.plannedQuantity} шт
+                </span>
+              </span>
+              <span className="actions">
+                {row.status === "draft" && (
                   <button type="button" onClick={() => void confirmOrder(row.id)}>
                     Подтвердить
                   </button>
-                );
-              }
-              if (row.status === "ready_for_pickup") {
-                return (
+                )}
+                {row.status === "ready_for_pickup" && (
                   <div className="inline-action">
                     <select
                       value={receiveWarehouse[row.id] ?? ""}
@@ -240,13 +252,20 @@ export function ProductionOrdersPage() {
                       Принять партию
                     </button>
                   </div>
-                );
-              }
-              return null;
-            },
-          },
-        ]}
-      />
+                )}
+                {(row.status === "placed" || row.status === "in_progress" || row.status === "received") && (
+                  <StatusBadge status={row.status} />
+                )}
+              </span>
+            </div>
+          ))}
+        {orders.length === 0 && (
+          <div className="card empty">
+            <div className="t">Пока нет ни одного заказа пошива</div>
+            <div className="s">Создайте первый заказ в форме выше.</div>
+          </div>
+        )}
+      </div>
     </section>
   );
 }

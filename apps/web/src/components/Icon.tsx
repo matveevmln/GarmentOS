@@ -1,6 +1,7 @@
 // Иконки перенесены дословно (те же id и path) из утверждённого владельцем
 // прототипа (apps/prototype/index.html) — единая визуальная система, не
 // повторное изобретение (см. обсуждение дизайн-системы Итерации 11).
+import type { CSSProperties } from "react";
 const ICON_SYMBOLS = `
   <symbol id="i-home" viewBox="0 0 24 24"><path d="M4 11 12 4l8 7"/><path d="M6 10v10h5v-6h2v6h5V10"/></symbol>
   <symbol id="i-factory" viewBox="0 0 24 24"><path d="M3 21V10l5 3.4V10l5 3.4V7l6 4v10H3Z"/><path d="M7 21v-3.5M12 21v-3.5M17 21v-3.5"/></symbol>
@@ -14,6 +15,9 @@ const ICON_SYMBOLS = `
   <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5 9.5 17 19 7"/></symbol>
   <symbol id="i-truck" viewBox="0 0 24 24"><path d="M2.5 7h11v9h-11z"/><path d="M13.5 10h3.6l3.4 3v3h-7z"/><circle cx="7" cy="18.2" r="1.6"/><circle cx="17.5" cy="18.2" r="1.6"/></symbol>
   <symbol id="i-chevron" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20.5 20.5-4-4"/></symbol>
+  <symbol id="i-tag" viewBox="0 0 24 24"><path d="m12.5 3 8 8-9 9-8-8V4h8Z"/><circle cx="8.2" cy="7.8" r="1.4"/></symbol>
+  <symbol id="i-file" viewBox="0 0 24 24"><path d="M7 3h7l5 5v13H7Z"/><path d="M14 3v5h5"/><path d="M9.5 13h5M9.5 16.5h5"/></symbol>
 `;
 
 export function IconSpriteDefs() {
@@ -24,9 +28,17 @@ export function IconSpriteDefs() {
   );
 }
 
-export function Icon({ name, className }: { name: string; className?: string }) {
+export function Icon({
+  name,
+  className,
+  style,
+}: {
+  name: string;
+  className?: string;
+  style?: CSSProperties;
+}) {
   return (
-    <svg className={className ? `icon ${className}` : "icon"} aria-hidden="true">
+    <svg className={className ? `icon ${className}` : "icon"} style={style} aria-hidden="true">
       <use href={`#i-${name}`} />
     </svg>
   );

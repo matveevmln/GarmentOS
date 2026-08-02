@@ -3,20 +3,35 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { createMaterialSchema, type CreateMaterialDto, type MaterialResponseDto } from "@garmentos/shared-types";
 import { useCrudResource } from "../api/useCrudResource";
-import { DataTable } from "../components/DataTable";
+import { ListCard } from "../components/ListCard";
+import { FilterTabs, type FilterOption } from "../components/FilterTabs";
+import { SearchBar } from "../components/SearchBar";
 import { ApiError } from "../api/client";
 
 const MATERIAL_TYPES = [
-  { value: "fabric", label: "Ткань" },
+  { value: "fabric", label: "Ткани" },
   { value: "trim", label: "Фурнитура" },
   { value: "packaging", label: "Упаковка" },
   { value: "accessory", label: "Прочее" },
 ] as const;
 const MATERIAL_UNITS = ["m", "kg", "pcs"] as const;
+const MATERIAL_ICONS: Record<string, string> = {
+  fabric: "box",
+  trim: "scissors",
+  packaging: "layers",
+  accessory: "tag",
+};
+
+const TYPE_FILTERS: FilterOption<"all" | (typeof MATERIAL_TYPES)[number]["value"]>[] = [
+  { value: "all", label: "Все" },
+  ...MATERIAL_TYPES.map((type) => ({ value: type.value, label: type.label })),
+];
 
 export function MaterialsPage() {
   const { items, isLoading, error, create } = useCrudResource<MaterialResponseDto, CreateMaterialDto>("/materials");
   const [formError, setFormError] = useState<string | null>(null);
+  const [typeFilter, setTypeFilter] = useState<(typeof TYPE_FILTERS)[number]["value"]>("all");
+  const [query, setQuery] = useState("");
   const {
     register,
     handleSubmit,
@@ -90,16 +105,19 @@ export function MaterialsPage() {
       {isLoading && <p>Загрузка…</p>}
       {error && <p className="form-error">{error}</p>}
 
-      <DataTable
-        rows={items}
-        rowKey={(row) => row.id}
-        emptyText="Пока нет ни одного материала — добавьте первый выше"
-        columns={[
-          { header: "Название", render: (row) => row.name },
-          { header: "Тип", render: (row) => MATERIAL_TYPES.find((t) => t.value === row.type)?.label ?? row.type },
-          { header: "Ед.", render: (row) => row.unit },
-          { header: "Точка перезаказа", render: (row) => row.reorderPoint ?? "—" },
-        ]}
+      <SearchBar value={query} onChange={setQuery} placeholder="Поиск материала" />
+      <FilterTabs options={TYPE_FILTERS} value={typeFilter} onChange={setTypeFilter} />
+
+      <ListCard
+        items={items
+          .filter((row) => typeFilter === "all" || row.type === typeFilter)
+          .filter((row) => row.name.toLowerCase().includes(query.trim().toLowerCase()))}
+        getKey={(row) => row.id}
+        getIcon={(row) => MATERIAL_ICONS[row.type] ?? "box"}
+        getTitle={(row) => row.name}
+        getMeta={(row) => (row.reorderPoint ? `Точка перезаказа: ${row.reorderPoint} ${row.unit}` : row.unit)}
+        emptyTitle="Пока нет ни одного материала"
+        emptyHint="Добавьте первый материал в форме выше."
       />
     </section>
   );

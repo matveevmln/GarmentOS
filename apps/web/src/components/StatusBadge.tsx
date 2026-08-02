@@ -1,4 +1,5 @@
 const STATUS_LABELS: Record<string, string> = {
+  active: "Активен",
   draft: "Черновик",
   sent: "Отправлено",
   confirmed: "Подтверждено",
@@ -9,9 +10,11 @@ const STATUS_LABELS: Record<string, string> = {
   cancelled: "Отменено",
   approved: "Утверждено",
   archived: "В архиве",
+  discontinued: "Снята с продажи",
 };
 
 const STATUS_TONES: Record<string, string> = {
+  active: "tone-success",
   draft: "tone-warning",
   sent: "tone-info",
   confirmed: "tone-info",
@@ -22,6 +25,7 @@ const STATUS_TONES: Record<string, string> = {
   cancelled: "tone-danger",
   approved: "tone-success",
   archived: "",
+  discontinued: "tone-danger",
 };
 
 export function StatusBadge({ status }: { status: string }) {

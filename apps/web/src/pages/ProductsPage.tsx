@@ -1,15 +1,18 @@
 import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Link } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { createProductSchema, type CreateProductDto, type ProductResponseDto } from "@garmentos/shared-types";
 import { useCrudResource } from "../api/useCrudResource";
-import { DataTable } from "../components/DataTable";
+import { ModelGrid } from "../components/ModelGrid";
+import { SearchBar } from "../components/SearchBar";
 import { ApiError } from "../api/client";
 
 export function ProductsPage() {
   const { items, isLoading, error, create } = useCrudResource<ProductResponseDto, CreateProductDto>("/products");
   const [formError, setFormError] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+  const navigate = useNavigate();
   const {
     register,
     handleSubmit,
@@ -58,18 +61,16 @@ export function ProductsPage() {
       {isLoading && <p>Загрузка…</p>}
       {error && <p className="form-error">{error}</p>}
 
-      <DataTable
-        rows={items}
-        rowKey={(row) => row.id}
-        emptyText="Пока нет ни одной модели — добавьте первую выше"
-        columns={[
-          {
-            header: "Название",
-            render: (row) => <Link to={`/products/${row.id}`}>{row.name}</Link>,
-          },
-          { header: "Артикул", render: (row) => row.code },
-          { header: "Статус", render: (row) => row.status },
-        ]}
+      <SearchBar value={query} onChange={setQuery} placeholder="Поиск модели" />
+
+      <ModelGrid
+        items={items.filter((row) => row.name.toLowerCase().includes(query.trim().toLowerCase()))}
+        getKey={(row) => row.id}
+        getTitle={(row) => row.name}
+        getSubtitle={(row) => row.code}
+        onItemClick={(row) => void navigate(`/products/${row.id}`)}
+        emptyTitle="Пока нет ни одной модели"
+        emptyHint="Добавьте первую модель в форме выше."
       />
     </section>
   );

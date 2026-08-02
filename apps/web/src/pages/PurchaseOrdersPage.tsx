@@ -8,8 +8,15 @@ import {
 } from "@garmentos/shared-types";
 import { apiRequest, ApiError } from "../api/client";
 import { useCrudResource } from "../api/useCrudResource";
-import { DataTable } from "../components/DataTable";
+import { FilterTabs, type FilterOption } from "../components/FilterTabs";
 import { StatusBadge } from "../components/StatusBadge";
+
+const STATUS_FILTERS: FilterOption<"all" | "draft" | "sent" | "received">[] = [
+  { value: "all", label: "Все" },
+  { value: "draft", label: "Черновик" },
+  { value: "sent", label: "Отправлено" },
+  { value: "received", label: "Получено" },
+];
 
 export function PurchaseOrdersPage() {
   const { items: orders, isLoading, reload } = useCrudResource<PurchaseOrderResponseDto, never>("/purchase-orders");
@@ -23,6 +30,7 @@ export function PurchaseOrdersPage() {
   const [pendingPrice, setPendingPrice] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [receiveWarehouse, setReceiveWarehouse] = useState<Record<string, string>>({});
+  const [statusFilter, setStatusFilter] = useState<(typeof STATUS_FILTERS)[number]["value"]>("all");
 
   useEffect(() => {
     void apiRequest<SupplierResponseDto[]>("/suppliers").then(setSuppliers);
@@ -142,26 +150,27 @@ export function PurchaseOrdersPage() {
 
       {isLoading && <p>Загрузка…</p>}
 
-      <DataTable
-        rows={orders}
-        rowKey={(row) => row.id}
-        emptyText="Пока нет ни одной закупки"
-        columns={[
-          { header: "Поставщик", render: (row) => supplierName(row.supplierId) },
-          { header: "Позиций", render: (row) => row.items.length },
-          { header: "Статус", render: (row) => <StatusBadge status={row.status} /> },
-          {
-            header: "Действие",
-            render: (row) => {
-              if (row.status === "draft") {
-                return (
+      <FilterTabs options={STATUS_FILTERS} value={statusFilter} onChange={setStatusFilter} />
+
+      <div>
+        {orders
+          .filter((row) => statusFilter === "all" || row.status === statusFilter)
+          .map((row) => (
+            <div key={row.id} className="card list-card" style={{ flexWrap: "wrap" }}>
+              <span className="thumb" style={{ background: "var(--surface-2)", color: "var(--muted)" }}>
+                {supplierName(row.supplierId).slice(0, 2).toUpperCase()}
+              </span>
+              <span className="body">
+                <span className="title">{supplierName(row.supplierId)}</span>
+                <span className="meta">{row.items.length} позиций</span>
+              </span>
+              <span className="actions">
+                {row.status === "draft" && (
                   <button type="button" onClick={() => void confirmOrder(row.id)}>
                     Подтвердить
                   </button>
-                );
-              }
-              if (row.status === "sent") {
-                return (
+                )}
+                {row.status === "sent" && (
                   <div className="inline-action">
                     <select
                       value={receiveWarehouse[row.id] ?? ""}
@@ -178,13 +187,18 @@ export function PurchaseOrdersPage() {
                       Принять
                     </button>
                   </div>
-                );
-              }
-              return null;
-            },
-          },
-        ]}
-      />
+                )}
+                {row.status === "received" && <StatusBadge status={row.status} />}
+              </span>
+            </div>
+          ))}
+        {orders.length === 0 && (
+          <div className="card empty">
+            <div className="t">Пока нет ни одной закупки</div>
+            <div className="s">Создайте первую закупку в форме выше.</div>
+          </div>
+        )}
+      </div>
     </section>
   );
 }

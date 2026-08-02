@@ -1,14 +1,26 @@
+import { useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { createWorkshopSchema, type CreateWorkshopDto, type WorkshopResponseDto } from "@garmentos/shared-types";
 import { useCrudResource } from "../api/useCrudResource";
-import { DataTable } from "../components/DataTable";
+import { ListCard } from "../components/ListCard";
+import { FilterTabs, type FilterOption } from "../components/FilterTabs";
+import { SearchBar } from "../components/SearchBar";
+import { StatusBadge } from "../components/StatusBadge";
 import { ApiError } from "../api/client";
-import { useState } from "react";
+
+const STATUS_FILTERS: FilterOption<"all" | "draft" | "active" | "archived">[] = [
+  { value: "all", label: "Все" },
+  { value: "draft", label: "Черновик" },
+  { value: "active", label: "Активные" },
+  { value: "archived", label: "Архив" },
+];
 
 export function WorkshopsPage() {
   const { items, isLoading, error, create } = useCrudResource<WorkshopResponseDto, CreateWorkshopDto>("/workshops");
   const [formError, setFormError] = useState<string | null>(null);
+  const [statusFilter, setStatusFilter] = useState<(typeof STATUS_FILTERS)[number]["value"]>("all");
+  const [query, setQuery] = useState("");
   const {
     register,
     handleSubmit,
@@ -25,6 +37,14 @@ export function WorkshopsPage() {
       setFormError(err instanceof ApiError ? err.message : "Не удалось создать цех");
     }
   };
+
+  const filtered = useMemo(
+    () =>
+      items
+        .filter((row) => statusFilter === "all" || row.status === statusFilter)
+        .filter((row) => row.name.toLowerCase().includes(query.trim().toLowerCase())),
+    [items, statusFilter, query],
+  );
 
   return (
     <section>
@@ -61,16 +81,18 @@ export function WorkshopsPage() {
       {isLoading && <p>Загрузка…</p>}
       {error && <p className="form-error">{error}</p>}
 
-      <DataTable
-        rows={items}
-        rowKey={(row) => row.id}
-        emptyText="Пока нет ни одного цеха — добавьте первый выше"
-        columns={[
-          { header: "Название", render: (row) => row.name },
-          { header: "Специализация", render: (row) => row.specialization ?? "—" },
-          { header: "ИНН", render: (row) => row.inn ?? "—" },
-          { header: "Статус", render: (row) => row.status },
-        ]}
+      <SearchBar value={query} onChange={setQuery} placeholder="Поиск цеха" />
+      <FilterTabs options={STATUS_FILTERS} value={statusFilter} onChange={setStatusFilter} />
+
+      <ListCard
+        items={filtered}
+        getKey={(row) => row.id}
+        getIcon={() => "factory"}
+        getTitle={(row) => row.name}
+        getMeta={(row) => row.specialization || row.inn || "—"}
+        getTrailing={(row) => <StatusBadge status={row.status} />}
+        emptyTitle="Пока нет ни одного цеха"
+        emptyHint="Добавьте первый цех в форме выше."
       />
     </section>
   );

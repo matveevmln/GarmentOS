@@ -13,7 +13,7 @@ import {
 } from "@garmentos/shared-types";
 import { apiRequest, ApiError } from "../api/client";
 import { useCrudResource } from "../api/useCrudResource";
-import { DataTable } from "../components/DataTable";
+import { ListCard } from "../components/ListCard";
 import { StatusBadge } from "../components/StatusBadge";
 
 export function ProductDetailPage() {
@@ -110,7 +110,7 @@ export function ProductDetailPage() {
     <section>
       <h1>{product.name}</h1>
       <p className="muted">
-        Артикул {product.code} · статус {product.status}
+        Артикул {product.code} · <StatusBadge status={product.status} />
       </p>
 
       <h2>Размеры и цвета (SKU)</h2>
@@ -136,15 +136,14 @@ export function ProductDetailPage() {
       </form>
       {variantError && <p className="form-error">{variantError}</p>}
       {variantsLoading && <p>Загрузка…</p>}
-      <DataTable
-        rows={variants}
-        rowKey={(row) => row.id}
-        emptyText="Пока нет ни одного SKU — добавьте размер и цвет выше"
-        columns={[
-          { header: "Размер", render: (row) => row.size },
-          { header: "Цвет", render: (row) => row.color },
-          { header: "Код SKU", render: (row) => row.skuCode },
-        ]}
+      <ListCard
+        items={variants}
+        getKey={(row) => row.id}
+        getIcon={() => "layers"}
+        getTitle={(row) => `${row.size} / ${row.color}`}
+        getMeta={(row) => row.skuCode}
+        emptyTitle="Пока нет ни одного SKU"
+        emptyHint="Добавьте размер и цвет в форме выше."
       />
 
       <h2>Спецификация (BOM)</h2>
@@ -195,24 +194,23 @@ export function ProductDetailPage() {
       )}
       {bomError && <p className="form-error">{bomError}</p>}
 
-      <DataTable
-        rows={boms}
-        rowKey={(row) => row.id}
-        emptyText="Спецификация ещё не создана — добавьте материалы выше"
-        columns={[
-          { header: "Версия", render: (row) => row.version },
-          { header: "Статус", render: (row) => <StatusBadge status={row.status} /> },
-          { header: "Материалов", render: (row) => row.items.length },
-          {
-            header: "",
-            render: (row) =>
-              row.status === "draft" ? (
-                <button type="button" onClick={() => void approveBom(row.id)}>
-                  Утвердить
-                </button>
-              ) : null,
-          },
-        ]}
+      <ListCard
+        items={boms}
+        getKey={(row) => row.id}
+        getIcon={() => "file"}
+        getTitle={(row) => `Версия ${row.version}`}
+        getMeta={(row) => `${row.items.length} материалов`}
+        getTrailing={(row) =>
+          row.status === "draft" ? (
+            <button type="button" onClick={() => void approveBom(row.id)}>
+              Утвердить
+            </button>
+          ) : (
+            <StatusBadge status={row.status} />
+          )
+        }
+        emptyTitle="Спецификация ещё не создана"
+        emptyHint="Добавьте материалы в форме выше."
       />
     </section>
   );

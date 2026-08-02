@@ -3,12 +3,14 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { createWarehouseSchema, type CreateWarehouseDto, type WarehouseResponseDto } from "@garmentos/shared-types";
 import { useCrudResource } from "../api/useCrudResource";
-import { DataTable } from "../components/DataTable";
+import { ListCard } from "../components/ListCard";
+import { SearchBar } from "../components/SearchBar";
 import { ApiError } from "../api/client";
 
 export function WarehousesPage() {
   const { items, isLoading, error, create } = useCrudResource<WarehouseResponseDto, CreateWarehouseDto>("/warehouses");
   const [formError, setFormError] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
   const {
     register,
     handleSubmit,
@@ -51,15 +53,16 @@ export function WarehousesPage() {
       {isLoading && <p>Загрузка…</p>}
       {error && <p className="form-error">{error}</p>}
 
-      <DataTable
-        rows={items}
-        rowKey={(row) => row.id}
-        emptyText="Пока нет ни одного склада — добавьте первый выше"
-        columns={[
-          { header: "Название", render: (row) => row.name },
-          { header: "Тип", render: (row) => row.type },
-          { header: "Страна", render: (row) => row.country ?? "—" },
-        ]}
+      <SearchBar value={query} onChange={setQuery} placeholder="Поиск склада" />
+
+      <ListCard
+        items={items.filter((row) => row.name.toLowerCase().includes(query.trim().toLowerCase()))}
+        getKey={(row) => row.id}
+        getIcon={() => "building"}
+        getTitle={(row) => row.name}
+        getMeta={(row) => row.country ?? "—"}
+        emptyTitle="Пока нет ни одного склада"
+        emptyHint="Добавьте первый склад в форме выше."
       />
     </section>
   );
