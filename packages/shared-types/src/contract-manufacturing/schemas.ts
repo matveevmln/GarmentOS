@@ -65,6 +65,7 @@ export const productionOrderVariantDraftSchema = z.object({
   productVariantId: z.string().uuid(),
   quantity: z.number().positive(),
 });
+export type ProductionOrderVariantDraft = z.infer<typeof productionOrderVariantDraftSchema>;
 
 export const createProductionOrderSchema = z.object({
   productId: z.string().uuid(),

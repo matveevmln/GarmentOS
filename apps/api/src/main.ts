@@ -18,6 +18,17 @@ import { AppModule } from "./app.module";
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule);
 
+  // apps/web (Итерация 11) — браузерный SPA на отдельном origin (Vite dev
+  // server/Vercel), аутентификация через Bearer-токен в заголовке, не
+  // cookie — credentials не нужны, поэтому withCredentials/credentials:true
+  // сознательно не включены. CORS_ORIGIN — список через запятую для
+  // конкретного прод-домена; без переменной (локальная разработка)
+  // отражаем Origin запроса, а не "*", чтобы тот же код уже работал с
+  // credentialed-запросами, если они понадобятся позже без правки этой строки.
+  app.enableCors({
+    origin: process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(",") : true,
+  });
+
   // URI-versioning с первого контроллера (/v1/...) — маршруты будущих 10
   // модулей сразу попадают под версию без миграции путей задним числом.
   app.enableVersioning({ type: VersioningType.URI, defaultVersion: "1" });

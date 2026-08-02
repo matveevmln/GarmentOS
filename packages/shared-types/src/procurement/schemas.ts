@@ -66,6 +66,7 @@ export const purchaseOrderItemDraftSchema = z.object({
   quantity: z.number().positive(),
   unitPrice: z.number().min(0),
 });
+export type PurchaseOrderItemDraft = z.infer<typeof purchaseOrderItemDraftSchema>;
 
 export const createPurchaseOrderSchema = z.object({
   supplierId: z.string().uuid(),
