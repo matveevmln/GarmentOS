@@ -49,6 +49,7 @@
 | [`docs/ARCHITECTURE_SELF_REVIEW.md`](./docs/ARCHITECTURE_SELF_REVIEW.md) | Самопроверка архитектуры, риски, открытые вопросы |
 | [`docs/ARCHITECTURE_REVIEW.md`](./docs/ARCHITECTURE_REVIEW.md) | Независимая архитектурная ревизия перед первым реальным запуском на Railway (2026-08-02) — сверка `docs/*` с фактическим кодом/схемой БД, приоритеты P0-P3 |
 | [`docs/WEB_DESIGN_SYSTEM.md`](./docs/WEB_DESIGN_SYSTEM.md) | Эталонный визуальный язык GarmentOS (утверждённый `apps/prototype`) — аудит соответствия `apps/web`, план переноса компонент за компонентом |
+| [`docs/UI_FOUNDATION.md`](./docs/UI_FOUNDATION.md) | Инженерный фундамент UI Kit — какие open-source библиотеки (shadcn/ui, Radix UI, Tailwind, TanStack и др.) лежат в основе фирменных Garment-компонентов, какие компоненты строятся сейчас, какие зарезервированы на будущее |
 | `docs/adr/` | Architecture Decision Records — по одному файлу на значимое решение (создаётся по мере необходимости) |
 
 ## 2. Что такое GarmentOS (кратко)
