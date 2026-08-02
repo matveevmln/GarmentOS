@@ -63,6 +63,13 @@ export class ProductionOrdersController {
     return productionOrderResponseSchema.parse(productionOrder);
   }
 
+  @RequirePermissions("contract_manufacturing.read")
+  @Get()
+  async list(@CurrentUser() currentUser: AuthenticatedRequestUser): Promise<ProductionOrderResponseDto[]> {
+    const productionOrders = await this.contractManufacturingService.listProductionOrders(currentUser.companyId);
+    return productionOrders.map((order) => productionOrderResponseSchema.parse(order));
+  }
+
   // Показ заказа пошива и его статуса — минимум, нужный вертикальному
   // сценарию Итерации 7 (docs/ROADMAP.md), не read-слой для всех операций.
   @RequirePermissions("contract_manufacturing.read")

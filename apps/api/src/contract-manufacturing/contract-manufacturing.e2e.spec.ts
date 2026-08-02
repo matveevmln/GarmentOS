@@ -189,6 +189,19 @@ describe("Contract Manufacturing API (e2e)", () => {
       .expect(409);
     const conflictBody = conflictResponse.body as ErrorResponseBody;
     expect(conflictBody.code).toBe("PRODUCTION_ORDER_NOT_DRAFT");
+
+    // Списочные эндпоинты (Итерация 11, apps/web).
+    const workshopsListResponse = await request(httpServer)
+      .get("/v1/workshops")
+      .set(...authHeader(accessToken))
+      .expect(200);
+    expect((workshopsListResponse.body as WorkshopResponseDto[]).map((w) => w.id)).toContain(workshop.id);
+
+    const ordersListResponse = await request(httpServer)
+      .get("/v1/production-orders")
+      .set(...authHeader(accessToken))
+      .expect(200);
+    expect((ordersListResponse.body as ProductionOrderResponseDto[]).map((o) => o.id)).toContain(order.id);
   });
 
   it("viewer без contract_manufacturing.write не может создать цех — 403", async () => {

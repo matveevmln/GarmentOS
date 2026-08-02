@@ -114,6 +114,27 @@ describe("Procurement API (e2e)", () => {
       .expect(409);
     const conflictBody = conflictResponse.body as ErrorResponseBody;
     expect(conflictBody.code).toBe("PURCHASE_ORDER_NOT_DRAFT");
+
+    // Списочные эндпоинты (Итерация 11, apps/web) — без них CRUD-интерфейс
+    // не может показать ни одной таблицы.
+    const suppliersListResponse = await request(httpServer)
+      .get("/v1/suppliers")
+      .set(...authHeader(accessToken))
+      .expect(200);
+    expect((suppliersListResponse.body as SupplierResponseDto[]).map((s) => s.id)).toContain(supplier.id);
+
+    const materialsListResponse = await request(httpServer)
+      .get("/v1/materials")
+      .set(...authHeader(accessToken))
+      .expect(200);
+    expect((materialsListResponse.body as MaterialResponseDto[]).map((m) => m.id)).toContain(material.id);
+
+    const purchaseOrdersListResponse = await request(httpServer)
+      .get("/v1/purchase-orders")
+      .set(...authHeader(accessToken))
+      .expect(200);
+    const listedOrder = (purchaseOrdersListResponse.body as PurchaseOrderResponseDto[]).find((o) => o.id === order.id);
+    expect(listedOrder?.items).toHaveLength(1);
   });
 
   it("POST /v1/purchase-orders без позиций — 400", async () => {

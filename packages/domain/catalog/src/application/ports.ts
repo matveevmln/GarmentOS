@@ -39,6 +39,7 @@ export interface ProductRepository {
   // найдено (Итерация 7: предпросмотр текстового запроса перед созданием
   // заказа, не гадаем — предлагаем варианты человеку на подтверждение).
   findSimilarByName(companyId: string, name: string, limit: number): Promise<Product[]>;
+  listByCompany(companyId: string): Promise<Product[]>;
 }
 
 export interface NewProductVariantInput {
@@ -58,4 +59,5 @@ export interface ProductVariantRepository {
   // size/color для заполнения строк спецификации (Итерация 7, Document
   // Template Engine).
   findById(id: string): Promise<ProductVariant | null>;
+  listByProduct(productId: string): Promise<ProductVariant[]>;
 }

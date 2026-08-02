@@ -53,8 +53,11 @@ export const productResponseSchema = z.object({
 });
 export type ProductResponseDto = z.infer<typeof productResponseSchema>;
 
+// name опционален (Итерация 11): без него — список всех моделей компании
+// (apps/web), с ним — точный поиск для AI-разбора текстового запроса
+// (Итерация 7, docs/AI_PRODUCTION_ASSISTANT_ARCHITECTURE.md).
 export const findProductByNameQuerySchema = z.object({
-  name: z.string().min(1, "Название модели не может быть пустым"),
+  name: z.string().min(1, "Название модели не может быть пустым").optional(),
 });
 export type FindProductByNameQueryDto = z.infer<typeof findProductByNameQuerySchema>;
 
@@ -81,3 +84,8 @@ export const productVariantResponseSchema = z.object({
   deletedAt: z.date().nullable(),
 });
 export type ProductVariantResponseDto = z.infer<typeof productVariantResponseSchema>;
+
+export const listProductVariantsQuerySchema = z.object({
+  productId: z.string().uuid(),
+});
+export type ListProductVariantsQueryDto = z.infer<typeof listProductVariantsQuerySchema>;

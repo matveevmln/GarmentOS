@@ -235,4 +235,30 @@ export class DrizzleProductionOrderRepository implements ProductionOrderReposito
 
     return toProductionOrder(orderRow, variantRows);
   }
+
+  async listByCompany(companyId: string): Promise<ProductionOrder[]> {
+    const orderRows = await this.db
+      .select()
+      .from(productionOrders)
+      .where(eq(productionOrders.companyId, companyId))
+      .orderBy(desc(productionOrders.createdAt));
+    if (orderRows.length === 0) return [];
+
+    const variantRows = await this.db
+      .select()
+      .from(productionOrderVariants)
+      .where(
+        inArray(
+          productionOrderVariants.productionOrderId,
+          orderRows.map((row) => row.id),
+        ),
+      );
+
+    return orderRows.map((orderRow) =>
+      toProductionOrder(
+        orderRow,
+        variantRows.filter((variant) => variant.productionOrderId === orderRow.id),
+      ),
+    );
+  }
 }

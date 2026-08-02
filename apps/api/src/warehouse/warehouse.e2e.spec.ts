@@ -241,6 +241,15 @@ describe("Warehouse API (e2e)", () => {
       .set(...authHeader(accessToken))
       .expect(201);
     expect((completedResponse.body as InventoryCountResponseDto).status).toBe("completed");
+
+    // Список складов компании (Итерация 11, apps/web).
+    const warehousesListResponse = await request(httpServer)
+      .get("/v1/warehouses")
+      .set(...authHeader(accessToken))
+      .expect(200);
+    const listedIds = (warehousesListResponse.body as WarehouseResponseDto[]).map((w) => w.id);
+    expect(listedIds).toContain(origin.id);
+    expect(listedIds).toContain(destination.id);
   });
 
   it("отклоняет несогласованность типа склада и workshopId — 400; accountant без warehouse.write — 403", async () => {

@@ -5,7 +5,7 @@ import {
   suppliers,
   type DbOrTx,
 } from "@garmentos/db-schema";
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import type { Material } from "../domain/material";
 import type { Supplier } from "../domain/supplier";
 import type { PurchaseOrder, PurchaseOrderItem, PurchaseOrderStatus } from "../domain/purchase-order";
@@ -98,6 +98,11 @@ export class DrizzleMaterialRepository implements MaterialRepository {
       .limit(1);
     return row ? toMaterial(row) : null;
   }
+
+  async listByCompany(companyId: string): Promise<Material[]> {
+    const rows = await this.db.select().from(materials).where(eq(materials.companyId, companyId));
+    return rows.map(toMaterial);
+  }
 }
 
 export class DrizzleSupplierRepository implements SupplierRepository {
@@ -116,6 +121,11 @@ export class DrizzleSupplierRepository implements SupplierRepository {
       .where(and(eq(suppliers.companyId, companyId), eq(suppliers.id, id)))
       .limit(1);
     return row ? toSupplier(row) : null;
+  }
+
+  async listByCompany(companyId: string): Promise<Supplier[]> {
+    const rows = await this.db.select().from(suppliers).where(eq(suppliers.companyId, companyId));
+    return rows.map(toSupplier);
   }
 }
 
@@ -183,5 +193,31 @@ export class DrizzlePurchaseOrderRepository implements PurchaseOrderRepository {
       .where(eq(purchaseOrderItems.purchaseOrderId, orderRow.id));
 
     return toPurchaseOrder(orderRow, itemRows);
+  }
+
+  async listByCompany(companyId: string): Promise<PurchaseOrder[]> {
+    const orderRows = await this.db
+      .select()
+      .from(purchaseOrders)
+      .where(eq(purchaseOrders.companyId, companyId))
+      .orderBy(desc(purchaseOrders.createdAt));
+    if (orderRows.length === 0) return [];
+
+    const itemRows = await this.db
+      .select()
+      .from(purchaseOrderItems)
+      .where(
+        inArray(
+          purchaseOrderItems.purchaseOrderId,
+          orderRows.map((row) => row.id),
+        ),
+      );
+
+    return orderRows.map((orderRow) =>
+      toPurchaseOrder(
+        orderRow,
+        itemRows.filter((item) => item.purchaseOrderId === orderRow.id),
+      ),
+    );
   }
 }

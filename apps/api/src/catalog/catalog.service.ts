@@ -43,8 +43,16 @@ export class CatalogService {
     return this.products.findByName(companyId, name);
   }
 
+  async listProducts(companyId: string): Promise<Product[]> {
+    return this.products.listByCompany(companyId);
+  }
+
   async findProductVariant(productId: string, size: string, color: string): Promise<ProductVariant | null> {
     return this.productVariants.findByProductSizeColor(productId, size, color);
+  }
+
+  async listProductVariants(productId: string): Promise<ProductVariant[]> {
+    return this.productVariants.listByProduct(productId);
   }
 
   async findProductVariantById(id: string): Promise<ProductVariant | null> {

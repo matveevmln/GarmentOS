@@ -14,6 +14,7 @@ export interface NewMaterialInput {
 export interface MaterialRepository {
   create(input: NewMaterialInput): Promise<Material>;
   findById(companyId: string, id: string): Promise<Material | null>;
+  listByCompany(companyId: string): Promise<Material[]>;
 }
 
 export interface NewSupplierInput {
@@ -29,6 +30,7 @@ export interface NewSupplierInput {
 export interface SupplierRepository {
   create(input: NewSupplierInput): Promise<Supplier>;
   findById(companyId: string, id: string): Promise<Supplier | null>;
+  listByCompany(companyId: string): Promise<Supplier[]>;
 }
 
 export interface NewPurchaseOrderInput {
@@ -45,4 +47,5 @@ export interface PurchaseOrderRepository {
   create(input: NewPurchaseOrderInput): Promise<PurchaseOrder>;
   findById(companyId: string, id: string): Promise<PurchaseOrder | null>;
   updateStatus(id: string, status: PurchaseOrderStatus): Promise<PurchaseOrder>;
+  listByCompany(companyId: string): Promise<PurchaseOrder[]>;
 }

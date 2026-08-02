@@ -29,16 +29,22 @@ export class ProductsController {
     return productResponseSchema.parse(product);
   }
 
-  // Поиск модели по названию — нужен для разбора текстового
-  // производственного запроса (Итерация 7): AI извлекает название модели из
-  // текста, этот эндпоинт резолвит его в реальный productId (или явно
-  // сообщает, что модель не найдена — не придумывается).
+  // Без ?name= — список всех моделей компании (apps/web, Итерация 11).
+  // С ?name= — точный поиск для разбора текстового производственного запроса
+  // (Итерация 7): AI извлекает название модели из текста, этот эндпоинт
+  // резолвит его в реальный productId (или явно сообщает, что модель не
+  // найдена — не придумывается).
   @RequirePermissions("catalog.read")
   @Get()
   async findByName(
     @Query() query: FindProductByNameQueryDto,
     @CurrentUser() currentUser: AuthenticatedRequestUser,
-  ): Promise<ProductResponseDto> {
+  ): Promise<ProductResponseDto | ProductResponseDto[]> {
+    if (!query.name) {
+      const products = await this.catalogService.listProducts(currentUser.companyId);
+      return products.map((product) => productResponseSchema.parse(product));
+    }
+
     const product = await this.catalogService.findProductByName(currentUser.companyId, query.name);
     if (!product) {
       throw new NotFoundException({

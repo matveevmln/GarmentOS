@@ -1,4 +1,4 @@
-import { Body, Controller, Post } from "@nestjs/common";
+import { Body, Controller, Get, Post } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
 import { createZodDto } from "nestjs-zod";
 import { createWarehouseSchema, warehouseResponseSchema, type WarehouseResponseDto } from "@garmentos/shared-types";
@@ -21,5 +21,12 @@ export class WarehousesController {
   ): Promise<WarehouseResponseDto> {
     const warehouse = await this.warehouseService.createWarehouse(currentUser.companyId, body);
     return warehouseResponseSchema.parse(warehouse);
+  }
+
+  @RequirePermissions("warehouse.read")
+  @Get()
+  async list(@CurrentUser() currentUser: AuthenticatedRequestUser): Promise<WarehouseResponseDto[]> {
+    const warehouses = await this.warehouseService.listWarehouses(currentUser.companyId);
+    return warehouses.map((warehouse) => warehouseResponseSchema.parse(warehouse));
   }
 }

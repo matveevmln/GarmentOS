@@ -130,6 +130,11 @@ export class DrizzleProductRepository implements ProductRepository {
     });
     return matches.slice(0, limit).map(toProduct);
   }
+
+  async listByCompany(companyId: string): Promise<Product[]> {
+    const rows = await this.db.select().from(products).where(eq(products.companyId, companyId));
+    return rows.map(toProduct);
+  }
 }
 
 export class DrizzleProductVariantRepository implements ProductVariantRepository {
@@ -164,5 +169,10 @@ export class DrizzleProductVariantRepository implements ProductVariantRepository
   async findById(id: string): Promise<ProductVariant | null> {
     const [row] = await this.db.select().from(productVariants).where(eq(productVariants.id, id)).limit(1);
     return row ? toProductVariant(row) : null;
+  }
+
+  async listByProduct(productId: string): Promise<ProductVariant[]> {
+    const rows = await this.db.select().from(productVariants).where(eq(productVariants.productId, productId));
+    return rows.map(toProductVariant);
   }
 }

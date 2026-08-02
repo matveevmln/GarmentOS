@@ -106,6 +106,19 @@ describe("Catalog API (e2e)", () => {
       .expect(409);
     const conflictBody = conflictResponse.body as ErrorResponseBody;
     expect(conflictBody.code).toBe("PRODUCT_CODE_TAKEN");
+
+    // Списочные эндпоинты без ?name= (Итерация 11, apps/web).
+    const productsListResponse = await request(httpServer)
+      .get("/v1/products")
+      .set(...authHeader(accessToken))
+      .expect(200);
+    expect((productsListResponse.body as ProductResponseDto[]).map((p) => p.id)).toContain(product.id);
+
+    const variantsListResponse = await request(httpServer)
+      .get(`/v1/product-variants?productId=${product.id}`)
+      .set(...authHeader(accessToken))
+      .expect(200);
+    expect((variantsListResponse.body as ProductVariantResponseDto[]).map((v) => v.id)).toContain(variant.id);
   });
 
   it("POST /v1/collections с пустым именем — 400", async () => {

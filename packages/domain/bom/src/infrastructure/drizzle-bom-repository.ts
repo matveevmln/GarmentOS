@@ -1,5 +1,5 @@
 import { boms, bomItems, type DbOrTx } from "@garmentos/db-schema";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import type { Bom, BomItem, BomStatus } from "../domain/bom";
 import type { BomRepository, NewBomInput } from "../application/ports";
 
@@ -104,5 +104,26 @@ export class DrizzleBomRepository implements BomRepository {
 
     const itemRows = await this.db.select().from(bomItems).where(eq(bomItems.bomId, bomRow.id));
     return toBom(bomRow, itemRows);
+  }
+
+  async listByProduct(companyId: string, productId: string): Promise<Bom[]> {
+    const bomRows = await this.db
+      .select()
+      .from(boms)
+      .where(and(eq(boms.companyId, companyId), eq(boms.productId, productId)))
+      .orderBy(desc(boms.version));
+    if (bomRows.length === 0) return [];
+
+    const itemRows = await this.db
+      .select()
+      .from(bomItems)
+      .where(
+        inArray(
+          bomItems.bomId,
+          bomRows.map((row) => row.id),
+        ),
+      );
+
+    return bomRows.map((bomRow) => toBom(bomRow, itemRows.filter((item) => item.bomId === bomRow.id)));
   }
 }

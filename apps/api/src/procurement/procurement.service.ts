@@ -37,8 +37,20 @@ export class ProcurementService {
     return this.materials.findById(companyId, id);
   }
 
+  async listMaterials(companyId: string): Promise<Material[]> {
+    return this.materials.listByCompany(companyId);
+  }
+
   async createSupplier(companyId: string, input: CreateSupplierDto): Promise<Supplier> {
     return createSupplier({ suppliers: this.suppliers }, { ...input, companyId });
+  }
+
+  async listSuppliers(companyId: string): Promise<Supplier[]> {
+    return this.suppliers.listByCompany(companyId);
+  }
+
+  async listPurchaseOrders(companyId: string): Promise<PurchaseOrder[]> {
+    return this.purchaseOrders.listByCompany(companyId);
   }
 
   async createPurchaseOrderDraft(companyId: string, input: CreatePurchaseOrderDto): Promise<PurchaseOrder> {

@@ -19,4 +19,5 @@ export interface BomRepository {
   // (docs/ROADMAP.md, Итерация 3), в т.ч. другими модулями через публичный
   // getApprovedBom (см. index.ts), не прямым доступом к этой таблице.
   findLatestApproved(companyId: string, productId: string): Promise<Bom | null>;
+  listByProduct(companyId: string, productId: string): Promise<Bom[]>;
 }

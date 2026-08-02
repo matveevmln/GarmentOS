@@ -1,4 +1,4 @@
-import { Body, Controller, Post } from "@nestjs/common";
+import { Body, Controller, Get, Post } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
 import { createZodDto } from "nestjs-zod";
 import { createWorkshopSchema, workshopResponseSchema, type WorkshopResponseDto } from "@garmentos/shared-types";
@@ -21,5 +21,15 @@ export class WorkshopsController {
   ): Promise<WorkshopResponseDto> {
     const workshop = await this.contractManufacturingService.createWorkshop(currentUser.companyId, body);
     return workshopResponseSchema.parse(workshop);
+  }
+
+  // Активные цеха компании (owner создаёт цех сразу активным — см.
+  // createWorkshop; черновики от Inbox сюда не попадают, это отдельный
+  // будущий сценарий, не Итерация 11).
+  @RequirePermissions("contract_manufacturing.read")
+  @Get()
+  async list(@CurrentUser() currentUser: AuthenticatedRequestUser): Promise<WorkshopResponseDto[]> {
+    const workshops = await this.contractManufacturingService.listActiveWorkshops(currentUser.companyId);
+    return workshops.map((workshop) => workshopResponseSchema.parse(workshop));
   }
 }

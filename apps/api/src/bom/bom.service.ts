@@ -20,4 +20,8 @@ export class BomService {
   async getApproved(companyId: string, query: GetApprovedBomQueryDto): Promise<Bom | null> {
     return getApprovedBom({ boms: this.boms }, { ...query, companyId });
   }
+
+  async listByProduct(companyId: string, productId: string): Promise<Bom[]> {
+    return this.boms.listByProduct(companyId, productId);
+  }
 }

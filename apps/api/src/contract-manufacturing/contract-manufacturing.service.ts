@@ -47,6 +47,10 @@ export class ContractManufacturingService {
     return this.productionOrders.findById(companyId, id);
   }
 
+  async listProductionOrders(companyId: string): Promise<ProductionOrder[]> {
+    return this.productionOrders.listByCompany(companyId);
+  }
+
   async findWorkshopById(companyId: string, id: string): Promise<Workshop | null> {
     return this.workshops.findById(companyId, id);
   }

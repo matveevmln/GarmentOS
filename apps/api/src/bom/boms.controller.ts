@@ -54,4 +54,16 @@ export class BomsController {
     }
     return bomResponseSchema.parse(bom);
   }
+
+  // Все версии BOM модели (draft/approved/archived), не только утверждённая
+  // — apps/web (Итерация 11), чтобы можно было утвердить черновик из списка.
+  @RequirePermissions("bom.read")
+  @Get()
+  async list(
+    @Query() query: GetApprovedBomQueryDto,
+    @CurrentUser() currentUser: AuthenticatedRequestUser,
+  ): Promise<BomResponseDto[]> {
+    const boms = await this.bomService.listByProduct(currentUser.companyId, query.productId);
+    return boms.map((bom) => bomResponseSchema.parse(bom));
+  }
 }

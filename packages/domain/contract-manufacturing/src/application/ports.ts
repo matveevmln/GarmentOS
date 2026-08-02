@@ -65,6 +65,7 @@ export interface ProductionOrderRepository {
   // (простой текстовый ответ, не структурированная команда), поэтому
   // обновляется самый свежий незавершённый заказ этого цеха.
   findLatestActiveByWorkshop(companyId: string, workshopId: string): Promise<ProductionOrder | null>;
+  listByCompany(companyId: string): Promise<ProductionOrder[]>;
 }
 
 // Порт в модуль BOM — узкий срез, структурно совместимый с
