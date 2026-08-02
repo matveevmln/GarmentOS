@@ -14,6 +14,7 @@ import {
 import { apiRequest, ApiError } from "../api/client";
 import { useCrudResource } from "../api/useCrudResource";
 import { DataTable } from "../components/DataTable";
+import { StatusBadge } from "../components/StatusBadge";
 
 export function ProductDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -200,7 +201,7 @@ export function ProductDetailPage() {
         emptyText="Спецификация ещё не создана — добавьте материалы выше"
         columns={[
           { header: "Версия", render: (row) => row.version },
-          { header: "Статус", render: (row) => row.status },
+          { header: "Статус", render: (row) => <StatusBadge status={row.status} /> },
           { header: "Материалов", render: (row) => row.items.length },
           {
             header: "",

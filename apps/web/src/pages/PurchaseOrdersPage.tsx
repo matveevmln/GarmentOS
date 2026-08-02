@@ -9,6 +9,7 @@ import {
 import { apiRequest, ApiError } from "../api/client";
 import { useCrudResource } from "../api/useCrudResource";
 import { DataTable } from "../components/DataTable";
+import { StatusBadge } from "../components/StatusBadge";
 
 export function PurchaseOrdersPage() {
   const { items: orders, isLoading, reload } = useCrudResource<PurchaseOrderResponseDto, never>("/purchase-orders");
@@ -148,7 +149,7 @@ export function PurchaseOrdersPage() {
         columns={[
           { header: "Поставщик", render: (row) => supplierName(row.supplierId) },
           { header: "Позиций", render: (row) => row.items.length },
-          { header: "Статус", render: (row) => row.status },
+          { header: "Статус", render: (row) => <StatusBadge status={row.status} /> },
           {
             header: "Действие",
             render: (row) => {

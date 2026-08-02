@@ -3,6 +3,7 @@ import { AuthProvider } from "./auth/AuthContext";
 import { LoginPage } from "./auth/LoginPage";
 import { RequireAuth } from "./auth/RequireAuth";
 import { AppLayout } from "./layout/AppLayout";
+import { IconSpriteDefs } from "./components/Icon";
 import { WorkshopsPage } from "./pages/WorkshopsPage";
 import { SuppliersPage } from "./pages/SuppliersPage";
 import { MaterialsPage } from "./pages/MaterialsPage";
@@ -15,6 +16,7 @@ import { ProductionOrdersPage } from "./pages/ProductionOrdersPage";
 export function App() {
   return (
     <AuthProvider>
+      <IconSpriteDefs />
       <Routes>
         <Route path="/login" element={<LoginPage />} />
         <Route element={<RequireAuth />}>

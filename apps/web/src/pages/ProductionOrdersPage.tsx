@@ -11,6 +11,7 @@ import {
 import { apiRequest, ApiError } from "../api/client";
 import { useCrudResource } from "../api/useCrudResource";
 import { DataTable } from "../components/DataTable";
+import { StatusBadge } from "../components/StatusBadge";
 
 export function ProductionOrdersPage() {
   const { items: orders, isLoading, reload } = useCrudResource<ProductionOrderResponseDto, never>("/production-orders");
@@ -210,7 +211,7 @@ export function ProductionOrdersPage() {
           { header: "Модель", render: (row) => productName(row.productId) },
           { header: "Цех", render: (row) => workshopName(row.workshopId) },
           { header: "Количество", render: (row) => row.plannedQuantity },
-          { header: "Статус", render: (row) => row.status },
+          { header: "Статус", render: (row) => <StatusBadge status={row.status} /> },
           {
             header: "Действие",
             render: (row) => {

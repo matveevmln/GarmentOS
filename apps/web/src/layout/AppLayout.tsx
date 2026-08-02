@@ -1,14 +1,15 @@
 import { NavLink, Outlet } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
+import { Icon } from "../components/Icon";
 
 const NAV_ITEMS = [
-  { to: "/workshops", label: "Цеха" },
-  { to: "/suppliers", label: "Поставщики" },
-  { to: "/materials", label: "Материалы" },
-  { to: "/warehouses", label: "Склады" },
-  { to: "/products", label: "Модели" },
-  { to: "/purchase-orders", label: "Закупки" },
-  { to: "/production-orders", label: "Заказы пошива" },
+  { to: "/workshops", label: "Цеха", icon: "factory" },
+  { to: "/suppliers", label: "Поставщики", icon: "users" },
+  { to: "/materials", label: "Материалы", icon: "layers" },
+  { to: "/warehouses", label: "Склады", icon: "building" },
+  { to: "/products", label: "Модели", icon: "box" },
+  { to: "/purchase-orders", label: "Закупки", icon: "cash" },
+  { to: "/production-orders", label: "Заказы пошива", icon: "scissors" },
 ];
 
 export function AppLayout() {
@@ -31,6 +32,7 @@ export function AppLayout() {
         <nav className="app-nav">
           {NAV_ITEMS.map((item) => (
             <NavLink key={item.to} to={item.to} className={({ isActive }) => (isActive ? "active" : "")}>
+              <Icon name={item.icon} />
               {item.label}
             </NavLink>
           ))}

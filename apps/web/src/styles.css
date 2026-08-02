@@ -1,28 +1,50 @@
-/* Минимальный функциональный слой стилей (Итерация 11, первый рабочий шаг).
-   Полноценная дизайн-система — по итогам утверждения apps/prototype
-   (docs/MASTER_BACKLOG.md) — здесь сознательно только читаемость и Mobile-First
-   раскладка (docs/PRINCIPLES.md, принцип 20), не финальный визуальный язык. */
+/* Токены (цвета/радиусы/тени) и иконки перенесены дословно из утверждённого
+   владельцем прототипа (apps/prototype/index.html) — единая дизайн-система
+   для apps/prototype и apps/web, не два разных визуальных языка. Компоненты
+   здесь — не 1:1 копия разметки прототипа (тот собран как одноразовый
+   HTML-макет без переиспользуемых компонентов), а первый перенос той же
+   системы в переиспользуемые React-компоненты; уточняется по мере переноса
+   остальных экранов прототипа. */
 
 :root {
-  --ink: #1c1b19;
-  --muted: #6b6862;
-  --border: #e4e1d9;
-  --bg: #f7f6f3;
+  --bg: #fafaf9;
   --surface: #ffffff;
-  --accent: #b3122a;
-  --danger: #b3122a;
+  --surface-2: #f3f2ef;
+  --border: #eceae5;
+  --ink: #18181b;
+  --muted: #75757e;
+  --muted-2: #a0a0a8;
+  --accent: #d7263d;
+  --accent-ink: #ffffff;
+  --accent-tint: #fce9eb;
+  --accent-ring: rgba(215, 38, 61, 0.16);
+  --success: #16a34a;
+  --success-tint: #e8f6ec;
+  --warning: #d97706;
+  --warning-tint: #fdf1e1;
+  --danger: #e2543a;
+  --danger-tint: #fceae6;
+  --info: #2563eb;
+  --info-tint: #eaf0fe;
+  --r-lg: 22px;
+  --r-md: 16px;
+  --r-sm: 11px;
+  --shadow-card: 0 1px 2px rgba(20, 20, 25, 0.04), 0 8px 24px -12px rgba(20, 20, 25, 0.1);
   color-scheme: light;
 }
 
 * {
   box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
 }
 
 body {
   margin: 0;
-  font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-family:
+    -apple-system, "SF Pro Text", "Segoe UI Variable", "Segoe UI", Roboto, Arial, sans-serif;
   color: var(--ink);
   background: var(--bg);
+  -webkit-font-smoothing: antialiased;
 }
 
 input,
@@ -31,18 +53,33 @@ button {
   font: inherit;
 }
 
+.icon {
+  width: 20px;
+  height: 20px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.75;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  display: block;
+  flex: none;
+}
+
+/* ---- auth ---- */
 .auth-screen {
   min-height: 100dvh;
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 16px;
+  background: var(--bg);
 }
 
 .auth-card {
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-card);
   padding: 28px;
   width: 100%;
   max-width: 360px;
@@ -53,6 +90,8 @@ button {
 
 .auth-card h1 {
   margin: 0;
+  color: var(--accent);
+  letter-spacing: -0.02em;
 }
 
 .auth-subtitle {
@@ -66,30 +105,41 @@ label {
   gap: 4px;
   font-size: 0.9rem;
   color: var(--muted);
+  font-weight: 650;
 }
 
 input,
 select {
   padding: 10px 12px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink);
+  border-radius: var(--r-sm);
   min-height: 44px;
+}
+
+input:focus,
+select:focus {
+  outline: 2px solid var(--accent-ring);
+  border-color: var(--accent);
 }
 
 button {
   padding: 10px 16px;
   min-height: 44px;
-  border-radius: 8px;
+  border-radius: var(--r-sm);
   border: none;
   background: var(--accent);
-  color: white;
-  font-weight: 600;
+  color: var(--accent-ink);
+  font-weight: 800;
   cursor: pointer;
+  box-shadow: 0 10px 22px -10px var(--accent-ring);
 }
 
 button:disabled {
   opacity: 0.5;
   cursor: default;
+  box-shadow: none;
 }
 
 .field-error,
@@ -97,8 +147,10 @@ button:disabled {
   color: var(--danger);
   font-size: 0.85rem;
   margin: -4px 0 0;
+  font-weight: 650;
 }
 
+/* ---- app shell ---- */
 .app-shell {
   min-height: 100dvh;
   display: flex;
@@ -109,14 +161,15 @@ button:disabled {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 16px;
+  padding: 14px 20px;
   background: var(--surface);
   border-bottom: 1px solid var(--border);
 }
 
 .app-title {
-  font-weight: 700;
+  font-weight: 800;
   color: var(--accent);
+  letter-spacing: -0.01em;
 }
 
 .app-user {
@@ -124,14 +177,17 @@ button:disabled {
   align-items: center;
   gap: 10px;
   font-size: 0.9rem;
+  font-weight: 650;
 }
 
 .app-user button {
-  background: transparent;
+  background: var(--surface);
   color: var(--muted);
   border: 1px solid var(--border);
+  box-shadow: none;
   min-height: 36px;
   padding: 4px 12px;
+  font-weight: 700;
 }
 
 .app-body {
@@ -140,45 +196,103 @@ button:disabled {
   flex-direction: column;
 }
 
+/* Desktop/tablet: горизонтальная панель вкладок вверху. */
 .app-nav {
   display: flex;
   overflow-x: auto;
   gap: 4px;
-  padding: 8px 12px;
-  background: var(--surface);
+  padding: 10px 16px;
+  background: var(--surface-2);
   border-bottom: 1px solid var(--border);
 }
 
 .app-nav a {
+  display: flex;
+  align-items: center;
+  gap: 7px;
   white-space: nowrap;
-  padding: 8px 12px;
+  padding: 8px 14px;
   border-radius: 999px;
   text-decoration: none;
   color: var(--muted);
-  font-size: 0.9rem;
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.app-nav a .icon {
+  width: 16px;
+  height: 16px;
 }
 
 .app-nav a.active {
-  background: var(--accent);
-  color: white;
+  background: var(--ink);
+  color: #fff;
 }
 
 .app-main {
   flex: 1;
-  padding: 16px;
-  max-width: 720px;
+  padding: 20px;
+  padding-bottom: 32px;
+  max-width: 760px;
   width: 100%;
   margin: 0 auto;
 }
 
+/* Мобильные экраны: та же навигация становится нижней панелью вкладок с
+   иконками — одна и та же разметка (AppLayout.tsx), меняется только
+   представление через CSS (Принцип 20 Mobile-First — один код, а не два
+   интерфейса). */
+@media (max-width: 640px) {
+  .app-nav {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 30;
+    justify-content: space-around;
+    overflow-x: auto;
+    padding: 8px 4px calc(8px + env(safe-area-inset-bottom, 0px));
+    background: rgba(255, 255, 255, 0.92);
+    backdrop-filter: blur(14px);
+    border-top: 1px solid var(--border);
+    border-bottom: none;
+  }
+
+  .app-nav a {
+    flex: none;
+    flex-direction: column;
+    gap: 3px;
+    padding: 4px 10px;
+    border-radius: 12px;
+    font-size: 10px;
+    color: var(--muted-2);
+  }
+
+  .app-nav a .icon {
+    width: 21px;
+    height: 21px;
+  }
+
+  .app-nav a.active {
+    background: none;
+    color: var(--accent);
+  }
+
+  .app-main {
+    padding-bottom: calc(84px + env(safe-area-inset-bottom, 0px));
+  }
+}
+
+/* ---- cards / forms ---- */
 .entity-form {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 16px;
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-card);
+  padding: 18px;
   margin-bottom: 20px;
 }
 
@@ -186,10 +300,6 @@ button:disabled {
   flex-direction: row;
   flex-wrap: wrap;
   align-items: flex-end;
-  margin-bottom: 0;
-  border: none;
-  padding: 0;
-  background: transparent;
 }
 
 .entity-form.inline label {
@@ -208,7 +318,8 @@ button:disabled {
   overflow-x: auto;
   overflow-y: hidden;
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-card);
   -webkit-overflow-scrolling: touch;
 }
 
@@ -222,15 +333,16 @@ button:disabled {
 .data-table th,
 .data-table td {
   text-align: left;
-  padding: 10px 12px;
+  padding: 12px 14px;
   border-bottom: 1px solid var(--border);
   font-size: 0.9rem;
 }
 
 .data-table th {
   color: var(--muted);
-  font-weight: 600;
-  font-size: 0.78rem;
+  font-weight: 800;
+  font-size: 0.72rem;
+  letter-spacing: 0.05em;
   text-transform: uppercase;
 }
 
@@ -256,11 +368,52 @@ button:disabled {
 
 h1 {
   font-size: 1.4rem;
+  letter-spacing: -0.015em;
 }
 
 h2 {
-  font-size: 1.1rem;
+  font-size: 1.05rem;
   margin-top: 28px;
+  letter-spacing: -0.01em;
+}
+
+/* ---- статус — семантический цвет вместо сырой строки enum ---- */
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.72rem;
+  font-weight: 800;
+  padding: 5px 10px;
+  border-radius: 999px;
+  white-space: nowrap;
+  background: var(--surface-2);
+  color: var(--muted);
+}
+
+.status-badge.tone-success {
+  background: var(--success-tint);
+  color: var(--success);
+}
+
+.status-badge.tone-warning {
+  background: var(--warning-tint);
+  color: var(--warning);
+}
+
+.status-badge.tone-danger {
+  background: var(--danger-tint);
+  color: var(--danger);
+}
+
+.status-badge.tone-info {
+  background: var(--info-tint);
+  color: var(--info);
+}
+
+.status-badge.tone-accent {
+  background: var(--accent-tint);
+  color: var(--accent);
 }
 
 @media (max-width: 600px) {
