@@ -141,3 +141,9 @@ dist
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
+
+# Turborepo cache
+.turbo/
+
+# LocalFileStorageAdapter (apps/api/src/document) — dev/test fallback без S3/MinIO
+.local-storage/

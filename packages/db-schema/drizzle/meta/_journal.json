@@ -1,0 +1,111 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1784909372048,
+      "tag": "0000_concerned_bug",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1784911364033,
+      "tag": "0001_melted_mordo",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1784912461899,
+      "tag": "0002_magenta_lifeguard",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1784912691994,
+      "tag": "0003_fantastic_reptil",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1784913929407,
+      "tag": "0004_serious_iron_patriot",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1784914000000,
+      "tag": "0005_document_immutability_trigger",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1784964320010,
+      "tag": "0006_misty_zombie",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1784964400000,
+      "tag": "0007_seed_rbac_roles_permissions",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1785090512031,
+      "tag": "0008_add_audit_log_source_and_ai_link",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1785099098260,
+      "tag": "0009_telegram_integration",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1785099749907,
+      "tag": "0010_telegram_invite_company_id",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1785103654461,
+      "tag": "0011_workshop_contract_and_spec_numbering",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1785131074845,
+      "tag": "0012_company_default_currency_kgs",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1785660360714,
+      "tag": "0013_hard_dazzler",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1785662534068,
+      "tag": "0014_zippy_malice",
+      "breakpoints": true
+    }
+  ]
+}

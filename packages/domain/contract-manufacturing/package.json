@@ -1,0 +1,30 @@
+{
+  "name": "@garmentos/domain-contract-manufacturing",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Contract Manufacturing — цеха-подрядчики, заказы пошива (см. docs/ARCHITECTURE.md, раздел 3; переименован из «Production», docs/DATABASE_SCHEMA.md п.0)",
+  "type": "commonjs",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "lint": "eslint \"src/**/*.ts\"",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@garmentos/db-schema": "workspace:*",
+    "drizzle-orm": "^0.45.2"
+  },
+  "devDependencies": {
+    "@garmentos/domain-bom": "workspace:*",
+    "@garmentos/domain-catalog": "workspace:*",
+    "@garmentos/domain-identity": "workspace:*",
+    "@garmentos/domain-procurement": "workspace:*",
+    "@types/node": "^26.1.1",
+    "dotenv": "^17.4.2",
+    "postgres": "^3.4.9",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.10"
+  }
+}

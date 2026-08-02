@@ -1,0 +1,29 @@
+{
+  "name": "@garmentos/domain-warehouse",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Warehouse & Inventory — остатки, приёмки, отгрузки, инвентаризации (см. docs/ARCHITECTURE.md, раздел 3)",
+  "type": "commonjs",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "lint": "eslint \"src/**/*.ts\"",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@garmentos/db-schema": "workspace:*",
+    "drizzle-orm": "^0.45.2"
+  },
+  "devDependencies": {
+    "@garmentos/domain-catalog": "workspace:*",
+    "@garmentos/domain-contract-manufacturing": "workspace:*",
+    "@garmentos/domain-identity": "workspace:*",
+    "@types/node": "^26.1.1",
+    "dotenv": "^17.4.2",
+    "postgres": "^3.4.9",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.10"
+  }
+}

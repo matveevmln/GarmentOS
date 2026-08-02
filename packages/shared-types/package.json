@@ -1,0 +1,21 @@
+{
+  "name": "@garmentos/shared-types",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Общие Zod-схемы/DTO между apps/api и apps/web (см. docs/REPOSITORY_STRUCTURE.md; docs/PRINCIPLES.md принцип 1 — API-first)",
+  "type": "commonjs",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "lint": "eslint \"src/**/*.ts\""
+  },
+  "dependencies": {
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.1",
+    "typescript": "^5.9.3"
+  }
+}

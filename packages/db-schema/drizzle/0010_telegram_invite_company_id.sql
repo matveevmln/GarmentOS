@@ -1,0 +1,2 @@
+ALTER TABLE "telegram_invite_codes" ADD COLUMN "company_id" uuid NOT NULL;--> statement-breakpoint
+ALTER TABLE "telegram_invite_codes" ADD CONSTRAINT "telegram_invite_codes_company_id_companies_id_fk" FOREIGN KEY ("company_id") REFERENCES "public"."companies"("id") ON DELETE no action ON UPDATE no action;
