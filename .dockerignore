@@ -1,0 +1,11 @@
+# Docker-образ всегда пересобирает зависимости и билд внутри контейнера
+# (infra/docker/*.Dockerfile) — локальные node_modules/dist с бинарниками
+# под архитектуру хоста никогда не должны попадать в образ.
+node_modules
+**/node_modules
+dist
+**/dist
+.git
+.turbo
+**/.turbo
+*.log

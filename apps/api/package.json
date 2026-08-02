@@ -11,7 +11,8 @@
     "lint": "eslint \"src/**/*.ts\"",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
-    "bootstrap-company": "node dist/bootstrap-company.script.js"
+    "bootstrap-company": "node dist/bootstrap-company.script.js",
+    "add-user": "node dist/add-user.script.js"
   },
   "dependencies": {
     "@garmentos/db-schema": "workspace:*",
