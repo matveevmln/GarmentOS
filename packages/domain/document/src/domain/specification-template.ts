@@ -82,10 +82,15 @@ export const DEFAULT_SPECIFICATION_TEMPLATE: SpecificationTemplateDefinition = {
   introParagraph:
     "1. В соответствии с Договором № {{contractNumber}} от {{contractDate}} г., {{contractorName}} (Далее - Исполнитель) " +
     "поставляет, а {{customerName}} (Далее - Заказчик) оплачивает следующие товары:",
+  // Ширины колонок в сумме равны CONTENT_WIDTH рендерера (612 - 45*2 = 522pt,
+  // размер страницы измерен по эталону 2026-08-03, не A4) — разница с
+  // прежней шириной A4 (505pt) добавлена в колонку "Товары" как наиболее
+  // естественно растяжимую (номер/ед.изм./размер/кол-во/цена/сумма —
+  // короткие фиксированные значения, их ширина в эталоне не менялась).
   table: {
     columns: [
       { key: "index", label: "№", width: 25, align: "center" },
-      { key: "name", label: "Товары", width: 190, align: "left" },
+      { key: "name", label: "Товары", width: 207, align: "left" },
       { key: "unit", label: "Ед. измер.", width: 45, align: "center" },
       { key: "size", label: "Размер", width: 55, align: "center" },
       { key: "quantity", label: "Кол-во", width: 45, align: "right" },

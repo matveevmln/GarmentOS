@@ -20,8 +20,11 @@ import type { DocumentRenderAdapter } from "../application/ports";
 // кириллицу (SIL Open Font License 1.1, свободно распространяется) — тот же
 // шрифт, что и в эталонном образце документа (2026-07-26).
 const FONTS_DIR = join(__dirname, "..", "..", "assets", "fonts");
-const PAGE_WIDTH = 595.28; // A4
-const PAGE_HEIGHT = 841.89;
+// Размер страницы измерен напрямую по эталонному документу (владелец
+// проекта, 2026-08-03, спецификация №1 к договору №П-22-04) — 612×842pt,
+// не стандартный A4 (595.28×841.89): подтверждено PDF MediaBox эталона.
+const PAGE_WIDTH = 612;
+const PAGE_HEIGHT = 842;
 const MARGIN = 45;
 const CONTENT_WIDTH = PAGE_WIDTH - MARGIN * 2;
 
@@ -33,22 +36,24 @@ interface DrawContext {
   y: number;
 }
 
-function wrapText(font: PDFFont, text: string, size: number, maxWidth: number): string[] {
+// Разбивает ОДИН абзац (без \n внутри) на строки по ширине — вызывающий код
+// (drawParagraph) сам разбивает текст по \n на абзацы, чтобы знать, какая
+// строка последняя в своём абзаце (нужно для выравнивания по ширине —
+// последняя строка абзаца никогда не растягивается, см. drawJustifiedLine).
+function wrapParagraphLines(font: PDFFont, paragraph: string, size: number, maxWidth: number): string[] {
+  const words = paragraph.split(" ");
   const lines: string[] = [];
-  for (const paragraph of text.split("\n")) {
-    const words = paragraph.split(" ");
-    let current = "";
-    for (const word of words) {
-      const candidate = current ? `${current} ${word}` : word;
-      if (font.widthOfTextAtSize(candidate, size) > maxWidth && current) {
-        lines.push(current);
-        current = word;
-      } else {
-        current = candidate;
-      }
+  let current = "";
+  for (const word of words) {
+    const candidate = current ? `${current} ${word}` : word;
+    if (font.widthOfTextAtSize(candidate, size) > maxWidth && current) {
+      lines.push(current);
+      current = word;
+    } else {
+      current = candidate;
     }
-    lines.push(current);
   }
+  lines.push(current);
   return lines;
 }
 
@@ -59,26 +64,70 @@ function ensureSpace(ctx: DrawContext, needed: number): void {
   }
 }
 
-function drawParagraph(ctx: DrawContext, text: string, options: { bold?: boolean; size?: number; align?: "left" | "right" | "center"; gapAfter?: number } = {}): void {
+// Выравнивание по ширине (justify) — эталонный документ растягивает
+// межсловные пробелы так, что каждая строка абзаца, кроме последней,
+// доходит точно до правого края (владелец проекта, 2026-08-03: сверено
+// визуально с присланным оригиналом — правый край первой строки пункта 1 и
+// пункта 2 совпадает с правой границей таблицы, последняя строка каждого
+// абзаца остаётся обычной, нерастянутой длины).
+function drawJustifiedLine(ctx: DrawContext, line: string, font: PDFFont, size: number, x0: number, targetWidth: number): void {
+  const words = line.split(" ");
+  if (words.length <= 1) {
+    ctx.page.drawText(line, { x: x0, y: ctx.y, size, font, color: rgb(0, 0, 0) });
+    return;
+  }
+  const naturalWidth = font.widthOfTextAtSize(line, size);
+  const spaceWidth = font.widthOfTextAtSize(" ", size);
+  const extraPerGap = (targetWidth - naturalWidth) / (words.length - 1);
+  let x = x0;
+  for (const word of words) {
+    ctx.page.drawText(word, { x, y: ctx.y, size, font, color: rgb(0, 0, 0) });
+    x += font.widthOfTextAtSize(word, size) + spaceWidth + extraPerGap;
+  }
+}
+
+function drawParagraph(
+  ctx: DrawContext,
+  text: string,
+  options: { bold?: boolean; size?: number; align?: "left" | "right" | "center"; justify?: boolean; gapAfter?: number } = {},
+): void {
   const size = options.size ?? 10.5;
   const font = options.bold ? ctx.boldFont : ctx.font;
-  const lineHeight = size + 4;
-  const lines = wrapText(font, text, size, CONTENT_WIDTH);
+  // Межстрочный интервал в основном тексте измерен по эталону (владелец
+  // проекта, 2026-08-03) — около 12pt для 10.5pt текста (было +4pt, что
+  // визуально заметно просторнее оригинала).
+  const lineHeight = size + 1.5;
 
-  for (const line of lines) {
-    ensureSpace(ctx, lineHeight);
-    const width = font.widthOfTextAtSize(line, size);
-    const x = options.align === "center" ? MARGIN + (CONTENT_WIDTH - width) / 2 : options.align === "right" ? MARGIN + CONTENT_WIDTH - width : MARGIN;
-    ctx.page.drawText(line, { x, y: ctx.y, size, font, color: rgb(0, 0, 0) });
-    ctx.y -= lineHeight;
+  for (const paragraph of text.split("\n")) {
+    const lines = wrapParagraphLines(font, paragraph, size, CONTENT_WIDTH);
+    lines.forEach((line, index) => {
+      ensureSpace(ctx, lineHeight);
+      const isLastLineOfParagraph = index === lines.length - 1;
+      if (options.justify && !isLastLineOfParagraph && !options.align) {
+        drawJustifiedLine(ctx, line, font, size, MARGIN, CONTENT_WIDTH);
+      } else {
+        const width = font.widthOfTextAtSize(line, size);
+        const x =
+          options.align === "center"
+            ? MARGIN + (CONTENT_WIDTH - width) / 2
+            : options.align === "right"
+              ? MARGIN + CONTENT_WIDTH - width
+              : MARGIN;
+        ctx.page.drawText(line, { x, y: ctx.y, size, font, color: rgb(0, 0, 0) });
+      }
+      ctx.y -= lineHeight;
+    });
   }
   ctx.y -= options.gapAfter ?? 4;
 }
 
 function drawTable(ctx: DrawContext, template: SpecificationTemplateDefinition, data: SpecificationDocumentData): void {
   const { columns } = template.table;
-  const headerHeight = 26;
-  const rowHeight = 24;
+  // Высоты строк измерены по эталону (владелец проекта, 2026-08-03): ряд
+  // таблицы в оригинале ~14.6pt, а не 24pt — прежние значения были взяты "на
+  // глаз" ещё до того, как реальный документ был доступен для сверки.
+  const headerHeight = 22;
+  const rowHeight = 15;
   const fontSize = 9;
 
   const drawHeaderRow = (): void => {
@@ -87,8 +136,8 @@ function drawTable(ctx: DrawContext, template: SpecificationTemplateDefinition, 
     const top = ctx.y;
     for (const column of columns) {
       ctx.page.drawRectangle({ x, y: top - headerHeight, width: column.width, height: headerHeight, borderWidth: 0.75, borderColor: rgb(0, 0, 0) });
-      const lines = wrapText(ctx.boldFont, column.label, fontSize, column.width - 6);
-      let textY = top - 12;
+      const lines = wrapParagraphLines(ctx.boldFont, column.label, fontSize, column.width - 6);
+      let textY = top - 9;
       for (const line of lines) {
         const width = ctx.boldFont.widthOfTextAtSize(line, fontSize);
         const textX = column.align === "center" ? x + (column.width - width) / 2 : column.align === "right" ? x + column.width - width - 3 : x + 3;
@@ -108,8 +157,8 @@ function drawTable(ctx: DrawContext, template: SpecificationTemplateDefinition, 
     for (const column of columns) {
       ctx.page.drawRectangle({ x, y: top - rowHeight, width: column.width, height: rowHeight, borderWidth: 0.75, borderColor: rgb(0, 0, 0) });
       const value = values[column.key] ?? "";
-      const lines = wrapText(font, value, fontSize, column.width - 6);
-      let textY = top - 12;
+      const lines = wrapParagraphLines(font, value, fontSize, column.width - 6);
+      let textY = top - 10;
       for (const line of lines.slice(0, 2)) {
         const width = font.widthOfTextAtSize(line, fontSize);
         const textX = column.align === "center" ? x + (column.width - width) / 2 : column.align === "right" ? x + column.width - width - 3 : x + 3;
@@ -151,13 +200,16 @@ export class PdfLibTemplateRenderer implements DocumentRenderAdapter {
     for (const line of template.titleLines) {
       drawParagraph(ctx, applyPlaceholders(line, data.fields), { bold: true, size: 12, align: "center", gapAfter: 2 });
     }
-    ctx.y -= 10;
-    drawParagraph(ctx, applyPlaceholders(template.introParagraph, data.fields), { gapAfter: 16 });
+    ctx.y -= 4;
+    // justify: true — эталон растягивает межсловные пробелы во вводном
+    // пункте и в пунктах 2-6 так, что все строки, кроме последней в каждом
+    // абзаце, доходят до правого края (см. drawJustifiedLine).
+    drawParagraph(ctx, applyPlaceholders(template.introParagraph, data.fields), { justify: true, gapAfter: 16 });
 
     drawTable(ctx, template, data);
 
     for (const line of template.footerLines) {
-      drawParagraph(ctx, applyPlaceholders(line, data.fields), { gapAfter: 6 });
+      drawParagraph(ctx, applyPlaceholders(line, data.fields), { justify: true, gapAfter: 6 });
     }
     ctx.y -= 20;
 

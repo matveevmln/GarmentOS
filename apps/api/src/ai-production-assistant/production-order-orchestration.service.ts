@@ -13,7 +13,7 @@ import type { TelegramClient } from "../telegram/telegram-client";
 import { TELEGRAM_CLIENT } from "../telegram/telegram.tokens";
 import { WarehouseService } from "../warehouse/warehouse.service";
 import { ProductionRequestService } from "./production-request.service";
-import { formatRuAmount, formatRuQuantity } from "./ru-number-format";
+import { formatRuAmount, formatRuDate, formatRuQuantity } from "./ru-number-format";
 
 // Форма {message, code} — распознаётся DomainExceptionFilter по duck typing
 // (apps/api/src/common/domain-exception.filter.ts), тот же паттерн, что
@@ -433,12 +433,12 @@ export class ProductionOrderOrchestrationService {
     const data: SpecificationDocumentData = {
       fields: {
         contractNumber: workshop.contractNumber ?? "",
-        contractDate: workshop.contractDate ?? "",
+        contractDate: formatRuDate(workshop.contractDate),
         customerName: company.legalName ?? company.name,
         contractorName: workshop.name,
         specNumber: String(specNumber),
         paymentTerms: workshop.paymentTerms ?? "",
-        deliveryDeadline: order.dueDate ?? "",
+        deliveryDeadline: formatRuDate(order.dueDate),
         deliveryMethod: workshop.deliveryMethod ?? "",
         contractorSignerRole: workshop.signerRole ?? "",
         contractorSignerName: workshop.signerName ?? "",
