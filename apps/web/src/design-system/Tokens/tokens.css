@@ -56,12 +56,23 @@
   --radius-lg: 22px;
   --radius-xl: 22px;
 
-  /* ---- тень карточки — дословно из прототипа (--shadow-card) ---- */
+  /* ---- шкала теней (elevation) — docs/DESIGN_SYSTEM_MAP.md §2.1:
+     sm — лёгкое приподнятие (hover строки списка), card — карточка в покое
+     (дословно из прототипа, было единственным уровнем), lg — то, что
+     "выше" обычной карточки (открытый Dialog/Drawer/Popover). ---- */
+  --shadow-sm: 0 1px 2px rgba(20, 20, 25, 0.06);
   --shadow-card: 0 1px 2px rgba(20, 20, 25, 0.04), 0 8px 24px -12px rgba(20, 20, 25, 0.1);
+  --shadow-lg: 0 4px 8px rgba(20, 20, 25, 0.06), 0 16px 40px -8px rgba(20, 20, 25, 0.16);
 
   /* ---- шрифт — тот же системный стек, без кастомного webfont ---- */
   --font-sans:
     -apple-system, "SF Pro Text", "Segoe UI Variable", "Segoe UI", Roboto, Arial, sans-serif;
+
+  /* Моноширинные числа (docs/DESIGN_SYSTEM_MAP.md §1, паттерн Stripe) —
+     суммы/количества/номера заказов выравниваются в колонку, не "прыгают"
+     при разной длине значения. Отдельного токена не требует — Tailwind
+     уже даёт готовую утилиту `tabular-nums` (font-variant-numeric),
+     применяется прямо в компонентах (Combobox/MoneyInput и т.д.). */
 
   /* ---- типографическая шкала — единое место, не разбросано по компонентам ---- */
   --text-caption: 0.72rem;
@@ -82,4 +93,63 @@
   --animate-duration-fast: 120ms;
   --animate-duration-base: 180ms;
   --animate-duration-slow: 260ms;
+
+  /* ---- кривые анимации (docs/DESIGN_SYSTEM_MAP.md §2.4) — явные
+     easing-кривые вместо браузерного дефолта на Radix-переходах:
+     standard — вход/выход обычных элементов (Dialog/Drawer/Popover),
+     spring — лёгкий overshoot для микроинтеракций (нажатие, toast). ---- */
+  --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* ---- Dark mode — архитектурная проводка (docs/DESIGN_SYSTEM_MAP.md §2.2).
+   Компоненты уже читают токены по имени (bg-card, text-muted-foreground
+   и т.д.) — здесь переопределяются те же имена для системной тёмной темы,
+   без изменения компонентов и без второго набора классов. Полный
+   визуальный QA тёмного режима не входит в этот проход (нет запроса на
+   тёмную тему как отдельную фичу) — это только готовность подключить её
+   без переписывания компонентов, когда она понадобится. ---- */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-background: #121214;
+    --color-foreground: #f4f4f5;
+
+    --color-card: #1c1c1f;
+    --color-card-foreground: #f4f4f5;
+
+    --color-popover: #1c1c1f;
+    --color-popover-foreground: #f4f4f5;
+
+    --color-primary: #ff4d5e;
+    --color-primary-foreground: #ffffff;
+
+    --color-secondary: #232326;
+    --color-secondary-foreground: #f4f4f5;
+
+    --color-muted: #232326;
+    --color-muted-foreground: #a1a1aa;
+
+    --color-accent: #3a1f22;
+    --color-accent-foreground: #ff4d5e;
+
+    --color-destructive: #f0654a;
+    --color-destructive-foreground: #ffffff;
+
+    --color-success: #22c55e;
+    --color-success-tint: #143820;
+    --color-warning: #f59e0b;
+    --color-warning-tint: #3a2a0d;
+    --color-info: #3b82f6;
+    --color-info-tint: #172a4d;
+
+    --color-border: #2c2c30;
+    --color-input: #2c2c30;
+    --color-ring: rgba(255, 77, 94, 0.28);
+
+    --color-muted-2: #6b6b73;
+
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.24);
+    --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.24), 0 8px 24px -12px rgba(0, 0, 0, 0.4);
+    --shadow-lg: 0 4px 8px rgba(0, 0, 0, 0.28), 0 16px 40px -8px rgba(0, 0, 0, 0.5);
+  }
 }
