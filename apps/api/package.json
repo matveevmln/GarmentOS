@@ -12,7 +12,8 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
     "bootstrap-company": "node dist/bootstrap-company.script.js",
-    "add-user": "node dist/add-user.script.js"
+    "add-user": "node dist/add-user.script.js",
+    "seed-demo": "node dist/seed-demo.script.js"
   },
   "dependencies": {
     "@garmentos/db-schema": "workspace:*",
