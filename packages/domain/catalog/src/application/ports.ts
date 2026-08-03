@@ -26,8 +26,14 @@ export interface NewProductInput {
   createdBy: string | null;
 }
 
+export interface ProductCostsInput {
+  standardSewingCost: string | null;
+  otherProductionCost: string | null;
+}
+
 export interface ProductRepository {
   create(input: NewProductInput): Promise<Product>;
+  updateCosts(companyId: string, id: string, input: ProductCostsInput): Promise<Product>;
   findByCode(companyId: string, code: string): Promise<Product | null>;
   findById(companyId: string, id: string): Promise<Product | null>;
   // Регистронезависимый поиск по названию модели — нужен для разбора

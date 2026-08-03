@@ -46,12 +46,24 @@ export const productResponseSchema = z.object({
   season: z.string().nullable(),
   status: z.enum(["draft", "active", "discontinued"]),
   techPackUrl: z.string().nullable(),
+  // Плановые составляющие себестоимости, не выводимые из BOM
+  // (docs/PRODUCT_MODEL_ARCHITECTURE.md, раздел 6) — прямой ввод.
+  standardSewingCost: z.string().nullable(),
+  otherProductionCost: z.string().nullable(),
   createdBy: z.string().uuid().nullable(),
   createdAt: z.date(),
   updatedAt: z.date(),
   deletedAt: z.date().nullable(),
 });
 export type ProductResponseDto = z.infer<typeof productResponseSchema>;
+
+// Обновление плановых составляющих себестоимости — отдельно от создания
+// модели (владелец проекта, 2026-08-03 — «Расчёт стоимости спецификации»).
+export const updateProductCostsSchema = z.object({
+  standardSewingCost: z.number().min(0).optional(),
+  otherProductionCost: z.number().min(0).optional(),
+});
+export type UpdateProductCostsDto = z.infer<typeof updateProductCostsSchema>;
 
 // name опционален (Итерация 11): без него — список всех моделей компании
 // (apps/web), с ним — точный поиск для AI-разбора текстового запроса

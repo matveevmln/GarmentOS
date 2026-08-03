@@ -2,6 +2,7 @@ import { Module } from "@nestjs/common";
 import type { Database } from "@garmentos/db-schema";
 import { DrizzleProductionOrderRepository, DrizzleWorkshopRepository } from "@garmentos/domain-contract-manufacturing";
 import { DATABASE_CONNECTION } from "../database/database.module";
+import { CatalogModule } from "../catalog/catalog.module";
 import { WarehouseModule } from "../warehouse/warehouse.module";
 import { WorkshopsController } from "./workshops.controller";
 import { ProductionOrdersController } from "./production-orders.controller";
@@ -10,7 +11,7 @@ import { bomApprovalProvider } from "./bom-approval.provider";
 import { ContractManufacturingService } from "./contract-manufacturing.service";
 
 @Module({
-  imports: [WarehouseModule],
+  imports: [WarehouseModule, CatalogModule],
   controllers: [WorkshopsController, ProductionOrdersController],
   providers: [
     ContractManufacturingService,

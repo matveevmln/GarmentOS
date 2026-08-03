@@ -10,6 +10,7 @@ export type {
   NewCollectionInput,
   NewProductInput,
   NewProductVariantInput,
+  ProductCostsInput,
   ProductRepository,
   ProductVariantRepository,
 } from "./application/ports";
@@ -20,6 +21,16 @@ export {
   type CreateProductVariantDeps,
   type CreateProductVariantInput,
 } from "./application/create-product-variant";
+export {
+  updateProductCosts,
+  type UpdateProductCostsDeps,
+  type UpdateProductCostsInput,
+} from "./application/update-product-costs";
+export {
+  distributeQuantityBySize,
+  distributeQuantityEvenly,
+  type SizeQuantity,
+} from "./application/distribute-size-quantities";
 
 export {
   DrizzleCollectionRepository,

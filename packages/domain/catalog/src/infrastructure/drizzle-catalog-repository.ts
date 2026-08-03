@@ -8,6 +8,7 @@ import type {
   NewCollectionInput,
   NewProductInput,
   NewProductVariantInput,
+  ProductCostsInput,
   ProductRepository,
   ProductVariantRepository,
 } from "../application/ports";
@@ -41,6 +42,8 @@ function toProduct(row: ProductRow): Product {
     season: row.season,
     status: row.status,
     techPackUrl: row.techPackUrl,
+    standardSewingCost: row.standardSewingCost,
+    otherProductionCost: row.otherProductionCost,
     createdBy: row.createdBy,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
@@ -88,6 +91,16 @@ export class DrizzleProductRepository implements ProductRepository {
   async create(input: NewProductInput): Promise<Product> {
     const [row] = await this.db.insert(products).values(input).returning();
     if (!row) throw new Error("INSERT products не вернул строку");
+    return toProduct(row);
+  }
+
+  async updateCosts(companyId: string, id: string, input: ProductCostsInput): Promise<Product> {
+    const [row] = await this.db
+      .update(products)
+      .set({ standardSewingCost: input.standardSewingCost, otherProductionCost: input.otherProductionCost })
+      .where(and(eq(products.companyId, companyId), eq(products.id, id)))
+      .returning();
+    if (!row) throw new Error(`UPDATE products не вернул строку для id=${id}`);
     return toProduct(row);
   }
 

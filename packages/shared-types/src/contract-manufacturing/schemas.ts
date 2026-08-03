@@ -82,6 +82,24 @@ export const createProductionOrderSchema = z.object({
 });
 export type CreateProductionOrderDto = z.infer<typeof createProductionOrderSchema>;
 
+// Создание заказа пошива по общему количеству, без ручной разбивки по
+// SKU (владелец проекта, 2026-08-03 — «указываю только общее количество,
+// размерный ряд система распределяет автоматически»). Цвет не указывается —
+// используется единственный цвет модели; если у модели несколько цветов,
+// общее количество делится между ними поровну, затем внутри каждого цвета —
+// по размерам (см. contract-manufacturing.service.ts).
+export const createProductionOrderFromQuantitySchema = z.object({
+  productId: z.string().uuid(),
+  bomId: z.string().uuid(),
+  workshopId: z.string().uuid(),
+  totalQuantity: z.number().int().positive(),
+  agreedUnitPrice: z.number().min(0),
+  materialsProvidedByUs: z.boolean().optional(),
+  dueDate: z.string().optional(),
+  createdBy: z.string().uuid().optional(),
+});
+export type CreateProductionOrderFromQuantityDto = z.infer<typeof createProductionOrderFromQuantitySchema>;
+
 // Приёмка партии на склад (Итерация 10) — склад, на который зачисляются все
 // SKU заказа, выбирается человеком при приёмке (в отличие от материалов,
 // авторезолв единственного склада компании здесь не подходит: заказ пошива —

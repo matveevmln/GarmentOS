@@ -3,6 +3,7 @@ import {
   createCollection,
   createProduct,
   createProductVariant,
+  updateProductCosts,
   type Collection,
   type CollectionRepository,
   type Product,
@@ -10,7 +11,12 @@ import {
   type ProductVariant,
   type ProductVariantRepository,
 } from "@garmentos/domain-catalog";
-import type { CreateCollectionDto, CreateProductDto, CreateProductVariantDto } from "@garmentos/shared-types";
+import type {
+  CreateCollectionDto,
+  CreateProductDto,
+  CreateProductVariantDto,
+  UpdateProductCostsDto,
+} from "@garmentos/shared-types";
 import { COLLECTION_REPOSITORY, PRODUCT_REPOSITORY, PRODUCT_VARIANT_REPOSITORY } from "./catalog.tokens";
 
 // Тонкий presentation-адаптер поверх packages/domain/catalog (docs/ARCHITECTURE.md,
@@ -37,6 +43,10 @@ export class CatalogService {
 
   async findProductById(companyId: string, id: string): Promise<Product | null> {
     return this.products.findById(companyId, id);
+  }
+
+  async updateProductCosts(companyId: string, productId: string, input: UpdateProductCostsDto): Promise<Product> {
+    return updateProductCosts({ products: this.products }, { companyId, productId, ...input });
   }
 
   async findProductByName(companyId: string, name: string): Promise<Product | null> {

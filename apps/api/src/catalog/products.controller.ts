@@ -1,10 +1,11 @@
-import { Body, Controller, Get, HttpStatus, NotFoundException, Param, Post, Query } from "@nestjs/common";
+import { Body, Controller, Get, HttpStatus, NotFoundException, Param, Patch, Post, Query } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
 import { createZodDto } from "nestjs-zod";
 import {
   createProductSchema,
   findProductByNameQuerySchema,
   productResponseSchema,
+  updateProductCostsSchema,
   type ProductResponseDto,
 } from "@garmentos/shared-types";
 import { CurrentUser, type AuthenticatedRequestUser } from "../auth/current-user.decorator";
@@ -13,6 +14,7 @@ import { CatalogService } from "./catalog.service";
 
 class CreateProductDto extends createZodDto(createProductSchema) {}
 class FindProductByNameQueryDto extends createZodDto(findProductByNameQuerySchema) {}
+class UpdateProductCostsDto extends createZodDto(updateProductCostsSchema) {}
 
 @ApiTags("products")
 @Controller("products")
@@ -53,6 +55,20 @@ export class ProductsController {
         message: `Модель "${query.name}" не найдена в каталоге`,
       });
     }
+    return productResponseSchema.parse(product);
+  }
+
+  // «Расчёт стоимости спецификации» (владелец проекта, 2026-08-03) читает
+  // эти два поля вместе с BOM — редактируются отдельно от остальных полей
+  // модели, не через общий PATCH/PUT.
+  @RequirePermissions("catalog.write")
+  @Patch(":id/costs")
+  async updateCosts(
+    @Param("id") id: string,
+    @Body() body: UpdateProductCostsDto,
+    @CurrentUser() currentUser: AuthenticatedRequestUser,
+  ): Promise<ProductResponseDto> {
+    const product = await this.catalogService.updateProductCosts(currentUser.companyId, id, body);
     return productResponseSchema.parse(product);
   }
 

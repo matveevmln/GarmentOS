@@ -44,6 +44,32 @@ export const overdueInvoiceSchema = z.object({
 });
 export type OverdueInvoiceDto = z.infer<typeof overdueInvoiceSchema>;
 
+// «Расчёт стоимости спецификации» (владелец проекта, 2026-08-03) — фактическая
+// себестоимость (ткань/фурнитура/упаковка из BOM × последняя цена закупки +
+// стоимость пошива и прочие расходы из карточки модели) и цена, которая
+// попадёт в спецификацию (фактическая минус согласованное уменьшение).
+// Обе цифры показываются пользователю всегда вместе, ни одна не скрывается.
+export const specificationPricingRequestSchema = z.object({
+  totalQuantity: z.number().int().positive(),
+  deduction: z.number().min(0).optional(),
+});
+export type SpecificationPricingRequestDto = z.infer<typeof specificationPricingRequestSchema>;
+
+export const specificationPricingResponseSchema = z.object({
+  fabricCostPerUnit: z.number(),
+  trimCostPerUnit: z.number(),
+  packagingCostPerUnit: z.number(),
+  sewingCostPerUnit: z.number(),
+  otherCostPerUnit: z.number(),
+  actualCostPerUnit: z.number(),
+  deductionPerUnit: z.number(),
+  specificationPricePerUnit: z.number(),
+  // Материалы BOM без единой закупки в истории — цену для них взять неоткуда
+  // (не подставляется 0 молча, чтобы не занизить фактическую себестоимость).
+  materialsWithoutPriceHistory: z.array(z.string()),
+});
+export type SpecificationPricingResponseDto = z.infer<typeof specificationPricingResponseSchema>;
+
 export const attentionResponseSchema = z.object({
   overdueProductionOrders: z.array(overdueProductionOrderSchema),
   overduePurchaseOrders: z.array(overduePurchaseOrderSchema),

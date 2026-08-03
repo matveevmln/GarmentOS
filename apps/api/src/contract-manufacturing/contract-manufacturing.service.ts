@@ -11,8 +11,14 @@ import {
   type Workshop,
   type WorkshopRepository,
 } from "@garmentos/domain-contract-manufacturing";
-import type { CreateProductionOrderDto, CreateWorkshopDto } from "@garmentos/shared-types";
+import {
+  distributeQuantityBySize,
+  distributeQuantityEvenly,
+  DomainError as CatalogDomainError,
+} from "@garmentos/domain-catalog";
+import type { CreateProductionOrderDto, CreateProductionOrderFromQuantityDto, CreateWorkshopDto } from "@garmentos/shared-types";
 import type { AuthenticatedRequestUser } from "../auth/current-user.decorator";
+import { CatalogService } from "../catalog/catalog.service";
 import { WarehouseService } from "../warehouse/warehouse.service";
 import { BOM_APPROVAL_PORT, PRODUCTION_ORDER_REPOSITORY, WORKSHOP_REPOSITORY } from "./contract-manufacturing.tokens";
 
@@ -26,6 +32,7 @@ export class ContractManufacturingService {
     @Inject(PRODUCTION_ORDER_REPOSITORY) private readonly productionOrders: ProductionOrderRepository,
     @Inject(BOM_APPROVAL_PORT) private readonly bomApproval: BomApprovalPort,
     private readonly warehouseService: WarehouseService,
+    private readonly catalogService: CatalogService,
   ) {}
 
   async createWorkshop(companyId: string, input: CreateWorkshopDto): Promise<Workshop> {
@@ -37,6 +44,57 @@ export class ContractManufacturingService {
       { productionOrders: this.productionOrders, workshops: this.workshops, bomApproval: this.bomApproval },
       { ...input, companyId },
     );
+  }
+
+  // «Указываю только общее количество, размерный ряд распределяется
+  // автоматически» (владелец проекта, 2026-08-03) — если у модели один
+  // цвет, всё количество идёт на его размеры; при нескольких цветах общее
+  // количество сначала делится поровну между цветами, затем внутри каждого
+  // цвета — по размерам (см. distributeQuantityBySize, @garmentos/domain-catalog).
+  // Порядок размеров — порядок создания SKU модели (от меньшего к большему);
+  // явного поля порядка размеров в схеме пока нет — известное упрощение,
+  // не для показа как "готово навсегда".
+  async createProductionOrderDraftFromTotalQuantity(
+    companyId: string,
+    input: CreateProductionOrderFromQuantityDto,
+  ): Promise<ProductionOrder> {
+    const variants = await this.catalogService.listProductVariants(input.productId);
+    if (variants.length === 0) {
+      throw new CatalogDomainError(`У модели ${input.productId} нет ни одного SKU`, "PRODUCT_HAS_NO_VARIANTS");
+    }
+
+    // Цвета делятся поровну (не по правилу размерных тиров — оно осмысленно
+    // только для размеров, не для цветов), внутри каждого цвета — по
+    // размерам через distributeQuantityBySize.
+    const colors = [...new Set(variants.map((variant) => variant.color))];
+    const colorQuantities = distributeQuantityEvenly(colors.length, input.totalQuantity);
+
+    const variantDrafts = colors.flatMap((color, colorIndex) => {
+      const sizesForColor = variants.filter((variant) => variant.color === color);
+      const colorQuantity = colorQuantities[colorIndex] ?? 0;
+      if (colorQuantity === 0) return [];
+      return distributeQuantityBySize(
+        sizesForColor.map((variant) => variant.size),
+        colorQuantity,
+      )
+        .filter((row) => row.quantity > 0)
+        .map(({ size, quantity }) => ({
+          productVariantId: sizesForColor.find((variant) => variant.size === size)!.id,
+          quantity,
+        }));
+    });
+
+    return this.createProductionOrderDraft(companyId, {
+      productId: input.productId,
+      bomId: input.bomId,
+      workshopId: input.workshopId,
+      plannedQuantity: input.totalQuantity,
+      agreedUnitPrice: input.agreedUnitPrice,
+      materialsProvidedByUs: input.materialsProvidedByUs,
+      dueDate: input.dueDate,
+      createdBy: input.createdBy,
+      variants: variantDrafts,
+    });
   }
 
   async confirmProductionOrder(companyId: string, productionOrderId: string): Promise<ProductionOrder> {

@@ -1,4 +1,4 @@
-import { integer, pgEnum, pgTable, text, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { integer, numeric, pgEnum, pgTable, text, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import { auditColumns, id, softDelete } from "./_shared";
 import { companies, users } from "./identity";
 
@@ -54,6 +54,15 @@ export const products = pgTable(
     // Ссылка на текущий файл техпака/спецификации через StorageAdapter.
     // Архив версий/доп. соглашений — через таблицу documents (common.ts).
     techPackUrl: text("tech_pack_url"),
+    // Плановые составляющие себестоимости, не выводимые из BOM (ткань/
+    // фурнитура/упаковка уже считаются из bom_items × цена материала —
+    // docs/PRODUCT_MODEL_ARCHITECTURE.md, раздел 6): стоимость пошива за
+    // единицу — прямой ввод (стандартная цена цеха для планирования нового
+    // запуска, до того как конкретный цех согласован для партии) и прочие
+    // производственные расходы за единицу (владелец проекта, 2026-08-03 —
+    // расчёт стоимости спецификации).
+    standardSewingCost: numeric("standard_sewing_cost", { precision: 14, scale: 2 }),
+    otherProductionCost: numeric("other_production_cost", { precision: 14, scale: 2 }),
     createdBy: uuid("created_by").references(() => users.id),
     ...auditColumns,
     ...softDelete,

@@ -2,6 +2,7 @@ import { Body, Controller, Get, HttpStatus, NotFoundException, Param, Post } fro
 import { ApiTags } from "@nestjs/swagger";
 import { createZodDto } from "nestjs-zod";
 import {
+  createProductionOrderFromQuantitySchema,
   createProductionOrderSchema,
   productionOrderResponseSchema,
   receiveProductionOrderSchema,
@@ -12,6 +13,7 @@ import { RequirePermissions } from "../auth/require-permissions.decorator";
 import { ContractManufacturingService } from "./contract-manufacturing.service";
 
 class CreateProductionOrderDto extends createZodDto(createProductionOrderSchema) {}
+class CreateProductionOrderFromQuantityDto extends createZodDto(createProductionOrderFromQuantitySchema) {}
 class ReceiveProductionOrderDto extends createZodDto(receiveProductionOrderSchema) {}
 
 @ApiTags("production-orders")
@@ -26,6 +28,22 @@ export class ProductionOrdersController {
     @CurrentUser() currentUser: AuthenticatedRequestUser,
   ): Promise<ProductionOrderResponseDto> {
     const productionOrder = await this.contractManufacturingService.createProductionOrderDraft(
+      currentUser.companyId,
+      body,
+    );
+    return productionOrderResponseSchema.parse(productionOrder);
+  }
+
+  // «Указываю только модель и общее количество» (владелец проекта,
+  // 2026-08-03) — размерный ряд распределяется автоматически
+  // (createProductionOrderDraftFromTotalQuantity).
+  @RequirePermissions("contract_manufacturing.write")
+  @Post("from-quantity")
+  async createFromQuantity(
+    @Body() body: CreateProductionOrderFromQuantityDto,
+    @CurrentUser() currentUser: AuthenticatedRequestUser,
+  ): Promise<ProductionOrderResponseDto> {
+    const productionOrder = await this.contractManufacturingService.createProductionOrderDraftFromTotalQuantity(
       currentUser.companyId,
       body,
     );
