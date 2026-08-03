@@ -63,13 +63,17 @@
   --radius-lg: 22px;
   --radius-xl: 22px;
 
-  /* ---- шкала теней (elevation) — docs/DESIGN_SYSTEM_MAP.md §2.1:
-     sm — лёгкое приподнятие (hover строки списка), card — карточка в покое
-     (дословно из прототипа, было единственным уровнем), lg — то, что
-     "выше" обычной карточки (открытый Dialog/Drawer/Popover). ---- */
-  --shadow-sm: 0 1px 2px rgba(20, 20, 25, 0.06);
-  --shadow-card: 0 1px 2px rgba(20, 20, 25, 0.04), 0 8px 24px -12px rgba(20, 20, 25, 0.1);
-  --shadow-lg: 0 4px 8px rgba(20, 20, 25, 0.06), 0 16px 40px -8px rgba(20, 20, 25, 0.16);
+  /* ---- шкала теней (elevation) — docs/DESIGN_SYSTEM_MAP.md §2.1, смягчено
+     по итогам визуального ревью (2026-08-03: "более мягкие тени") — меньше
+     непрозрачность ближнего слоя, больше размытие дальнего, тень читается
+     как мягкая подсветка снизу, а не жёсткая обводка:
+     sm — лёгкое приподнятие (hover строки списка), card — карточка в покое,
+     lg — то, что "выше" обычной карточки (открытый Dialog/Drawer/Popover),
+     hover — карточка при наведении (между card и lg). ---- */
+  --shadow-sm: 0 1px 2px rgba(20, 20, 25, 0.045);
+  --shadow-card: 0 1px 2px rgba(20, 20, 25, 0.03), 0 10px 30px -14px rgba(20, 20, 25, 0.09);
+  --shadow-hover: 0 2px 6px rgba(20, 20, 25, 0.05), 0 16px 36px -14px rgba(20, 20, 25, 0.12);
+  --shadow-lg: 0 4px 10px rgba(20, 20, 25, 0.05), 0 20px 48px -10px rgba(20, 20, 25, 0.15);
 
   /* ---- шрифт — тот же системный стек, без кастомного webfont ---- */
   --font-sans:
@@ -107,15 +111,34 @@
      spring — лёгкий overshoot для микроинтеракций (нажатие, toast). ---- */
   --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
   --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+
+  /* ---- shimmer — Skeleton (docs/DESIGN_SYSTEM_MAP.md §6, замена статичного
+     градиента на движущуюся световую полосу, паттерн большинства
+     современных SaaS-лоадеров — читается как "идёт загрузка", не как
+     статичная серая плашка). Tailwind v4 генерирует утилиту animate-shimmer
+     из этого имени, реализация — @keyframes ниже, вне @theme. ---- */
+  --animate-shimmer: shimmer 1.6s ease-in-out infinite;
 }
 
-/* ---- Dark mode — архитектурная проводка (docs/DESIGN_SYSTEM_MAP.md §2.2).
-   Компоненты уже читают токены по имени (bg-card, text-muted-foreground
-   и т.д.) — здесь переопределяются те же имена для системной тёмной темы,
-   без изменения компонентов и без второго набора классов. Полный
-   визуальный QA тёмного режима не входит в этот проход (нет запроса на
-   тёмную тему как отдельную фичу) — это только готовность подключить её
-   без переписывания компонентов, когда она понадобится. ---- */
+@keyframes shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+/* ---- Dark mode — docs/DESIGN_SYSTEM_MAP.md §2.2, визуально проверено
+   2026-08-03 (владелец проекта явно попросил показать поддержку тёмной
+   темы). Два независимых механизма переопределяют одни и те же имена
+   токенов, компоненты не меняются ни разу:
+   1) @media (prefers-color-scheme: dark) — системная тема ОС, работает
+      без единой строчки JS.
+   2) :root[data-theme="dark"|"light"] — ручное переключение (ThemeToggle,
+      design-system/Theme/ThemeToggle.tsx), должно побеждать системную
+      настройку в обе стороны, поэтому идёт ПОСЛЕ media-блока и не завязано
+      на него условием. ---- */
 @media (prefers-color-scheme: dark) {
   :root {
     --color-background: #121214;
@@ -155,8 +178,108 @@
 
     --color-muted-2: #6b6b73;
 
-    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.24);
-    --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.24), 0 8px 24px -12px rgba(0, 0, 0, 0.4);
-    --shadow-lg: 0 4px 8px rgba(0, 0, 0, 0.28), 0 16px 40px -8px rgba(0, 0, 0, 0.5);
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.22);
+    --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.22), 0 10px 30px -14px rgba(0, 0, 0, 0.38);
+    --shadow-hover: 0 2px 6px rgba(0, 0, 0, 0.26), 0 16px 36px -14px rgba(0, 0, 0, 0.42);
+    --shadow-lg: 0 4px 10px rgba(0, 0, 0, 0.28), 0 20px 48px -10px rgba(0, 0, 0, 0.48);
+
+    /* Легаси-переменная без прямого аналога в @theme (см. styles.css) —
+       переопределяется здесь же, чтобы вся тема жила в одном месте. */
+    --danger-tint: #3a1f1a;
+    color-scheme: dark;
   }
+}
+
+:root[data-theme="dark"] {
+  --color-background: #121214;
+  --color-foreground: #f4f4f5;
+
+  --color-card: #1c1c1f;
+  --color-card-foreground: #f4f4f5;
+
+  --color-popover: #1c1c1f;
+  --color-popover-foreground: #f4f4f5;
+
+  --color-primary: #ff4d5e;
+  --color-primary-foreground: #ffffff;
+
+  --color-secondary: #232326;
+  --color-secondary-foreground: #f4f4f5;
+
+  --color-muted: #232326;
+  --color-muted-foreground: #a1a1aa;
+
+  --color-accent: #3a1f22;
+  --color-accent-foreground: #ff4d5e;
+
+  --color-destructive: #f0654a;
+  --color-destructive-foreground: #ffffff;
+
+  --color-success: #22c55e;
+  --color-success-tint: #143820;
+  --color-warning: #f59e0b;
+  --color-warning-tint: #3a2a0d;
+  --color-info: #3b82f6;
+  --color-info-tint: #172a4d;
+
+  --color-border: #2c2c30;
+  --color-input: #2c2c30;
+  --color-ring: rgba(255, 77, 94, 0.28);
+
+  --color-muted-2: #6b6b73;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.22);
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.22), 0 10px 30px -14px rgba(0, 0, 0, 0.38);
+  --shadow-hover: 0 2px 6px rgba(0, 0, 0, 0.26), 0 16px 36px -14px rgba(0, 0, 0, 0.42);
+  --shadow-lg: 0 4px 10px rgba(0, 0, 0, 0.28), 0 20px 48px -10px rgba(0, 0, 0, 0.48);
+
+  --danger-tint: #3a1f1a;
+  color-scheme: dark;
+}
+
+:root[data-theme="light"] {
+  --color-background: #fafaf9;
+  --color-foreground: #18181b;
+
+  --color-card: #ffffff;
+  --color-card-foreground: #18181b;
+
+  --color-popover: #ffffff;
+  --color-popover-foreground: #18181b;
+
+  --color-primary: #d7263d;
+  --color-primary-foreground: #ffffff;
+
+  --color-secondary: #f3f2ef;
+  --color-secondary-foreground: #18181b;
+
+  --color-muted: #f3f2ef;
+  --color-muted-foreground: #75757e;
+
+  --color-accent: #fce9eb;
+  --color-accent-foreground: #d7263d;
+
+  --color-destructive: #e2543a;
+  --color-destructive-foreground: #ffffff;
+
+  --color-success: #16a34a;
+  --color-success-tint: #e8f6ec;
+  --color-warning: #d97706;
+  --color-warning-tint: #fdf1e1;
+  --color-info: #2563eb;
+  --color-info-tint: #eaf0fe;
+
+  --color-border: #eceae5;
+  --color-input: #eceae5;
+  --color-ring: rgba(215, 38, 61, 0.16);
+
+  --color-muted-2: #a0a0a8;
+
+  --shadow-sm: 0 1px 2px rgba(20, 20, 25, 0.045);
+  --shadow-card: 0 1px 2px rgba(20, 20, 25, 0.03), 0 10px 30px -14px rgba(20, 20, 25, 0.09);
+  --shadow-hover: 0 2px 6px rgba(20, 20, 25, 0.05), 0 16px 36px -14px rgba(20, 20, 25, 0.12);
+  --shadow-lg: 0 4px 10px rgba(20, 20, 25, 0.05), 0 20px 48px -10px rgba(20, 20, 25, 0.15);
+
+  --danger-tint: #fceae6;
+  color-scheme: light;
 }

@@ -1,5 +1,7 @@
 import type { ReactNode } from "react";
 import { Icon } from "../Icons/Icon";
+import { EmptyIllustration } from "../Feedback/EmptyIllustration";
+import { Button } from "../Button/Button";
 
 export interface ListCardTone {
   icon: string;
@@ -57,6 +59,10 @@ interface ListCardProps<T> {
   onItemClick?: (item: T) => void;
   emptyTitle?: string;
   emptyHint?: string;
+  // docs/UX_PRINCIPLES.md §4 — пустое состояние обязано вести прямо к
+  // действию, которое его заполнит, не только объяснять, что здесь будет.
+  emptyActionLabel?: string;
+  onEmptyAction?: () => void;
 }
 
 export function ListCard<T>({
@@ -70,13 +76,20 @@ export function ListCard<T>({
   onItemClick,
   emptyTitle = "Пока пусто",
   emptyHint,
+  emptyActionLabel,
+  onEmptyAction,
 }: ListCardProps<T>) {
   if (items.length === 0) {
     return (
-      <div className="card empty">
-        <Icon name="box" />
+      <div className="card empty flex flex-col items-center gap-1">
+        <EmptyIllustration className="mb-1 h-16 w-auto" />
         <div className="t">{emptyTitle}</div>
         {emptyHint && <div className="s">{emptyHint}</div>}
+        {emptyActionLabel && onEmptyAction && (
+          <Button type="button" size="sm" variant="secondary" className="mt-2 w-auto" onClick={onEmptyAction}>
+            {emptyActionLabel}
+          </Button>
+        )}
       </div>
     );
   }

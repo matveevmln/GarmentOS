@@ -11,7 +11,7 @@ import { cn } from "../utils";
 // теперь как переиспользуемый компонент с вариантами, а не голый CSS-класс
 // на каждой кнопке.
 export const buttonVariants = cva(
-  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-[15px] text-[0.95rem] font-extrabold tracking-[-0.005em] transition-colors disabled:pointer-events-none disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30",
+  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-[15px] text-[0.95rem] font-extrabold tracking-[-0.005em] transition-[color,background-color,border-color,box-shadow,transform] duration-[var(--animate-duration-fast)] ease-[var(--ease-standard)] active:scale-[0.97] disabled:pointer-events-none disabled:opacity-50 disabled:active:scale-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30",
   {
     variants: {
       variant: {
@@ -20,7 +20,7 @@ export const buttonVariants = cva(
         destructive: "bg-destructive text-destructive-foreground hover:opacity-90",
         outline: "border border-border bg-transparent text-foreground hover:bg-secondary",
         ghost: "bg-transparent text-foreground hover:bg-secondary",
-        link: "bg-transparent text-primary underline-offset-4 hover:underline shadow-none",
+        link: "bg-transparent text-primary underline-offset-4 hover:underline shadow-none active:scale-100",
       },
       size: {
         default: "h-11 min-h-11 px-4 py-2 w-full",

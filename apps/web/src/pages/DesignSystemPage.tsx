@@ -6,6 +6,9 @@ import { Combobox } from "../design-system/Select/Combobox";
 import { NumberInput, MoneyInput, PercentInput } from "../design-system/Input/NumberInput";
 import { DatePicker } from "../design-system/Form/DatePicker";
 import { Card, CardContent, CardHeader, CardTitle } from "../design-system/Card/Card";
+import { KpiCard } from "../design-system/Card/KpiCard";
+import { ThemeToggle } from "../design-system/Theme/ThemeToggle";
+import { Package, TrendingUp, Wallet } from "lucide-react";
 import { Avatar } from "../design-system/Avatar/Avatar";
 import { StatusBadge } from "../design-system/StatusBadge/StatusBadge";
 import { ListCard, ListCardItem } from "../design-system/ListCard/ListCard";
@@ -46,12 +49,46 @@ export function DesignSystemPage() {
 
   return (
     <section className="mx-auto flex max-w-3xl flex-col gap-8 p-5">
-      <h1>Design System GarmentOS</h1>
-      <p className="text-muted-foreground">
-        docs/DESIGN_SYSTEM_MAP.md — каталог Tier A + Tier B-now. Служебная страница для визуального ревью, не пункт
-        обычной навигации. Нажмите <kbd className="rounded border border-border px-1.5 py-0.5 text-[0.8em]">⌘K</kbd> в
-        любом месте приложения — командная палитра.
-      </p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1>Design System GarmentOS</h1>
+          <p className="text-muted-foreground">
+            docs/DESIGN_SYSTEM_MAP.md — каталог Tier A + Tier B-now. Служебная страница для визуального ревью, не
+            пункт обычной навигации. Нажмите{" "}
+            <kbd className="rounded border border-border px-1.5 py-0.5 text-[0.8em]">⌘K</kbd> в любом месте
+            приложения — командная палитра.
+          </p>
+        </div>
+        <ThemeToggle />
+      </div>
+
+      <Section title="KPI-блоки (Главная, принцип 22 — «что происходит сейчас?»)">
+        <p className="text-[0.75rem] text-muted-foreground">
+          Синтетические значения для демонстрации компонента — экран Главная ещё не спроектирован (нет реального
+          источника данных, docs/DESIGN_SYSTEM_MAP.md §3.5).
+        </p>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <KpiCard
+            label="Партий в работе"
+            value={18}
+            hint="в 6 цехах"
+            icon={<Package className="h-4 w-4" />}
+            trend={{ direction: "up", label: "+3 за неделю", tone: "neutral" }}
+          />
+          <KpiCard
+            label="Ожидаемая прибыль"
+            value="612 400 ₽"
+            icon={<TrendingUp className="h-4 w-4" />}
+            trend={{ direction: "up", label: "+8%" }}
+          />
+          <KpiCard
+            label="В незавершённом производстве"
+            value="1 240 000 ₽"
+            icon={<Wallet className="h-4 w-4" />}
+            trend={{ direction: "down", label: "-4%", tone: "danger" }}
+          />
+        </div>
+      </Section>
 
       <Section title="Buttons">
         <div className="flex flex-wrap gap-2">
@@ -140,19 +177,23 @@ export function DesignSystemPage() {
           </CardHeader>
           <CardContent>Содержимое карточки — тот же .card/.card-pad, что и в прототипе.</CardContent>
         </Card>
+        <p className="text-[0.75rem] text-muted-foreground">Наведите на строку — приподнимается (кликабельная).</p>
         <ListCard
           items={[{ id: "1", title: "Пример строки", meta: "Подпись" }]}
           getKey={(row) => row.id}
           getIcon={() => "box"}
           getTitle={(row) => row.title}
           getMeta={(row) => row.meta}
+          onItemClick={() => toast.success("Открыли бы карточку сущности")}
         />
         <ListCard<{ id: string }>
           items={[]}
           getKey={(row) => row.id}
           getTitle={() => ""}
-          emptyTitle="Пустое состояние"
-          emptyHint="Пример empty state с подсказкой."
+          emptyTitle="Пока нет заказов пошива"
+          emptyHint="Создайте первый заказ — займёт меньше минуты."
+          emptyActionLabel="Создать заказ пошива"
+          onEmptyAction={() => toast.success("Открыли бы форму создания")}
         />
       </Section>
 

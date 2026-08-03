@@ -2,11 +2,28 @@ import { forwardRef } from "react";
 import type { HTMLAttributes } from "react";
 import { cn } from "../utils";
 
+interface CardProps extends HTMLAttributes<HTMLDivElement> {
+  // Визуальное ревью 2026-08-03 ("более интересные карточки", плавные
+  // hover-состояния) — приподнятие + более глубокая тень при наведении.
+  // Опционально: статичные карточки-контейнеры формы не должны "прыгать"
+  // при наведении, только кликабельные строки списка/карточки-сущности.
+  interactive?: boolean;
+}
+
 // GarmentCard — базовый примитив (docs/UI_FOUNDATION.md, шаг 4), тот же
 // .card/.card-pad, что и в apps/prototype, теперь как компонент с составными
 // частями в духе shadcn (Header/Content/Footer), не только CSS-класс.
-export const Card = forwardRef<HTMLDivElement, HTMLAttributes<HTMLDivElement>>(({ className, ...props }, ref) => (
-  <div ref={ref} className={cn("rounded-[22px] border border-border bg-card shadow-card", className)} {...props} />
+export const Card = forwardRef<HTMLDivElement, CardProps>(({ className, interactive = false, ...props }, ref) => (
+  <div
+    ref={ref}
+    className={cn(
+      "rounded-[22px] border border-border bg-card shadow-card",
+      interactive &&
+        "transition-[transform,box-shadow] duration-[var(--animate-duration-base)] ease-[var(--ease-standard)] hover:-translate-y-0.5 hover:shadow-hover active:translate-y-0 active:shadow-card",
+      className,
+    )}
+    {...props}
+  />
 ));
 Card.displayName = "Card";
 

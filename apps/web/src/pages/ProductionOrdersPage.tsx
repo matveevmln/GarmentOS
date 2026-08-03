@@ -287,7 +287,7 @@ export function ProductionOrdersPage() {
         {orders
           .filter((row) => statusFilter === "all" || row.status === statusFilter)
           .map((row) => (
-            <Card key={row.id} className="mb-2.5 flex flex-wrap items-center gap-3 p-3.5">
+            <Card key={row.id} interactive className="mb-2.5 flex flex-wrap items-center gap-3 p-3.5">
               <Avatar tone="warning">{productName(row.productId).slice(0, 2).toUpperCase()}</Avatar>
               <div className="min-w-0 flex-1">
                 <div className="truncate text-[14px] font-bold text-foreground">{productName(row.productId)}</div>

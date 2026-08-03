@@ -14,30 +14,43 @@
    импортируется раньше этого файла), поэтому порядок остаётся: theme -> base -> components -> utilities. */
 @layer base {
 
+/* Найденный при визуальном ревью тёмной темы баг (2026-08-03): эти
+   переменные раньше были собственными литеральными значениями, отдельными
+   от Tokens/tokens.css `@theme` (--color-*) — при переключении темы
+   переключались только новые Tailwind-компоненты (явно использующие
+   bg-card/text-foreground), а весь легаси-CSS (.card/.list-card/button/
+   h1 и унаследованный цвет текста) оставался на светлых значениях,
+   давая чёрный текст на тёмном фоне. Исправлено: легаси-переменные теперь
+   алиасы новых токенов — единый источник истины, тема переключается
+   в одном месте (Tokens/tokens.css), а не дублируется в двух системах. */
 :root {
-  --bg: #fafaf9;
-  --surface: #ffffff;
-  --surface-2: #f3f2ef;
-  --border: #eceae5;
-  --ink: #18181b;
-  --muted: #75757e;
-  --muted-2: #a0a0a8;
-  --accent: #d7263d;
-  --accent-ink: #ffffff;
-  --accent-tint: #fce9eb;
-  --accent-ring: rgba(215, 38, 61, 0.16);
-  --success: #16a34a;
-  --success-tint: #e8f6ec;
-  --warning: #d97706;
-  --warning-tint: #fdf1e1;
-  --danger: #e2543a;
+  --bg: var(--color-background);
+  --surface: var(--color-card);
+  --surface-2: var(--color-secondary);
+  --border: var(--color-border);
+  --ink: var(--color-foreground);
+  --muted: var(--color-muted-foreground);
+  --muted-2: var(--color-muted-2);
+  --accent: var(--color-primary);
+  --accent-ink: var(--color-primary-foreground);
+  --accent-tint: var(--color-accent);
+  --accent-ring: var(--color-ring);
+  --success: var(--color-success);
+  --success-tint: var(--color-success-tint);
+  --warning: var(--color-warning);
+  --warning-tint: var(--color-warning-tint);
+  --danger: var(--color-destructive);
   --danger-tint: #fceae6;
-  --info: #2563eb;
-  --info-tint: #eaf0fe;
-  --r-lg: 22px;
-  --r-md: 16px;
-  --r-sm: 11px;
-  --shadow-card: 0 1px 2px rgba(20, 20, 25, 0.04), 0 8px 24px -12px rgba(20, 20, 25, 0.1);
+  --info: var(--color-info);
+  --info-tint: var(--color-info-tint);
+  --r-lg: var(--radius-lg);
+  --r-md: var(--radius-md);
+  --r-sm: var(--radius-sm);
+  /* --shadow-card не переопределяется здесь: то же имя уже определено
+     в Tokens/tokens.css @theme (неслоистый CSS, побеждает по правилам
+     cascade layers, docs/UI_REVIEW.md §5) — второе объявление внутри
+     @layer base было бы просто мёртвым кодом и рискует опечаткой вида
+     var(--shadow-card) внутри самого себя (циклическая ссылка). */
   color-scheme: light;
 }
 
@@ -264,8 +277,11 @@ button:disabled {
 }
 
 .app-nav a.active {
+  /* Тот же паттерн, что .filters button.active (см. комментарий там) —
+     --bg вместо захардкоженного #fff, чтобы пара оставалась контрастной
+     после инверсии в тёмной теме. */
   background: var(--ink);
-  color: #fff;
+  color: var(--bg);
 }
 
 .app-main {
@@ -424,6 +440,26 @@ button.list-card {
 a.list-card,
 button.list-card {
   cursor: pointer;
+  transition:
+    transform var(--animate-duration-base, 180ms) var(--ease-standard, ease),
+    box-shadow var(--animate-duration-base, 180ms) var(--ease-standard, ease);
+}
+
+/* Кликабельные строки приподнимаются при наведении (визуальное ревью
+   2026-08-03) — то же поведение, что GarmentCard interactive, только для
+   уже существующего .list-card до его переноса на новые компоненты. На
+   touch-устройствах наведения нет, приподнимать нечего. */
+@media (hover: hover) {
+  a.list-card:hover,
+  button.list-card:hover {
+    transform: translateY(-1px);
+    box-shadow: var(--shadow-hover, var(--shadow-card));
+  }
+}
+
+a.list-card:active,
+button.list-card:active {
+  transform: translateY(0);
 }
 
 .list-card .thumb {
@@ -518,8 +554,14 @@ button.list-card {
 }
 
 .filters button.active {
+  /* Раньше color: #fff — верно только в светлой теме, где --ink тёмный.
+     В тёмной теме --ink светлый (алиас --color-foreground), и захардкоженный
+     белый текст становился невидимым на светлой пилюле (найдено на
+     визуальном ревью тёмной темы 2026-08-03). --bg тоже теперь алиас темы
+     (--color-background) — пара ink/bg инвертируется вместе, контраст
+     остаётся верным в обеих темах без двух наборов правил. */
   background: var(--ink);
-  color: #fff;
+  color: var(--bg);
   border-color: var(--ink);
 }
 

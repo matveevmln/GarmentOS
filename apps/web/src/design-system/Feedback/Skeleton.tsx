@@ -1,13 +1,16 @@
 import { cn } from "../utils";
 
 // GarmentSkeleton — реальный пробел закрыт: раньше везде был текст
-// «Загрузка…» (docs/UI_FOUNDATION.md, Tier A). Дословно по прототипу
-// (.sk — градиентная анимация), не серый прямоугольник по умолчанию.
+// «Загрузка…» (docs/UI_FOUNDATION.md, Tier A). Shimmer (движущаяся световая
+// полоса) вместо статичного пульсирующего градиента — визуальное ревью
+// 2026-08-03 ("приятные skeleton-загрузчики"), паттерн большинства
+// современных SaaS-лоадеров: полоса читается как "идёт загрузка", не
+// просто как статичная серая плашка.
 export function Skeleton({ className }: { className?: string }) {
   return (
     <div
       className={cn(
-        "animate-pulse rounded-[10px] bg-gradient-to-r from-secondary via-border to-secondary bg-[length:400%_100%]",
+        "animate-shimmer rounded-[10px] bg-gradient-to-r from-secondary via-border to-secondary bg-[length:200%_100%]",
         className,
       )}
     />
