@@ -21,6 +21,8 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Tooltip, TooltipContent, TooltipTrigger } from "../design-system/Tooltip/Tooltip";
 import { Popover, PopoverContent, PopoverTrigger } from "../design-system/Popover/Popover";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "../design-system/DropdownMenu/DropdownMenu";
+import { Drawer, DrawerClose, DrawerContent, DrawerDescription, DrawerFooter, DrawerHeader, DrawerTitle, DrawerTrigger } from "../design-system/Drawer/Drawer";
+import { Upload } from "../design-system/Upload/Upload";
 import { toast } from "../design-system/Toast/Toast";
 
 // Каталог компонентов дизайн-системы GarmentOS (владелец проекта, п.9) —
@@ -46,6 +48,7 @@ export function DesignSystemPage() {
   const [percent, setPercent] = useState<number | undefined>(12);
   const [qty, setQty] = useState<number | undefined>(undefined);
   const [loadingDemo, setLoadingDemo] = useState(false);
+  const [uploadFiles, setUploadFiles] = useState<File[]>([]);
 
   return (
     <section className="mx-auto flex max-w-3xl flex-col gap-8 p-5">
@@ -297,6 +300,38 @@ export function DesignSystemPage() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+      </Section>
+
+      <Section title="Drawer / Bottom Sheet">
+        <p className="text-[0.75rem] text-muted-foreground">
+          На мобильном — снизу экрана (drag-to-dismiss), на десктопе — по центру снизу. Паттерн Telegram/Revolut
+          (docs/DESIGN_SYSTEM_MAP.md §1): контекстное действие поверх текущего экрана, без перехода на новую
+          страницу.
+        </p>
+        <Drawer>
+          <DrawerTrigger asChild>
+            <Button variant="secondary">Открыть Drawer (приёмка партии)</Button>
+          </DrawerTrigger>
+          <DrawerContent>
+            <DrawerHeader>
+              <DrawerTitle>Принять партию</DrawerTitle>
+              <DrawerDescription>Заказ №142 — Худи Base, 120 шт. Выберите склад и подтвердите приёмку.</DrawerDescription>
+            </DrawerHeader>
+            <DrawerFooter>
+              <Button onClick={() => toast.success("Партия принята")}>Подтвердить приёмку</Button>
+              <DrawerClose asChild>
+                <Button variant="secondary">Отмена</Button>
+              </DrawerClose>
+            </DrawerFooter>
+          </DrawerContent>
+        </Drawer>
+      </Section>
+
+      <Section title="Upload / Preview">
+        <p className="text-[0.75rem] text-muted-foreground">
+          Фото ткани/брака/накладной — камера или файл, превью по клику (docs/PRINCIPLES.md принцип 20, п.3).
+        </p>
+        <Upload files={uploadFiles} onChange={setUploadFiles} hint="JPG, PNG до 10 МБ" />
       </Section>
 
       <Section title="Toast">
