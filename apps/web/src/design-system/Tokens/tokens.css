@@ -8,6 +8,13 @@
    "используй реализацию shadcn, не внешний вид". */
 
 @import "tailwindcss";
+/* tw-animate-css — даёт utility-классы animate-in, animate-out, fade-in,
+   zoom-in и парные им (Tailwind v4 не включает их по умолчанию, в отличие
+   от v3-плагина tailwindcss-animate, на который расчитан код shadcn/ui).
+   Без этого импорта классы вроде data-[state=open]:animate-in в
+   Dialog/Select были синтаксически валидны, но не генерировали CSS —
+   переходы были no-op. */
+@import "tw-animate-css";
 
 @theme {
   /* ---- фирменная палитра (см. apps/web/src/styles.css :root — тот же

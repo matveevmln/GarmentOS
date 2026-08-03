@@ -478,6 +478,23 @@ button.list-card {
   gap: 8px;
 }
 
+/* docs/DESIGN_SYSTEM_MAP.md §4.4/§6.4 — hover-only меню действий (паттерн
+   Notion, §1): на устройствах с наведением действия скрыты, пока курсор не
+   на строке — меньше визуального шума в состоянии покоя. На touch-устройствах
+   (hover: none) наведения не существует физически — действия остаются
+   видимыми всегда, иначе они были бы недостижимы одним тапом. */
+@media (hover: hover) {
+  .list-card .actions {
+    opacity: 0;
+    transition: opacity var(--animate-duration-fast, 120ms) ease;
+  }
+
+  .list-card:hover .actions,
+  .list-card .actions:focus-within {
+    opacity: 1;
+  }
+}
+
 /* ---- .filters — пилюли-вкладки статуса, дословно из прототипа ---- */
 .filters {
   display: flex;

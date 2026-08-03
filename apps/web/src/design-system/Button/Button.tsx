@@ -40,18 +40,32 @@ export interface ButtonProps
   extends ButtonHTMLAttributes<HTMLButtonElement>,
     VariantProps<typeof buttonVariants> {
   asChild?: boolean;
+  // docs/DESIGN_SYSTEM_MAP.md §4.2 — реальный пробел: между нажатием и
+  // ответом сервера кнопка была доступна для повторного нажатия (риск
+  // двойной отправки на медленной мобильной сети в цехе/на складе).
+  loading?: boolean;
 }
 
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
-  ({ className, variant, size, asChild = false, type = "button", ...props }, ref) => {
+  ({ className, variant, size, asChild = false, loading = false, disabled, type = "button", children, ...props }, ref) => {
     const Comp = asChild ? Slot.Root : "button";
     return (
       <Comp
         className={cn(buttonVariants({ variant, size, className }))}
         ref={ref}
         type={asChild ? undefined : type}
+        disabled={disabled || loading}
+        aria-busy={loading || undefined}
         {...props}
-      />
+      >
+        {loading && (
+          <svg className="h-4 w-4 shrink-0 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
+            <path className="opacity-90" d="M22 12a10 10 0 0 0-10-10" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+          </svg>
+        )}
+        {children}
+      </Comp>
     );
   },
 );
