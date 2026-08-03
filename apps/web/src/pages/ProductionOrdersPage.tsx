@@ -21,6 +21,7 @@ import { DatePicker } from "../design-system/Form/DatePicker";
 import { Avatar } from "../design-system/Avatar/Avatar";
 import { SkeletonList } from "../design-system/Feedback/Skeleton";
 import { ErrorState } from "../design-system/Feedback/ErrorState";
+import { EmptyIllustration } from "../design-system/Feedback/EmptyIllustration";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../design-system/Tooltip/Tooltip";
 import { toast } from "../design-system/Toast/Toast";
 
@@ -340,7 +341,8 @@ export function ProductionOrdersPage() {
             </Card>
           ))}
         {!isLoading && orders.length === 0 && (
-          <div className="card empty">
+          <div className="card empty flex flex-col items-center gap-1">
+            <EmptyIllustration className="mb-1 h-16 w-auto" />
             <div className="t">Пока нет ни одного заказа пошива</div>
             <div className="s">Создайте первый заказ в форме выше.</div>
           </div>

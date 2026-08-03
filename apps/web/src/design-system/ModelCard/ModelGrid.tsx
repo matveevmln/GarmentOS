@@ -1,5 +1,7 @@
 import type { ReactNode } from "react";
 import { Icon } from "../Icons/Icon";
+import { EmptyIllustration } from "../Feedback/EmptyIllustration";
+import { Button } from "../Button/Button";
 
 // Сетка карточек-моделей — дословно по классу .model-grid/.model-card из
 // утверждённого прототипа (фото-плейсхолдер + название + подпись), не
@@ -25,6 +27,8 @@ interface ModelGridProps<T> {
   onItemClick: (item: T) => void;
   emptyTitle?: string;
   emptyHint?: string;
+  emptyActionLabel?: string;
+  onEmptyAction?: () => void;
 }
 
 export function ModelGrid<T>({
@@ -35,13 +39,20 @@ export function ModelGrid<T>({
   onItemClick,
   emptyTitle = "Пока нет ни одной модели",
   emptyHint,
+  emptyActionLabel,
+  onEmptyAction,
 }: ModelGridProps<T>) {
   if (items.length === 0) {
     return (
-      <div className="card empty">
-        <Icon name="layers" />
+      <div className="card empty flex flex-col items-center gap-1">
+        <EmptyIllustration className="mb-1 h-16 w-auto" />
         <div className="t">{emptyTitle}</div>
         {emptyHint && <div className="s">{emptyHint}</div>}
+        {emptyActionLabel && onEmptyAction && (
+          <Button type="button" size="sm" variant="secondary" className="mt-2 w-auto" onClick={onEmptyAction}>
+            {emptyActionLabel}
+          </Button>
+        )}
       </div>
     );
   }

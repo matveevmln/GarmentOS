@@ -6,72 +6,95 @@ import { createProductSchema, type CreateProductDto, type ProductResponseDto } f
 import { useCrudResource } from "../api/useCrudResource";
 import { ModelGrid } from "../design-system/ModelCard/ModelGrid";
 import { SearchBar } from "../design-system/Search/SearchBar";
+import { Card, CardContent, CardHeader, CardTitle } from "../design-system/Card/Card";
+import { Input } from "../design-system/Input/Input";
+import { Button } from "../design-system/Button/Button";
+import { SkeletonList } from "../design-system/Feedback/Skeleton";
+import { ErrorState } from "../design-system/Feedback/ErrorState";
+import { toast } from "../design-system/Toast/Toast";
 import { ApiError } from "../api/client";
 
+// Пятый из 7 перенесённых экранов (docs/DESIGN_SYSTEM_MAP.md, задача #72).
 export function ProductsPage() {
-  const { items, isLoading, error, create } = useCrudResource<ProductResponseDto, CreateProductDto>("/products");
-  const [formError, setFormError] = useState<string | null>(null);
+  const { items, isLoading, error, reload, create } = useCrudResource<ProductResponseDto, CreateProductDto>(
+    "/products",
+  );
   const [query, setQuery] = useState("");
   const navigate = useNavigate();
   const {
     register,
     handleSubmit,
     reset,
+    setFocus,
     formState: { errors, isSubmitting },
   } = useForm<CreateProductDto>({ resolver: zodResolver(createProductSchema) });
 
   const onSubmit = async (data: CreateProductDto) => {
-    setFormError(null);
     try {
       await create(data);
       reset();
+      toast.success("Модель добавлена");
     } catch (err) {
-      setFormError(err instanceof ApiError ? err.message : "Не удалось создать модель");
+      toast.error(err instanceof ApiError ? err.message : "Не удалось создать модель");
     }
   };
 
   return (
-    <section>
+    <section className="flex flex-col gap-5">
       <h1>Модели</h1>
 
-      <form className="entity-form" onSubmit={(event) => void handleSubmit(onSubmit)(event)}>
-        <label>
-          Название модели
-          <input {...register("name")} placeholder="Двойка" />
-        </label>
-        {errors.name && <p className="field-error">{errors.name.message}</p>}
+      <Card>
+        <CardHeader>
+          <CardTitle>Новая модель</CardTitle>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-4">
+          <form className="flex flex-col gap-4" onSubmit={(event) => void handleSubmit(onSubmit)(event)}>
+            <label className="flex flex-col gap-1.5 text-[0.9rem] font-semibold text-muted-foreground">
+              Название модели
+              <Input {...register("name")} placeholder="Двойка" />
+              {errors.name && <span className="text-[0.8rem] font-semibold text-destructive">{errors.name.message}</span>}
+            </label>
 
-        <label>
-          Артикул
-          <input {...register("code")} placeholder="DVOIKA-001" />
-        </label>
-        {errors.code && <p className="field-error">{errors.code.message}</p>}
+            <label className="flex flex-col gap-1.5 text-[0.9rem] font-semibold text-muted-foreground">
+              Артикул
+              <Input {...register("code")} placeholder="DVOIKA-001" />
+              {errors.code && <span className="text-[0.8rem] font-semibold text-destructive">{errors.code.message}</span>}
+            </label>
 
-        <label>
-          Категория
-          <input {...register("category")} />
-        </label>
+            <label className="flex flex-col gap-1.5 text-[0.9rem] font-semibold text-muted-foreground">
+              Категория
+              <Input {...register("category")} />
+            </label>
 
-        {formError && <p className="form-error">{formError}</p>}
-        <button type="submit" disabled={isSubmitting}>
-          Добавить модель
-        </button>
-      </form>
+            <Button type="submit" loading={isSubmitting}>
+              {isSubmitting ? "Добавляем..." : "Добавить модель"}
+            </Button>
+          </form>
+        </CardContent>
+      </Card>
 
-      {isLoading && <p>Загрузка…</p>}
-      {error && <p className="form-error">{error}</p>}
+      {isLoading && <SkeletonList />}
+      {!isLoading && error && (
+        <ErrorState title="Не удалось загрузить модели" description={error} onRetry={() => void reload()} />
+      )}
 
-      <SearchBar value={query} onChange={setQuery} placeholder="Поиск модели" />
+      {!isLoading && !error && (
+        <>
+          <SearchBar value={query} onChange={setQuery} placeholder="Поиск модели" />
 
-      <ModelGrid
-        items={items.filter((row) => row.name.toLowerCase().includes(query.trim().toLowerCase()))}
-        getKey={(row) => row.id}
-        getTitle={(row) => row.name}
-        getSubtitle={(row) => row.code}
-        onItemClick={(row) => void navigate(`/products/${row.id}`)}
-        emptyTitle="Пока нет ни одной модели"
-        emptyHint="Добавьте первую модель в форме выше."
-      />
+          <ModelGrid
+            items={items.filter((row) => row.name.toLowerCase().includes(query.trim().toLowerCase()))}
+            getKey={(row) => row.id}
+            getTitle={(row) => row.name}
+            getSubtitle={(row) => row.code}
+            onItemClick={(row) => void navigate(`/products/${row.id}`)}
+            emptyTitle="Пока нет ни одной модели"
+            emptyHint="Добавьте первую модель — займёт меньше минуты."
+            emptyActionLabel="Добавить модель"
+            onEmptyAction={() => setFocus("name")}
+          />
+        </>
+      )}
     </section>
   );
 }

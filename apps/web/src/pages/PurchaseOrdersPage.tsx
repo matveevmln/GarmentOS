@@ -10,7 +10,21 @@ import { apiRequest, ApiError } from "../api/client";
 import { useCrudResource } from "../api/useCrudResource";
 import { FilterTabs, type FilterOption } from "../design-system/Tabs/FilterTabs";
 import { StatusBadge } from "../design-system/StatusBadge/StatusBadge";
+import { Card, CardContent, CardHeader, CardTitle } from "../design-system/Card/Card";
+import { Combobox } from "../design-system/Select/Combobox";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../design-system/Select/Select";
+import { NumberInput, MoneyInput } from "../design-system/Input/NumberInput";
+import { Button } from "../design-system/Button/Button";
+import { Avatar } from "../design-system/Avatar/Avatar";
+import { SkeletonList } from "../design-system/Feedback/Skeleton";
+import { ErrorState } from "../design-system/Feedback/ErrorState";
+import { EmptyIllustration } from "../design-system/Feedback/EmptyIllustration";
+import { toast } from "../design-system/Toast/Toast";
 
+// Последний, седьмой из перенесённых экранов (docs/DESIGN_SYSTEM_MAP.md,
+// задача #72) — тот же паттерн, что уже утверждённая форма-эталон
+// (ProductionOrdersPage): Combobox для поставщика/материала (растущий
+// справочник), MoneyInput для цены (форматирование при blur).
 const STATUS_FILTERS: FilterOption<"all" | "draft" | "sent" | "received">[] = [
   { value: "all", label: "Все" },
   { value: "draft", label: "Черновик" },
@@ -26,16 +40,25 @@ export function PurchaseOrdersPage() {
   const [supplierId, setSupplierId] = useState("");
   const [lineItems, setLineItems] = useState<PurchaseOrderItemDraft[]>([]);
   const [pendingMaterialId, setPendingMaterialId] = useState("");
-  const [pendingQuantity, setPendingQuantity] = useState("");
-  const [pendingPrice, setPendingPrice] = useState("");
-  const [error, setError] = useState<string | null>(null);
+  const [pendingQuantity, setPendingQuantity] = useState<number | undefined>(undefined);
+  const [pendingPrice, setPendingPrice] = useState<number | undefined>(undefined);
   const [receiveWarehouse, setReceiveWarehouse] = useState<Record<string, string>>({});
   const [statusFilter, setStatusFilter] = useState<(typeof STATUS_FILTERS)[number]["value"]>("all");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [pendingOrderAction, setPendingOrderAction] = useState<string | null>(null);
+  const [referenceError, setReferenceError] = useState(false);
+
+  const loadReferences = () => {
+    setReferenceError(false);
+    Promise.all([
+      apiRequest<SupplierResponseDto[]>("/suppliers").then(setSuppliers),
+      apiRequest<MaterialResponseDto[]>("/materials").then(setMaterials),
+      apiRequest<WarehouseResponseDto[]>("/warehouses").then(setWarehouses),
+    ]).catch(() => setReferenceError(true));
+  };
 
   useEffect(() => {
-    void apiRequest<SupplierResponseDto[]>("/suppliers").then(setSuppliers);
-    void apiRequest<MaterialResponseDto[]>("/materials").then(setMaterials);
-    void apiRequest<WarehouseResponseDto[]>("/warehouses").then(setWarehouses);
+    loadReferences();
   }, []);
 
   const materialName = (id: string) => materials.find((m) => m.id === id)?.name ?? id;
@@ -43,112 +66,136 @@ export function PurchaseOrdersPage() {
 
   const addLineItem = () => {
     if (!pendingMaterialId || !pendingQuantity || !pendingPrice) return;
-    setLineItems((prev) => [
-      ...prev,
-      { materialId: pendingMaterialId, quantity: Number(pendingQuantity), unitPrice: Number(pendingPrice) },
-    ]);
+    setLineItems((prev) => [...prev, { materialId: pendingMaterialId, quantity: pendingQuantity, unitPrice: pendingPrice }]);
     setPendingMaterialId("");
-    setPendingQuantity("");
-    setPendingPrice("");
+    setPendingQuantity(undefined);
+    setPendingPrice(undefined);
   };
 
   const submitOrder = async () => {
     if (!supplierId || lineItems.length === 0) return;
-    setError(null);
+    setIsSubmitting(true);
     try {
       await apiRequest("/purchase-orders", { method: "POST", body: { supplierId, items: lineItems } });
       setSupplierId("");
       setLineItems([]);
       await reload();
+      toast.success("Закупка создана");
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Не удалось создать закупку");
+      toast.error(err instanceof ApiError ? err.message : "Не удалось создать закупку");
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
   const confirmOrder = async (orderId: string) => {
-    setError(null);
+    setPendingOrderAction(orderId);
     try {
       await apiRequest(`/purchase-orders/${orderId}/confirm`, { method: "POST" });
       await reload();
+      toast.success("Закупка подтверждена");
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Не удалось подтвердить закупку");
+      toast.error(err instanceof ApiError ? err.message : "Не удалось подтвердить закупку");
+    } finally {
+      setPendingOrderAction(null);
     }
   };
 
   const receiveOrder = async (orderId: string) => {
     const warehouseId = receiveWarehouse[orderId];
     if (!warehouseId) {
-      setError("Выберите склад для приёмки");
+      toast.error("Выберите склад для приёмки");
       return;
     }
-    setError(null);
+    setPendingOrderAction(orderId);
     try {
       await apiRequest(`/purchase-orders/${orderId}/receive`, { method: "POST", body: { warehouseId } });
       await reload();
+      toast.success("Закупка принята на склад");
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Не удалось принять закупку");
+      toast.error(err instanceof ApiError ? err.message : "Не удалось принять закупку");
+    } finally {
+      setPendingOrderAction(null);
     }
   };
 
   return (
-    <section>
+    <section className="flex flex-col gap-5">
       <h1>Закупки материалов</h1>
 
-      <div className="entity-form">
-        <label>
-          Поставщик
-          <select value={supplierId} onChange={(event) => setSupplierId(event.target.value)}>
-            <option value="">Выберите поставщика</option>
-            {suppliers.map((supplier) => (
-              <option key={supplier.id} value={supplier.id}>
-                {supplier.name}
-              </option>
-            ))}
-          </select>
-        </label>
+      {referenceError ? (
+        <ErrorState
+          title="Не удалось загрузить справочники"
+          description="Поставщики, материалы и склады недоступны — проверьте соединение."
+          onRetry={loadReferences}
+        />
+      ) : (
+        <Card>
+          <CardHeader>
+            <CardTitle>Новая закупка</CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-4">
+            <label className="flex flex-col gap-1.5 text-[0.9rem] font-semibold text-muted-foreground">
+              Поставщик
+              <Combobox
+                value={supplierId}
+                onChange={setSupplierId}
+                placeholder="Выберите поставщика"
+                searchPlaceholder="Поиск поставщика..."
+                options={suppliers.map((supplier) => ({ value: supplier.id, label: supplier.name }))}
+              />
+            </label>
 
-        <div className="entity-form inline">
-          <label>
-            Материал
-            <select value={pendingMaterialId} onChange={(event) => setPendingMaterialId(event.target.value)}>
-              <option value="">Материал</option>
-              {materials.map((material) => (
-                <option key={material.id} value={material.id}>
-                  {material.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            Количество
-            <input type="number" step="0.001" value={pendingQuantity} onChange={(event) => setPendingQuantity(event.target.value)} />
-          </label>
-          <label>
-            Цена за единицу
-            <input type="number" step="0.01" value={pendingPrice} onChange={(event) => setPendingPrice(event.target.value)} />
-          </label>
-          <button type="button" onClick={addLineItem}>
-            Добавить строку
-          </button>
-        </div>
+            <div className="flex flex-col gap-3 rounded-[16px] bg-secondary p-3.5 sm:flex-row sm:items-end sm:flex-wrap">
+              <label className="flex flex-1 min-w-[160px] flex-col gap-1.5 text-[0.9rem] font-semibold text-muted-foreground">
+                Материал
+                <Combobox
+                  value={pendingMaterialId}
+                  onChange={setPendingMaterialId}
+                  placeholder="Материал"
+                  searchPlaceholder="Поиск материала..."
+                  options={materials.map((material) => ({ value: material.id, label: material.name }))}
+                />
+              </label>
+              <label className="flex flex-1 min-w-[100px] flex-col gap-1.5 text-[0.9rem] font-semibold text-muted-foreground">
+                Количество
+                <NumberInput value={pendingQuantity} onChange={setPendingQuantity} min={0} decimals={3} />
+              </label>
+              <label className="flex flex-1 min-w-[120px] flex-col gap-1.5 text-[0.9rem] font-semibold text-muted-foreground">
+                Цена за единицу
+                <MoneyInput value={pendingPrice} onChange={setPendingPrice} currency="сом" />
+              </label>
+              <Button type="button" variant="secondary" size="sm" onClick={addLineItem} className="sm:w-auto">
+                Добавить строку
+              </Button>
+            </div>
 
-        {lineItems.length > 0 && (
-          <ul className="pending-list">
-            {lineItems.map((item, index) => (
-              <li key={index}>
-                {materialName(item.materialId)} — {item.quantity} × {item.unitPrice}
-              </li>
-            ))}
-          </ul>
-        )}
+            {lineItems.length > 0 && (
+              <ul className="m-0 list-none p-0 text-[0.9rem] text-muted-foreground">
+                {lineItems.map((item, index) => (
+                  <li key={index} className="flex justify-between border-b border-border py-1.5 last:border-none">
+                    <span>{materialName(item.materialId)}</span>
+                    <span className="tabular-nums">
+                      {item.quantity} × {item.unitPrice}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
 
-        {error && <p className="form-error">{error}</p>}
-        <button type="button" disabled={!supplierId || lineItems.length === 0} onClick={() => void submitOrder()}>
-          Создать закупку
-        </button>
-      </div>
+            <Button
+              type="button"
+              loading={isSubmitting}
+              disabled={!supplierId || lineItems.length === 0}
+              onClick={() => void submitOrder()}
+            >
+              {isSubmitting ? "Создаём..." : "Создать закупку"}
+            </Button>
+          </CardContent>
+        </Card>
+      )}
 
-      {isLoading && <p>Загрузка…</p>}
+      {isLoading && <SkeletonList />}
 
       <FilterTabs options={STATUS_FILTERS} value={statusFilter} onChange={setStatusFilter} />
 
@@ -156,44 +203,47 @@ export function PurchaseOrdersPage() {
         {orders
           .filter((row) => statusFilter === "all" || row.status === statusFilter)
           .map((row) => (
-            <div key={row.id} className="card list-card" style={{ flexWrap: "wrap" }}>
-              <span className="thumb" style={{ background: "var(--surface-2)", color: "var(--muted)" }}>
-                {supplierName(row.supplierId).slice(0, 2).toUpperCase()}
-              </span>
-              <span className="body">
-                <span className="title">{supplierName(row.supplierId)}</span>
-                <span className="meta">{row.items.length} позиций</span>
-              </span>
-              <span className="actions">
+            <Card key={row.id} interactive className="mb-2.5 flex flex-wrap items-center gap-3 p-3.5">
+              <Avatar tone="info">{supplierName(row.supplierId).slice(0, 2).toUpperCase()}</Avatar>
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-[14px] font-bold text-foreground">{supplierName(row.supplierId)}</div>
+                <div className="truncate text-[11.5px] text-muted-foreground">{row.items.length} позиций</div>
+              </div>
+              <div className="flex flex-none items-center gap-2">
                 {row.status === "draft" && (
-                  <button type="button" onClick={() => void confirmOrder(row.id)}>
+                  <Button type="button" size="sm" loading={pendingOrderAction === row.id} onClick={() => void confirmOrder(row.id)}>
                     Подтвердить
-                  </button>
+                  </Button>
                 )}
                 {row.status === "sent" && (
-                  <div className="inline-action">
-                    <select
+                  <div className="flex items-center gap-2">
+                    <Select
                       value={receiveWarehouse[row.id] ?? ""}
-                      onChange={(event) => setReceiveWarehouse((prev) => ({ ...prev, [row.id]: event.target.value }))}
+                      onValueChange={(value) => setReceiveWarehouse((prev) => ({ ...prev, [row.id]: value }))}
                     >
-                      <option value="">Склад</option>
-                      {warehouses.map((warehouse) => (
-                        <option key={warehouse.id} value={warehouse.id}>
-                          {warehouse.name}
-                        </option>
-                      ))}
-                    </select>
-                    <button type="button" onClick={() => void receiveOrder(row.id)}>
+                      <SelectTrigger className="w-32">
+                        <SelectValue placeholder="Склад" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {warehouses.map((warehouse) => (
+                          <SelectItem key={warehouse.id} value={warehouse.id}>
+                            {warehouse.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Button type="button" size="sm" loading={pendingOrderAction === row.id} onClick={() => void receiveOrder(row.id)}>
                       Принять
-                    </button>
+                    </Button>
                   </div>
                 )}
                 {row.status === "received" && <StatusBadge status={row.status} />}
-              </span>
-            </div>
+              </div>
+            </Card>
           ))}
-        {orders.length === 0 && (
-          <div className="card empty">
+        {!isLoading && orders.length === 0 && (
+          <div className="card empty flex flex-col items-center gap-1">
+            <EmptyIllustration className="mb-1 h-16 w-auto" />
             <div className="t">Пока нет ни одной закупки</div>
             <div className="s">Создайте первую закупку в форме выше.</div>
           </div>
