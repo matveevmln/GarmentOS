@@ -63,7 +63,7 @@ export function ProductsPage() {
 
             <label className="flex flex-col gap-1.5 text-[0.9rem] font-semibold text-muted-foreground">
               Категория
-              <Input {...register("category")} />
+              <Input {...register("category")} placeholder="Худи" />
             </label>
 
             <Button type="submit" loading={isSubmitting}>

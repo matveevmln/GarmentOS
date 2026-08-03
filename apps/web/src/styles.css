@@ -269,6 +269,17 @@ button:disabled {
   color: var(--muted);
   font-size: 0.85rem;
   font-weight: 700;
+  transition: background-color var(--animate-duration-fast, 120ms) ease, color var(--animate-duration-fast, 120ms) ease;
+}
+
+.app-nav a:not(.active):hover {
+  background: var(--surface-2);
+  color: var(--ink);
+}
+
+.app-nav a:focus-visible {
+  outline: 2px solid var(--accent-ring);
+  outline-offset: 2px;
 }
 
 .app-nav a .icon {
@@ -551,6 +562,25 @@ button.list-card:active {
   font-weight: 700;
   min-height: 0;
   box-shadow: none;
+  transition:
+    background-color var(--animate-duration-fast, 120ms) ease,
+    border-color var(--animate-duration-fast, 120ms) ease,
+    color var(--animate-duration-fast, 120ms) ease;
+}
+
+/* Инженерная ревизия перед заморозкой (2026-08-03): раньше был стилизован
+   только .active — hover/фокус не давали пилюле никакой визуальной
+   обратной связи (нарушение единообразного поведения одинаковых
+   элементов, docs/UX_PRINCIPLES.md §3, и базовой доступности —
+   клавиатурная навигация должна быть видна). */
+.filters button:not(.active):hover {
+  background: var(--surface-2);
+  color: var(--ink);
+}
+
+.filters button:focus-visible {
+  outline: 2px solid var(--accent-ring);
+  outline-offset: 2px;
 }
 
 .filters button.active {
@@ -575,6 +605,17 @@ button.list-card:active {
   padding: 11px 14px;
   margin: 2px 0 16px;
   color: var(--muted);
+  border: 1.5px solid transparent;
+  transition: border-color var(--animate-duration-fast, 120ms) ease;
+}
+
+/* Инженерная ревизия перед заморозкой (2026-08-03): input внутри имеет
+   outline: none (снят намеренно, чтобы не дублировать фокус-рамку под
+   закруглённым контейнером) — но без переноса рамки на .search это было
+   полным отсутствием видимого фокуса при табуляции, реальный пробел
+   доступности, не оформительское решение. */
+.search:has(input:focus-visible) {
+  border-color: var(--accent);
 }
 
 .search .icon {
