@@ -7,6 +7,7 @@ import { IconSpriteDefs } from "./design-system/Icons/Icon";
 import { Toaster } from "./design-system/Toast/Toast";
 import { TooltipProvider } from "./design-system/Tooltip/Tooltip";
 import { CommandPalette } from "./design-system/CommandPalette/CommandPalette";
+import { DashboardPage } from "./pages/DashboardPage";
 import { WorkshopsPage } from "./pages/WorkshopsPage";
 import { SuppliersPage } from "./pages/SuppliersPage";
 import { MaterialsPage } from "./pages/MaterialsPage";
@@ -29,7 +30,8 @@ export function App() {
           <Route path="/design-system" element={<DesignSystemPage />} />
           <Route element={<RequireAuth />}>
             <Route element={<AppLayout />}>
-              <Route index element={<Navigate to="/workshops" replace />} />
+              <Route index element={<Navigate to="/dashboard" replace />} />
+              <Route path="/dashboard" element={<DashboardPage />} />
               <Route path="/workshops" element={<WorkshopsPage />} />
               <Route path="/suppliers" element={<SuppliersPage />} />
               <Route path="/materials" element={<MaterialsPage />} />

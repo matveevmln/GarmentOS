@@ -3,6 +3,7 @@ import { useAuth } from "../auth/AuthContext";
 import { Icon } from "../design-system/Icons/Icon";
 
 const NAV_ITEMS = [
+  { to: "/dashboard", label: "Главная", icon: "home" },
   { to: "/workshops", label: "Цеха", icon: "factory" },
   { to: "/suppliers", label: "Поставщики", icon: "users" },
   { to: "/materials", label: "Материалы", icon: "layers" },
