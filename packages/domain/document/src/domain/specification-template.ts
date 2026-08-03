@@ -82,20 +82,26 @@ export const DEFAULT_SPECIFICATION_TEMPLATE: SpecificationTemplateDefinition = {
   introParagraph:
     "1. В соответствии с Договором № {{contractNumber}} от {{contractDate}} г., {{contractorName}} (Далее - Исполнитель) " +
     "поставляет, а {{customerName}} (Далее - Заказчик) оплачивает следующие товары:",
-  // Ширины колонок в сумме равны CONTENT_WIDTH рендерера (612 - 45*2 = 522pt,
-  // размер страницы измерен по эталону 2026-08-03, не A4) — разница с
-  // прежней шириной A4 (505pt) добавлена в колонку "Товары" как наиболее
-  // естественно растяжимую (номер/ед.изм./размер/кол-во/цена/сумма —
-  // короткие фиксированные значения, их ширина в эталоне не менялась).
+  // Ширины колонок измерены напрямую по эталону (владелец проекта,
+  // 2026-08-03, вторая проверка): автоматическое детектирование вертикальных
+  // границ таблицы на скане (numpy, поиск тёмных столбцов пикселей в узкой
+  // строке заголовка, где перекос скана минимален) дало пропорции, сильно
+  // отличающиеся от первой (визуальной, ошибочной) оценки — колонка "Товары"
+  // в эталоне заметно уже (167pt), а "Кол-во" и особенно "Сумма (руб)" —
+  // заметно шире (63pt и 125pt), чем казалось на глаз. Сумма равна
+  // CONTENT_WIDTH рендерера (612 - 45*2 = 522pt).
+  // Заголовки "Ед.измер."/"Цена (руб)"/"Сумма (руб)" в эталоне — не перенос
+  // по ширине, а буквальный перенос строки внутри ячейки (\n) — так набран
+  // оригинал.
   table: {
     columns: [
-      { key: "index", label: "№", width: 25, align: "center" },
-      { key: "name", label: "Товары", width: 207, align: "left" },
-      { key: "unit", label: "Ед. измер.", width: 45, align: "center" },
-      { key: "size", label: "Размер", width: 55, align: "center" },
-      { key: "quantity", label: "Кол-во", width: 45, align: "right" },
-      { key: "unitPrice", label: "Цена (руб)", width: 65, align: "right" },
-      { key: "sum", label: "Сумма (руб)", width: 80, align: "right" },
+      { key: "index", label: "№", width: 24, align: "center" },
+      { key: "name", label: "Товары", width: 167, align: "left" },
+      { key: "unit", label: "Ед.\nизмер.", width: 48, align: "center" },
+      { key: "size", label: "Размер", width: 50, align: "center" },
+      { key: "quantity", label: "Кол-во", width: 63, align: "right" },
+      { key: "unitPrice", label: "Цена\n(руб)", width: 45, align: "right" },
+      { key: "sum", label: "Сумма\n(руб)", width: 125, align: "right" },
     ],
   },
   footerLines: [

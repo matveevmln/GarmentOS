@@ -123,10 +123,11 @@ function drawParagraph(
 
 function drawTable(ctx: DrawContext, template: SpecificationTemplateDefinition, data: SpecificationDocumentData): void {
   const { columns } = template.table;
-  // Высоты строк измерены по эталону (владелец проекта, 2026-08-03): ряд
-  // таблицы в оригинале ~14.6pt, а не 24pt — прежние значения были взяты "на
-  // глаз" ещё до того, как реальный документ был доступен для сверки.
-  const headerHeight = 22;
+  // Высоты строк измерены по эталону автоматическим детектированием
+  // горизонтальных границ (владелец проекта, 2026-08-03, вторая проверка):
+  // ряд данных ~15pt (подтверждено), шапка ~25.2pt (не 22pt — двухстрочные
+  // заголовки "Ед.\nизмер." и т.д. не помещаются в 22pt).
+  const headerHeight = 25;
   const rowHeight = 15;
   const fontSize = 9;
 
@@ -136,7 +137,10 @@ function drawTable(ctx: DrawContext, template: SpecificationTemplateDefinition, 
     const top = ctx.y;
     for (const column of columns) {
       ctx.page.drawRectangle({ x, y: top - headerHeight, width: column.width, height: headerHeight, borderWidth: 0.75, borderColor: rgb(0, 0, 0) });
-      const lines = wrapParagraphLines(ctx.boldFont, column.label, fontSize, column.width - 6);
+      // Заголовок может содержать буквальный перенос строки (эталон
+      // 2026-08-03: "Ед.\nизмер.", "Цена\n(руб)", "Сумма\n(руб)" набраны в
+      // оригинале как два ручных абзаца, не автоперенос по ширине).
+      const lines = column.label.split("\n").flatMap((part) => wrapParagraphLines(ctx.boldFont, part, fontSize, column.width - 6));
       let textY = top - 9;
       for (const line of lines) {
         const width = ctx.boldFont.widthOfTextAtSize(line, fontSize);

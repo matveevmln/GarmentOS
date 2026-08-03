@@ -15,6 +15,14 @@ import { WarehouseService } from "../warehouse/warehouse.service";
 import { ProductionRequestService } from "./production-request.service";
 import { formatRuAmount, formatRuDate, formatRuQuantity } from "./ru-number-format";
 
+// Стандартное условие оплаты компании (владелец проекта, 2026-08-03):
+// 70% предоплата после выставления счёта, 30% при отгрузке товара со склада
+// цеха — используется, только если у конкретного цеха (workshop.paymentTerms)
+// ещё не настроено собственное условие.
+const DEFAULT_PAYMENT_TERMS =
+  "70% стоимости товара, указанной в спецификации, оплачиваются Заказчиком в течение 3 (трёх) рабочих дней после " +
+  "получения счёта от Исполнителя. Остальные 30% оплачиваются Заказчиком в момент отгрузки Товара со склада Исполнителя.";
+
 // Форма {message, code} — распознаётся DomainExceptionFilter по duck typing
 // (apps/api/src/common/domain-exception.filter.ts), тот же паттерн, что
 // ProductionRequestParseError в ai-classifier.ts.
@@ -429,7 +437,11 @@ export class ProductionOrderOrchestrationService {
     // Условия оплаты/способ доставки/подписанты — постоянные поля,
     // настраиваются один раз в настройках цеха/компании (workshop.paymentTerms
     // и т.д., владелец проекта 2026-08-02) и подставляются автоматически в
-    // каждую сгенерированную спецификацию; пусто, только если ещё не заданы.
+    // каждую сгенерированную спецификацию. Если цех ещё не настроил своё
+    // условие — подставляется стандартная формула владельца проекта
+    // (2026-08-03: "70% предоплата / 30% при отгрузке" — эталонный документ),
+    // а не пустая строка: это реальное дефолтное правило компании, не
+    // придуманный текст.
     const data: SpecificationDocumentData = {
       fields: {
         contractNumber: workshop.contractNumber ?? "",
@@ -437,7 +449,7 @@ export class ProductionOrderOrchestrationService {
         customerName: company.legalName ?? company.name,
         contractorName: workshop.name,
         specNumber: String(specNumber),
-        paymentTerms: workshop.paymentTerms ?? "",
+        paymentTerms: workshop.paymentTerms ?? DEFAULT_PAYMENT_TERMS,
         deliveryDeadline: formatRuDate(order.dueDate),
         deliveryMethod: workshop.deliveryMethod ?? "",
         contractorSignerRole: workshop.signerRole ?? "",
