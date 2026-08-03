@@ -50,18 +50,13 @@ export class ProductionOrdersController {
     return productionOrderResponseSchema.parse(productionOrder);
   }
 
-  @RequirePermissions("contract_manufacturing.write")
-  @Post(":id/confirm")
-  async confirm(
-    @Param("id") id: string,
-    @CurrentUser() currentUser: AuthenticatedRequestUser,
-  ): Promise<ProductionOrderResponseDto> {
-    const productionOrder = await this.contractManufacturingService.confirmProductionOrder(
-      currentUser.companyId,
-      id,
-    );
-    return productionOrderResponseSchema.parse(productionOrder);
-  }
+  // Подтверждение заказа (":id/confirm") намеренно НЕ в этом контроллере —
+  // подтверждение обязано фиксировать Snapshot партии (owner, 2026-08-03 —
+  // «Паспорт партии»), а это требует CostingService из ai-production-assistant
+  // (ProductionOrderOrchestrationService.confirmProductionOrder), импорт
+  // которого сюда создал бы цикл модулей (тот модуль уже импортирует этот).
+  // Эндпоинт — production-order-specification.controller.ts, тот же
+  // "production-orders" префикс.
 
   // Приёмка партии на склад (Итерация 10) — доступна только когда цех
   // сообщил "готово к отгрузке" (assertCanReceive), склад выбирается тем, кто

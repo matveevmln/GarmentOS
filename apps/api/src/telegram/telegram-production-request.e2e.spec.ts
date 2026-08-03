@@ -428,7 +428,9 @@ describe("Telegram: текст → предпросмотр → подтверж
     await request(httpServer)
       .post("/v1/workshops")
       .set(...authHeader(accessToken))
-      .send({ name: "Цех Кнопки" })
+      // contractNumber обязателен для подтверждения заказа (Snapshot партии,
+      // owner 2026-08-03 — без него спецификация не может быть выпущена).
+      .send({ name: "Цех Кнопки", contractNumber: "Д-2" })
       .expect(201);
 
     const inviteResponse = await request(httpServer)

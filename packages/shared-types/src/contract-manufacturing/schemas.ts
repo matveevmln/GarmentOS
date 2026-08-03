@@ -118,6 +118,39 @@ export const productionOrderVariantResponseSchema = z.object({
   updatedAt: z.date(),
 });
 
+// Snapshot партии (владелец проекта, 2026-08-03 — «Паспорт партии»,
+// docs/PRODUCTION_BATCH_LIFECYCLE_ARCHITECTURE.md, раздел «Snapshot
+// партии»). Фиксируется один раз при подтверждении заказа (draft→placed) —
+// разбивка себестоимости по ценам материалов на тот момент + условия
+// оплаты/реквизиты договора/подписанты, которые тогда действовали в
+// карточке цеха. После фиксации не пересчитывается никогда, даже если
+// позже изменятся цены материалов, BOM модели или сама карточка цеха —
+// именно этот снимок, а не текущие карточки, служит источником данных для
+// каждой спецификации, сгенерированной по этому заказу (в т.ч. повторно
+// через месяц).
+export const productionOrderCostSnapshotSchema = z.object({
+  capturedAt: z.string(),
+  fabricCostPerUnit: z.number(),
+  trimCostPerUnit: z.number(),
+  packagingCostPerUnit: z.number(),
+  sewingCostPerUnit: z.number(),
+  otherCostPerUnit: z.number(),
+  actualCostPerUnit: z.number(),
+  deductionPerUnit: z.number(),
+  specificationPricePerUnit: z.number(),
+  materialsWithoutPriceHistory: z.array(z.string()),
+  paymentTerms: z.string(),
+  deliveryMethod: z.string(),
+  contractNumber: z.string(),
+  contractDate: z.string(),
+  contractorName: z.string(),
+  customerName: z.string(),
+  contractorSignerRole: z.string(),
+  contractorSignerName: z.string(),
+  customerSignerName: z.string(),
+});
+export type ProductionOrderCostSnapshot = z.infer<typeof productionOrderCostSnapshotSchema>;
+
 export const productionOrderResponseSchema = z.object({
   id: z.string().uuid(),
   companyId: z.string().uuid(),
@@ -130,6 +163,7 @@ export const productionOrderResponseSchema = z.object({
   status: productionOrderStatusSchema,
   dueDate: z.string().nullable(),
   receivedAt: z.date().nullable(),
+  costSnapshot: productionOrderCostSnapshotSchema.nullable(),
   createdBy: z.string().uuid().nullable(),
   createdAt: z.date(),
   updatedAt: z.date(),

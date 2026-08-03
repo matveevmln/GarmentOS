@@ -3,12 +3,14 @@ import type { BomItem } from "@garmentos/domain-bom";
 import type { ProductionOrder } from "@garmentos/domain-contract-manufacturing";
 import type { DocumentEntity, SpecificationDocumentData, SpecificationLineItem } from "@garmentos/domain-document";
 import { DomainError as WarehouseDomainError } from "@garmentos/domain-warehouse";
+import type { ProductionOrderCostSnapshot } from "@garmentos/shared-types";
 import { BomService } from "../bom/bom.service";
 import { CatalogService } from "../catalog/catalog.service";
 import { ContractManufacturingService } from "../contract-manufacturing/contract-manufacturing.service";
 import { DocumentService } from "../document/document.service";
 import { IdentityService } from "../identity/identity.service";
 import { ProcurementService } from "../procurement/procurement.service";
+import { CostingService } from "../reporting/costing.service";
 import type { TelegramClient } from "../telegram/telegram-client";
 import { TELEGRAM_CLIENT } from "../telegram/telegram.tokens";
 import { WarehouseService } from "../warehouse/warehouse.service";
@@ -94,6 +96,7 @@ export class ProductionOrderOrchestrationService {
     private readonly identityService: IdentityService,
     private readonly procurementService: ProcurementService,
     private readonly warehouseService: WarehouseService,
+    private readonly costingService: CostingService,
     @Inject(TELEGRAM_CLIENT) private readonly telegramClient: TelegramClient,
   ) {}
 
@@ -367,10 +370,82 @@ export class ProductionOrderOrchestrationService {
     this.pendingByChannel.delete(channelKey);
 
     const draft = await this.createFromText(pending.companyId, userId, pending.workshopId, pending.text);
-    const order = await this.contractManufacturingService.confirmProductionOrder(pending.companyId, draft.id);
+    const order = await this.confirmProductionOrder(pending.companyId, draft.id);
     await this.consumeMaterialsForOrder(pending.companyId, order);
     const document = await this.generateAndSendSpecification(pending.companyId, order.id, userId);
     return { order, document };
+  }
+
+  // Подтверждение заказа (draft→placed) + фиксация Snapshot партии одним
+  // шагом (владелец проекта, 2026-08-03 — «Паспорт партии»,
+  // docs/PRODUCTION_BATCH_LIFECYCLE_ARCHITECTURE.md, раздел «Snapshot
+  // партии»): себестоимость по текущим закупочным ценам, условия оплаты и
+  // реквизиты договора цеха фиксируются РОВНО в этот момент и больше
+  // никогда не пересчитываются — даже если позже изменятся цены материалов
+  // или карточка цеха. Это единственный путь подтверждения заказа в API
+  // (production-orders.controller.ts вызывает этот метод, не
+  // ContractManufacturingService.confirmProductionOrder напрямую) — иначе
+  // часть заказов осталась бы без снимка.
+  async confirmProductionOrder(companyId: string, productionOrderId: string): Promise<ProductionOrder> {
+    const draft = await this.contractManufacturingService.findProductionOrderById(companyId, productionOrderId);
+    if (!draft) {
+      throw new ProductionRequestOrchestrationError(
+        `Заказ пошива ${productionOrderId} не найден`,
+        "PRODUCTION_ORDER_NOT_FOUND",
+      );
+    }
+    const [workshop, company] = await Promise.all([
+      this.contractManufacturingService.findWorkshopById(companyId, draft.workshopId),
+      this.identityService.findCompanyById(companyId),
+    ]);
+    if (!workshop) {
+      throw new ProductionRequestOrchestrationError(`Цех ${draft.workshopId} не найден`, "WORKSHOP_NOT_FOUND");
+    }
+    if (!company) {
+      throw new ProductionRequestOrchestrationError(`Компания ${companyId} не найдена`, "COMPANY_NOT_FOUND");
+    }
+    // Основание генерации (owner, 2026-08-03 — «Паспорт партии», раздел 5):
+    // без номера договора спецификация физически не может быть выпущена
+    // ("Спецификация №N к договору № ___") — а раз он фиксируется в Snapshot
+    // именно сейчас и больше не меняется, проверить его нужно ДО перевода
+    // заказа в "placed", а не после: иначе при отказе заказ навсегда
+    // остаётся подтверждённым, но без снимка (assertCanConfirm разрешает
+    // подтверждение только из "draft" — повторно не подтвердить).
+    if (!workshop.contractNumber) {
+      throw new ProductionRequestOrchestrationError(
+        `У цеха "${workshop.name}" не указан номер договора — заполните его в карточке цеха перед подтверждением заказа`,
+        "WORKSHOP_CONTRACT_NUMBER_MISSING",
+      );
+    }
+
+    // computeSpecificationPricing тоже валидирует "основание генерации" —
+    // бросает 404, если у модели нет утверждённого BOM — тоже до перевода
+    // статуса, по той же причине.
+    const pricing = await this.costingService.computeSpecificationPricing(companyId, draft.productId);
+    const snapshot: ProductionOrderCostSnapshot = {
+      capturedAt: new Date().toISOString(),
+      fabricCostPerUnit: pricing.fabricCostPerUnit,
+      trimCostPerUnit: pricing.trimCostPerUnit,
+      packagingCostPerUnit: pricing.packagingCostPerUnit,
+      sewingCostPerUnit: pricing.sewingCostPerUnit,
+      otherCostPerUnit: pricing.otherCostPerUnit,
+      actualCostPerUnit: pricing.actualCostPerUnit,
+      deductionPerUnit: pricing.deductionPerUnit,
+      specificationPricePerUnit: pricing.specificationPricePerUnit,
+      materialsWithoutPriceHistory: pricing.materialsWithoutPriceHistory,
+      paymentTerms: workshop.paymentTerms ?? DEFAULT_PAYMENT_TERMS,
+      deliveryMethod: workshop.deliveryMethod ?? "",
+      contractNumber: workshop.contractNumber,
+      contractDate: workshop.contractDate ?? "",
+      contractorName: workshop.name,
+      customerName: company.legalName ?? company.name,
+      contractorSignerRole: workshop.signerRole ?? "",
+      contractorSignerName: workshop.signerName ?? "",
+      customerSignerName: company.signerName ?? "",
+    };
+
+    const order = await this.contractManufacturingService.confirmProductionOrder(companyId, productionOrderId);
+    return this.contractManufacturingService.updateProductionOrderCostSnapshot(order.id, snapshot);
   }
 
   async generateAndSendSpecification(
@@ -434,27 +509,30 @@ export class ProductionOrderOrchestrationService {
     // нумерация и даты", требование владельца проекта 2026-07-26).
     const specNumber = await this.contractManufacturingService.reserveNextSpecificationNumber(workshop.id);
 
-    // Условия оплаты/способ доставки/подписанты — постоянные поля,
-    // настраиваются один раз в настройках цеха/компании (workshop.paymentTerms
-    // и т.д., владелец проекта 2026-08-02) и подставляются автоматически в
-    // каждую сгенерированную спецификацию. Если цех ещё не настроил своё
-    // условие — подставляется стандартная формула владельца проекта
-    // (2026-08-03: "70% предоплата / 30% при отгрузке" — эталонный документ),
-    // а не пустая строка: это реальное дефолтное правило компании, не
-    // придуманный текст.
+    // Условия оплаты/способ доставки/реквизиты договора/подписанты
+    // подставляются из Snapshot партии (owner, 2026-08-03 — «Паспорт
+    // партии»), зафиксированного при подтверждении заказа
+    // (confirmProductionOrder выше) — не из живой карточки цеха/компании.
+    // Это гарантирует, что спецификация №2, сгенерированная повторно через
+    // месяц для того же заказа, покажет ТЕ ЖЕ условия, что и спецификация
+    // №1, даже если цех успел сменить условия оплаты или реквизиты договора
+    // в своих настройках. order.costSnapshot === null только у заказов,
+    // подтверждённых до появления этого механизма — для них сохраняется
+    // прежнее поведение (живые данные), а не отказ в генерации.
+    const snapshot = order.costSnapshot as ProductionOrderCostSnapshot | null;
     const data: SpecificationDocumentData = {
       fields: {
-        contractNumber: workshop.contractNumber ?? "",
-        contractDate: formatRuDate(workshop.contractDate),
-        customerName: company.legalName ?? company.name,
-        contractorName: workshop.name,
+        contractNumber: snapshot?.contractNumber ?? workshop.contractNumber ?? "",
+        contractDate: formatRuDate(snapshot?.contractDate ?? workshop.contractDate),
+        customerName: snapshot?.customerName ?? company.legalName ?? company.name,
+        contractorName: snapshot?.contractorName ?? workshop.name,
         specNumber: String(specNumber),
-        paymentTerms: workshop.paymentTerms ?? DEFAULT_PAYMENT_TERMS,
+        paymentTerms: snapshot?.paymentTerms ?? workshop.paymentTerms ?? DEFAULT_PAYMENT_TERMS,
         deliveryDeadline: formatRuDate(order.dueDate),
-        deliveryMethod: workshop.deliveryMethod ?? "",
-        contractorSignerRole: workshop.signerRole ?? "",
-        contractorSignerName: workshop.signerName ?? "",
-        customerSignerName: company.signerName ?? "",
+        deliveryMethod: snapshot?.deliveryMethod ?? workshop.deliveryMethod ?? "",
+        contractorSignerRole: snapshot?.contractorSignerRole ?? workshop.signerRole ?? "",
+        contractorSignerName: snapshot?.contractorSignerName ?? workshop.signerName ?? "",
+        customerSignerName: snapshot?.customerSignerName ?? company.signerName ?? "",
       },
       items,
       totals: { quantity: formatRuQuantity(totalQuantity), sum: formatRuAmount(totalSum) },

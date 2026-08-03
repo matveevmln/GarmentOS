@@ -29,6 +29,13 @@ export interface ProductionOrder {
   status: ProductionOrderStatus;
   dueDate: string | null;
   receivedAt: Date | null;
+  // Snapshot партии, зафиксированный при подтверждении (см. миграцию
+  // cost_snapshot) — намеренно нетипизирован в домене: точную форму
+  // (ProductionOrderCostSnapshot) знает только API-слой, который её же и
+  // заполняет через CostingService. Домен Contract Manufacturing не должен
+  // знать о ценах материалов/себестоимости — это чужая ответственность
+  // (docs/PRINCIPLES.md, принцип 2).
+  costSnapshot: Record<string, unknown> | null;
   createdBy: string | null;
   createdAt: Date;
   updatedAt: Date;

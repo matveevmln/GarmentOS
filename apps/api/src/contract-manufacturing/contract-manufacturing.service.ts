@@ -105,6 +105,16 @@ export class ContractManufacturingService {
     return this.productionOrders.findById(companyId, id);
   }
 
+  // Фиксирует Snapshot партии (см. миграцию cost_snapshot) — вызывается
+  // ровно один раз оркестрацией сразу после подтверждения заказа
+  // (production-order-orchestration.service.ts, ProductionOrderOrchestrationService.confirmProductionOrder).
+  async updateProductionOrderCostSnapshot(
+    id: string,
+    costSnapshot: Record<string, unknown>,
+  ): Promise<ProductionOrder> {
+    return this.productionOrders.updateCostSnapshot(id, costSnapshot);
+  }
+
   async listProductionOrders(companyId: string): Promise<ProductionOrder[]> {
     return this.productionOrders.listByCompany(companyId);
   }

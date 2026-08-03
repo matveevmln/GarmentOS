@@ -66,6 +66,7 @@ function toProductionOrder(row: ProductionOrderRow, variants: ProductionOrderVar
     status: row.status,
     dueDate: row.dueDate,
     receivedAt: row.receivedAt,
+    costSnapshot: row.costSnapshot as Record<string, unknown> | null,
     createdBy: row.createdBy,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
@@ -185,6 +186,22 @@ export class DrizzleProductionOrderRepository implements ProductionOrderReposito
     const [orderRow] = await this.db
       .update(productionOrders)
       .set({ status, updatedAt: new Date() })
+      .where(eq(productionOrders.id, id))
+      .returning();
+    if (!orderRow) throw new Error(`UPDATE production_orders не нашёл строку id=${id}`);
+
+    const variantRows = await this.db
+      .select()
+      .from(productionOrderVariants)
+      .where(eq(productionOrderVariants.productionOrderId, orderRow.id));
+
+    return toProductionOrder(orderRow, variantRows);
+  }
+
+  async updateCostSnapshot(id: string, costSnapshot: Record<string, unknown>): Promise<ProductionOrder> {
+    const [orderRow] = await this.db
+      .update(productionOrders)
+      .set({ costSnapshot, updatedAt: new Date() })
       .where(eq(productionOrders.id, id))
       .returning();
     if (!orderRow) throw new Error(`UPDATE production_orders не нашёл строку id=${id}`);

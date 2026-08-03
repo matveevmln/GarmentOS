@@ -13,5 +13,9 @@ import { CostingService } from "./costing.service";
   imports: [CatalogModule, BomModule],
   controllers: [AttentionController, CostingController],
   providers: [AttentionService, CostingService],
+  // CostingService нужен ProductionOrderOrchestrationService для фиксации
+  // Snapshot партии при подтверждении заказа (owner, 2026-08-03 — «Паспорт
+  // партии», docs/PRODUCTION_BATCH_LIFECYCLE_ARCHITECTURE.md).
+  exports: [CostingService],
 })
 export class ReportingModule {}

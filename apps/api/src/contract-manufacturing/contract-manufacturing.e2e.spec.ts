@@ -125,7 +125,9 @@ describe("Contract Manufacturing API (e2e)", () => {
     const workshopResponse = await request(httpServer)
       .post("/v1/workshops")
       .set(...authHeader(accessToken))
-      .send({ name: "Цех №1 (Иваново)", specialization: "трикотаж" })
+      // contractNumber обязателен для подтверждения заказа (Snapshot партии,
+      // owner 2026-08-03 — без него спецификация не может быть выпущена).
+      .send({ name: "Цех №1 (Иваново)", specialization: "трикотаж", contractNumber: "Д-1" })
       .expect(201);
     const workshop = workshopResponse.body as WorkshopResponseDto;
 

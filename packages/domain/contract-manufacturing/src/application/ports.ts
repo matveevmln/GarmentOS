@@ -60,6 +60,11 @@ export interface ProductionOrderRepository {
   // одной атомарной операцией, в отличие от updateStatus, который не знает
   // о receivedAt.
   markReceived(id: string): Promise<ProductionOrder>;
+  // Фиксирует Snapshot партии (см. production-order.ts, поле costSnapshot) —
+  // вызывается ровно один раз, сразу после подтверждения заказа
+  // (production-order-orchestration.service.ts). Перезаписывать существующий
+  // снимок не предполагается: он неизменяем по определению.
+  updateCostSnapshot(id: string, costSnapshot: Record<string, unknown>): Promise<ProductionOrder>;
   // Нужен для обработки входящего статус-обновления от цеха через Telegram
   // (Итерация 7) — сообщение не ссылается на конкретный productionOrderId
   // (простой текстовый ответ, не структурированная команда), поэтому

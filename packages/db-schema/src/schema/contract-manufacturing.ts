@@ -1,4 +1,4 @@
-import { boolean, date, index, integer, numeric, pgEnum, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { boolean, date, index, integer, jsonb, numeric, pgEnum, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 import { auditColumns, id, softDelete } from "./_shared";
 import { companies, users } from "./identity";
 import { products, productVariants } from "./catalog";
@@ -87,6 +87,18 @@ export const productionOrders = pgTable(
     // Фактическая дата завершения — без неё нельзя сравнить план (due_date) и
     // факт для рейтинга цеха и алертов о просрочке (USER_JOURNEY_AUDIT.md, пробел №5).
     receivedAt: timestamp("received_at", { withTimezone: true }),
+    // Snapshot партии (владелец проекта, 2026-08-03 — "Паспорт партии",
+    // docs/PRODUCTION_BATCH_LIFECYCLE_ARCHITECTURE.md, раздел "Snapshot
+    // партии"). Фиксируется ОДИН раз при подтверждении заказа (draft→placed):
+    // разбивка себестоимости на момент подтверждения (ткань/фурнитура/
+    // упаковка/пошив/прочее по текущим закупочным ценам), условия оплаты,
+    // реквизиты договора и подписантов, которые тогда действовали. После
+    // фиксации НИКОГДА не пересчитывается — даже если позже изменятся цены
+    // материалов, BOM модели или карточка цеха (ProductionOrderCostSnapshot,
+    // @garmentos/shared-types). null у заказов, подтверждённых до появления
+    // этого механизма — для них спецификация продолжает считать вживую
+    // (обратная совместимость, production-order-orchestration.service.ts).
+    costSnapshot: jsonb("cost_snapshot"),
     createdBy: uuid("created_by").references(() => users.id),
     ...auditColumns,
   },
