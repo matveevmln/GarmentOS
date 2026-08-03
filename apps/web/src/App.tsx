@@ -3,7 +3,8 @@ import { AuthProvider } from "./auth/AuthContext";
 import { LoginPage } from "./auth/LoginPage";
 import { RequireAuth } from "./auth/RequireAuth";
 import { AppLayout } from "./layout/AppLayout";
-import { IconSpriteDefs } from "./components/Icon";
+import { IconSpriteDefs } from "./design-system/Icons/Icon";
+import { Toaster } from "./design-system/Toast/Toast";
 import { WorkshopsPage } from "./pages/WorkshopsPage";
 import { SuppliersPage } from "./pages/SuppliersPage";
 import { MaterialsPage } from "./pages/MaterialsPage";
@@ -12,13 +13,16 @@ import { ProductsPage } from "./pages/ProductsPage";
 import { ProductDetailPage } from "./pages/ProductDetailPage";
 import { PurchaseOrdersPage } from "./pages/PurchaseOrdersPage";
 import { ProductionOrdersPage } from "./pages/ProductionOrdersPage";
+import { DesignSystemPage } from "./pages/DesignSystemPage";
 
 export function App() {
   return (
     <AuthProvider>
       <IconSpriteDefs />
+      <Toaster />
       <Routes>
         <Route path="/login" element={<LoginPage />} />
+        <Route path="/design-system" element={<DesignSystemPage />} />
         <Route element={<RequireAuth />}>
           <Route element={<AppLayout />}>
             <Route index element={<Navigate to="/workshops" replace />} />

@@ -1,6 +1,6 @@
 import { NavLink, Outlet } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
-import { Icon } from "../components/Icon";
+import { Icon } from "../design-system/Icons/Icon";
 
 const NAV_ITEMS = [
   { to: "/workshops", label: "Цеха", icon: "factory" },

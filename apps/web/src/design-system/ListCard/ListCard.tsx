@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Icon } from "./Icon";
+import { Icon } from "../Icons/Icon";
 
 export interface ListCardTone {
   icon: string;

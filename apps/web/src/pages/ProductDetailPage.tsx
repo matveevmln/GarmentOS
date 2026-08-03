@@ -13,8 +13,8 @@ import {
 } from "@garmentos/shared-types";
 import { apiRequest, ApiError } from "../api/client";
 import { useCrudResource } from "../api/useCrudResource";
-import { ListCard } from "../components/ListCard";
-import { StatusBadge } from "../components/StatusBadge";
+import { ListCard } from "../design-system/ListCard/ListCard";
+import { StatusBadge } from "../design-system/StatusBadge/StatusBadge";
 
 export function ProductDetailPage() {
   const { id } = useParams<{ id: string }>();

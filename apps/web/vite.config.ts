@@ -1,9 +1,13 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import tailwindcss from "@tailwindcss/vite";
 
 // GarmentOS web (Итерация 11, docs/ROADMAP.md) — SPA, без SSR (docs/TECH_STACK.md).
+// Tailwind CSS — решено docs/UI_FOUNDATION.md (2026-08-02): инженерный
+// фундамент под shadcn/ui-паттерн компонентов, не источник фирменного вида —
+// см. src/design-system/tokens.css, где переопределяются токены на наши.
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), tailwindcss()],
   server: {
     port: 5173,
   },

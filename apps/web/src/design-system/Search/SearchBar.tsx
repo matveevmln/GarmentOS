@@ -1,4 +1,4 @@
-import { Icon } from "./Icon";
+import { Icon } from "../Icons/Icon";
 
 // Строка поиска — дословно по классу .search из утверждённого прототипа.
 interface SearchBarProps {

@@ -3,8 +3,8 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { createWarehouseSchema, type CreateWarehouseDto, type WarehouseResponseDto } from "@garmentos/shared-types";
 import { useCrudResource } from "../api/useCrudResource";
-import { ListCard } from "../components/ListCard";
-import { SearchBar } from "../components/SearchBar";
+import { ListCard } from "../design-system/ListCard/ListCard";
+import { SearchBar } from "../design-system/Search/SearchBar";
 import { ApiError } from "../api/client";
 
 export function WarehousesPage() {

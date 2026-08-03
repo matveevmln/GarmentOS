@@ -1,0 +1,85 @@
+/* docs/UI_FOUNDATION.md — Tailwind как инженерный фундамент, не источник
+   вида: здесь Tailwind-токены (color, radius, shadow) указывают
+   на уже утверждённые фирменные значения GarmentOS (перенесены дословно из
+   apps/prototype/index.html), не на дефолтную Tailwind-палитру. Любой
+   компонент shadcn/ui, который использует стандартные семантические имена
+   (bg-primary, text-muted-foreground, rounded-lg, shadow-card) автоматически
+   получает фирменный вид без точечных переопределений — это и есть смысл
+   "используй реализацию shadcn, не внешний вид". */
+
+@import "tailwindcss";
+
+@theme {
+  /* ---- фирменная палитра (см. apps/web/src/styles.css :root — тот же
+     источник истины; со временем styles.css будет полностью вытеснен
+     этим файлом по мере переноса экранов, см. docs/WEB_DESIGN_SYSTEM.md) ---- */
+  --color-background: #fafaf9;
+  --color-foreground: #18181b;
+
+  --color-card: #ffffff;
+  --color-card-foreground: #18181b;
+
+  --color-popover: #ffffff;
+  --color-popover-foreground: #18181b;
+
+  --color-primary: #d7263d;
+  --color-primary-foreground: #ffffff;
+
+  --color-secondary: #f3f2ef;
+  --color-secondary-foreground: #18181b;
+
+  --color-muted: #f3f2ef;
+  --color-muted-foreground: #75757e;
+
+  --color-accent: #fce9eb;
+  --color-accent-foreground: #d7263d;
+
+  --color-destructive: #e2543a;
+  --color-destructive-foreground: #ffffff;
+
+  --color-success: #16a34a;
+  --color-success-tint: #e8f6ec;
+  --color-warning: #d97706;
+  --color-warning-tint: #fdf1e1;
+  --color-info: #2563eb;
+  --color-info-tint: #eaf0fe;
+
+  --color-border: #eceae5;
+  --color-input: #eceae5;
+  --color-ring: rgba(215, 38, 61, 0.16);
+
+  --color-muted-2: #a0a0a8;
+
+  /* ---- радиусы — дословно из прототипа (r-lg/r-md/r-sm) ---- */
+  --radius-sm: 11px;
+  --radius-md: 16px;
+  --radius-lg: 22px;
+  --radius-xl: 22px;
+
+  /* ---- тень карточки — дословно из прототипа (--shadow-card) ---- */
+  --shadow-card: 0 1px 2px rgba(20, 20, 25, 0.04), 0 8px 24px -12px rgba(20, 20, 25, 0.1);
+
+  /* ---- шрифт — тот же системный стек, без кастомного webfont ---- */
+  --font-sans:
+    -apple-system, "SF Pro Text", "Segoe UI Variable", "Segoe UI", Roboto, Arial, sans-serif;
+
+  /* ---- типографическая шкала — единое место, не разбросано по компонентам ---- */
+  --text-caption: 0.72rem;
+  --text-body-sm: 0.85rem;
+  --text-body: 0.95rem;
+  --text-title: 1.05rem;
+  --text-heading: 1.4rem;
+  --text-display: 1.75rem;
+
+  /* ---- z-index — единая шкала слоёв, чтобы нижняя навигация/модалка/
+     тост/поповер никогда не спорили за порядок наложения по случайности ---- */
+  --z-index-nav: 30;
+  --z-index-overlay: 50;
+  --z-index-popover: 60;
+  --z-index-toast: 70;
+
+  /* ---- длительность анимаций — одна шкала на весь интерфейс ---- */
+  --animate-duration-fast: 120ms;
+  --animate-duration-base: 180ms;
+  --animate-duration-slow: 260ms;
+}

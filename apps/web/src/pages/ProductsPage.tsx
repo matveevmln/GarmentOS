@@ -4,8 +4,8 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useNavigate } from "react-router-dom";
 import { createProductSchema, type CreateProductDto, type ProductResponseDto } from "@garmentos/shared-types";
 import { useCrudResource } from "../api/useCrudResource";
-import { ModelGrid } from "../components/ModelGrid";
-import { SearchBar } from "../components/SearchBar";
+import { ModelGrid } from "../design-system/ModelCard/ModelGrid";
+import { SearchBar } from "../design-system/Search/SearchBar";
 import { ApiError } from "../api/client";
 
 export function ProductsPage() {

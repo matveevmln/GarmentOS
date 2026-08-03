@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Icon } from "./Icon";
+import { Icon } from "../Icons/Icon";
 
 // Сетка карточек-моделей — дословно по классу .model-grid/.model-card из
 // утверждённого прототипа (фото-плейсхолдер + название + подпись), не

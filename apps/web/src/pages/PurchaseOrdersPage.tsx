@@ -8,8 +8,8 @@ import {
 } from "@garmentos/shared-types";
 import { apiRequest, ApiError } from "../api/client";
 import { useCrudResource } from "../api/useCrudResource";
-import { FilterTabs, type FilterOption } from "../components/FilterTabs";
-import { StatusBadge } from "../components/StatusBadge";
+import { FilterTabs, type FilterOption } from "../design-system/Tabs/FilterTabs";
+import { StatusBadge } from "../design-system/StatusBadge/StatusBadge";
 
 const STATUS_FILTERS: FilterOption<"all" | "draft" | "sent" | "received">[] = [
   { value: "all", label: "Все" },

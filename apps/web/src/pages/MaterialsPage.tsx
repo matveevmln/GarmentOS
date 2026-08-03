@@ -3,9 +3,9 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { createMaterialSchema, type CreateMaterialDto, type MaterialResponseDto } from "@garmentos/shared-types";
 import { useCrudResource } from "../api/useCrudResource";
-import { ListCard } from "../components/ListCard";
-import { FilterTabs, type FilterOption } from "../components/FilterTabs";
-import { SearchBar } from "../components/SearchBar";
+import { ListCard } from "../design-system/ListCard/ListCard";
+import { FilterTabs, type FilterOption } from "../design-system/Tabs/FilterTabs";
+import { SearchBar } from "../design-system/Search/SearchBar";
 import { ApiError } from "../api/client";
 
 const MATERIAL_TYPES = [

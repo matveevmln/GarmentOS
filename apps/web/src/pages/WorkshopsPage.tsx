@@ -3,10 +3,10 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { createWorkshopSchema, type CreateWorkshopDto, type WorkshopResponseDto } from "@garmentos/shared-types";
 import { useCrudResource } from "../api/useCrudResource";
-import { ListCard } from "../components/ListCard";
-import { FilterTabs, type FilterOption } from "../components/FilterTabs";
-import { SearchBar } from "../components/SearchBar";
-import { StatusBadge } from "../components/StatusBadge";
+import { ListCard } from "../design-system/ListCard/ListCard";
+import { FilterTabs, type FilterOption } from "../design-system/Tabs/FilterTabs";
+import { SearchBar } from "../design-system/Search/SearchBar";
+import { StatusBadge } from "../design-system/StatusBadge/StatusBadge";
 import { ApiError } from "../api/client";
 
 const STATUS_FILTERS: FilterOption<"all" | "draft" | "active" | "archived">[] = [
