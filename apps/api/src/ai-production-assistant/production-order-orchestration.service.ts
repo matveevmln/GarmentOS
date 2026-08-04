@@ -1,9 +1,11 @@
 import { Inject, Injectable, Logger } from "@nestjs/common";
 import type { BomItem } from "@garmentos/domain-bom";
 import type { ProductionOrder } from "@garmentos/domain-contract-manufacturing";
+import type { AuditSource } from "@garmentos/domain-audit";
 import type { DocumentEntity, SpecificationDocumentData, SpecificationLineItem } from "@garmentos/domain-document";
 import { DomainError as WarehouseDomainError } from "@garmentos/domain-warehouse";
 import type { ProductionOrderCostSnapshot } from "@garmentos/shared-types";
+import { AuditService } from "../audit/audit.service";
 import { BomService } from "../bom/bom.service";
 import { CatalogService } from "../catalog/catalog.service";
 import { ContractManufacturingService } from "../contract-manufacturing/contract-manufacturing.service";
@@ -97,6 +99,7 @@ export class ProductionOrderOrchestrationService {
     private readonly procurementService: ProcurementService,
     private readonly warehouseService: WarehouseService,
     private readonly costingService: CostingService,
+    private readonly auditService: AuditService,
     @Inject(TELEGRAM_CLIENT) private readonly telegramClient: TelegramClient,
   ) {}
 
@@ -370,7 +373,7 @@ export class ProductionOrderOrchestrationService {
     this.pendingByChannel.delete(channelKey);
 
     const draft = await this.createFromText(pending.companyId, userId, pending.workshopId, pending.text);
-    const order = await this.confirmProductionOrder(pending.companyId, draft.id);
+    const order = await this.confirmProductionOrder(pending.companyId, draft.id, userId, "telegram");
     await this.consumeMaterialsForOrder(pending.companyId, order);
     const document = await this.generateAndSendSpecification(pending.companyId, order.id, userId);
     return { order, document };
@@ -386,7 +389,12 @@ export class ProductionOrderOrchestrationService {
   // (production-orders.controller.ts вызывает этот метод, не
   // ContractManufacturingService.confirmProductionOrder напрямую) — иначе
   // часть заказов осталась бы без снимка.
-  async confirmProductionOrder(companyId: string, productionOrderId: string): Promise<ProductionOrder> {
+  async confirmProductionOrder(
+    companyId: string,
+    productionOrderId: string,
+    userId: string | null,
+    source: AuditSource = "http_api",
+  ): Promise<ProductionOrder> {
     const draft = await this.contractManufacturingService.findProductionOrderById(companyId, productionOrderId);
     if (!draft) {
       throw new ProductionRequestOrchestrationError(
@@ -445,7 +453,21 @@ export class ProductionOrderOrchestrationService {
     };
 
     const order = await this.contractManufacturingService.confirmProductionOrder(companyId, productionOrderId);
-    return this.contractManufacturingService.updateProductionOrderCostSnapshot(order.id, snapshot);
+    const confirmed = await this.contractManufacturingService.updateProductionOrderCostSnapshot(order.id, snapshot);
+
+    // Аудит партии (владелец проекта, 2026-08-04: "кто изменил партию, когда,
+    // что изменил, старое/новое значение" — момент подтверждения заказа —
+    // самое важное событие в жизни партии, здесь фиксируется Snapshot
+    // себестоимости, который больше никогда не пересчитывается).
+    await this.auditService.record(companyId, userId, source, {
+      entityType: "production_order",
+      entityId: confirmed.id,
+      action: "production_order.confirmed",
+      beforeJson: { status: draft.status },
+      afterJson: { status: confirmed.status, costSnapshot: snapshot },
+    });
+
+    return confirmed;
   }
 
   async generateAndSendSpecification(
@@ -539,6 +561,13 @@ export class ProductionOrderOrchestrationService {
     };
 
     const result = await this.documentService.generateSpecification(companyId, productionOrderId, uploadedBy, data);
+
+    await this.auditService.record(companyId, uploadedBy, "http_api", {
+      entityType: "production_order",
+      entityId: productionOrderId,
+      action: "document.specification_generated",
+      afterJson: { documentId: result.document.id, specNumber: data.fields.specNumber },
+    });
 
     if (workshop.telegramChatId) {
       await this.telegramClient.sendDocument(

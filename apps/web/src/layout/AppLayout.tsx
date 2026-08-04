@@ -11,6 +11,10 @@ const NAV_ITEMS = [
   { to: "/products", label: "Модели", icon: "box" },
   { to: "/purchase-orders", label: "Закупки", icon: "cash" },
   { to: "/production-orders", label: "Заказы пошива", icon: "scissors" },
+  // Pilot v1 (владелец проекта, 2026-08-04, docs/MASTER_BACKLOG.md, раздел
+  // 0.5) — пункт меню, не постоянная часть навигации; убрать после
+  // завершения пилота (docs/PILOT_LOG.md).
+  { to: "/pilot", label: "Pilot v1", icon: "check" },
 ];
 
 export function AppLayout() {

@@ -110,6 +110,29 @@ export const batchPassportTimelineEventSchema = z.object({
 });
 export type BatchPassportTimelineEventDto = z.infer<typeof batchPassportTimelineEventSchema>;
 
+// Pilot Dashboard (владелец проекта, 2026-08-04) — «именно этот экран
+// позволит быстро понять, что система вообще работает штатно» во время
+// Pilot v1 (docs/MASTER_BACKLOG.md, раздел 0.5). Не карточка одной партии
+// (это batchPassportResponseSchema выше) — сводка по всей компании на
+// сегодня, поверх Contract Manufacturing + Document Engine + Railway.
+//
+// errorsToday и lastBackupAt намеренно nullable без числового значения по
+// умолчанию: мониторинг ошибок (Sentry/аналог) и маркер последнего бэкапа
+// сознательно не подключены на пилоте (infra/PRODUCTION_CHECKLIST.md, п.5;
+// infra/backup/README.md) — честное отсутствие данных, а не выдуманный 0.
+export const pilotDashboardResponseSchema = z.object({
+  productionOrdersToday: z.number().int(),
+  inProgressCount: z.number().int(),
+  overdueCount: z.number().int(),
+  errorsToday: z.number().int().nullable(),
+  lastSpecificationNumber: z.number().int().nullable(),
+  lastSpecificationAt: z.date().nullable(),
+  lastSnapshotAt: z.date().nullable(),
+  lastBackupAt: z.date().nullable(),
+  lastDeployCommit: z.string().nullable(),
+});
+export type PilotDashboardResponseDto = z.infer<typeof pilotDashboardResponseSchema>;
+
 export const batchPassportResponseSchema = z.object({
   id: z.string().uuid(),
   status: z.string(),

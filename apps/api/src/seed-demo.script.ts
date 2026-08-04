@@ -524,7 +524,7 @@ async function run(): Promise<void> {
         // (owner, 2026-08-03 — «Паспорт партии»), иначе демо-компания не
         // показывала бы главную новую фичу («Экономика партии») ни на одном
         // заказе.
-        await productionOrchestration.confirmProductionOrder(company.id, draft.id);
+        await productionOrchestration.confirmProductionOrder(company.id, draft.id, owner.id);
         record.status = "placed";
         if (target === "placed") continue;
 

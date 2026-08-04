@@ -7,6 +7,7 @@ import type { INestApplication } from "@nestjs/common";
 import { VersioningType } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import {
+  auditLog,
   bomItems,
   boms,
   companies,
@@ -105,6 +106,7 @@ describe("Вертикальный сценарий Итерации 7 (e2e): т
           await db.delete(productVariants).where(eq(productVariants.productId, product.id));
         }
         await db.delete(products).where(eq(products.companyId, company.id));
+        await db.delete(auditLog).where(eq(auditLog.companyId, company.id));
         const companyUsers = await db.select().from(users).where(eq(users.companyId, company.id));
         for (const user of companyUsers) {
           await db.delete(refreshTokens).where(eq(refreshTokens.userId, user.id));

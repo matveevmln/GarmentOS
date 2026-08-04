@@ -21,7 +21,11 @@ export class ProductionOrderSpecificationController {
     @Param("id") id: string,
     @CurrentUser() currentUser: AuthenticatedRequestUser,
   ): Promise<ProductionOrderResponseDto> {
-    const productionOrder = await this.orchestrationService.confirmProductionOrder(currentUser.companyId, id);
+    const productionOrder = await this.orchestrationService.confirmProductionOrder(
+      currentUser.companyId,
+      id,
+      currentUser.id,
+    );
     return productionOrderResponseSchema.parse(productionOrder);
   }
 

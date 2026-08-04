@@ -319,6 +319,26 @@ describe("Telegram: текст → предпросмотр → подтверж
     const specLinks = await db.select().from(documentLinks).where(eq(documentLinks.entityId, orderId ?? ""));
     expect(specLinks).toHaveLength(1);
 
+    // Аудит (владелец проекта, 2026-08-04: "кто изменил партию, когда, что
+    // изменил, старое/новое значение") — подтверждение через Telegram
+    // происходит от имени компании, не конкретного человека (userId=null —
+    // тот же принцип, что и остальной обмен с компанией через общий чат),
+    // но источник действия зафиксирован.
+    const confirmAuditEntries = await db
+      .select()
+      .from(auditLog)
+      .where(and(eq(auditLog.entityId, orderId ?? ""), eq(auditLog.action, "production_order.confirmed")));
+    expect(confirmAuditEntries).toHaveLength(1);
+    expect(confirmAuditEntries[0]?.source).toBe("telegram");
+    expect(confirmAuditEntries[0]?.userId).toBeNull();
+    expect((confirmAuditEntries[0]?.afterJson as { status?: string } | null)?.status).toBe("placed");
+
+    const specAuditEntries = await db
+      .select()
+      .from(auditLog)
+      .where(and(eq(auditLog.entityId, orderId ?? ""), eq(auditLog.action, "document.specification_generated")));
+    expect(specAuditEntries).toHaveLength(1);
+
     // Расход материала при подтверждении: 100 шт × 1.1 м/шт = 110 м списано
     // со склада (150 - 110 = 40) — владелец проекта, 2026-08-02.
     const [stockAfterConfirm] = await db
@@ -376,6 +396,13 @@ describe("Telegram: текст → предпросмотр → подтверж
       stockOnHandAcrossVariants += Number(stockItem?.quantityOnHand ?? 0);
     }
     expect(stockOnHandAcrossVariants).toBe(100);
+
+    const receiveAuditEntries = await db
+      .select()
+      .from(auditLog)
+      .where(and(eq(auditLog.entityId, orderId ?? ""), eq(auditLog.action, "production_order.received")));
+    expect(receiveAuditEntries).toHaveLength(1);
+    expect(receiveAuditEntries[0]?.source).toBe("http_api");
 
     // Повторная приёмка уже принятой партии запрещена.
     const repeatReceiveResponse = await request(httpServer)

@@ -18,6 +18,7 @@ import {
 } from "@garmentos/domain-catalog";
 import type { CreateProductionOrderDto, CreateProductionOrderFromQuantityDto, CreateWorkshopDto } from "@garmentos/shared-types";
 import type { AuthenticatedRequestUser } from "../auth/current-user.decorator";
+import { AuditService } from "../audit/audit.service";
 import { CatalogService } from "../catalog/catalog.service";
 import { WarehouseService } from "../warehouse/warehouse.service";
 import { BOM_APPROVAL_PORT, PRODUCTION_ORDER_REPOSITORY, WORKSHOP_REPOSITORY } from "./contract-manufacturing.tokens";
@@ -33,6 +34,7 @@ export class ContractManufacturingService {
     @Inject(BOM_APPROVAL_PORT) private readonly bomApproval: BomApprovalPort,
     private readonly warehouseService: WarehouseService,
     private readonly catalogService: CatalogService,
+    private readonly auditService: AuditService,
   ) {}
 
   async createWorkshop(companyId: string, input: CreateWorkshopDto): Promise<Workshop> {
@@ -158,6 +160,13 @@ export class ContractManufacturingService {
         createdBy: currentUser.id,
       });
     }
+
+    await this.auditService.recordForUser(currentUser, {
+      entityType: "production_order",
+      entityId: order.id,
+      action: "production_order.received",
+      afterJson: { status: order.status, warehouseId, variants: order.variants.map((v) => ({ productVariantId: v.productVariantId, quantity: v.quantity })) },
+    });
 
     return order;
   }
