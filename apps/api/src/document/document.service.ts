@@ -32,15 +32,29 @@ export class DocumentService {
     @Inject(DOCUMENT_RENDERER) private readonly renderer: DocumentRenderAdapter,
   ) {}
 
+  // Владелец проекта, требование до пилота 2026-08-04: "в системе
+  // одновременно не может существовать несколько актуальных версий одной
+  // спецификации" — прежде чем генерировать новую, находит все документы,
+  // которые сейчас считаются текущими для этого заказа, и передаёт их как
+  // supersedesDocumentIds (generateSpecificationDocument помечает их
+  // isCurrentVersion=false и связывает новый документ через
+  // supersedesDocumentId — Immutable Original, docs/PRINCIPLES.md принцип 19,
+  // старые версии не удаляются). Инкапсулировано здесь, а не в вызывающем
+  // коде — версионность документов принадлежит Document Engine.
   async generateSpecification(
     companyId: string,
     productionOrderId: string,
     uploadedBy: string | null,
     data: SpecificationDocumentData,
   ): Promise<AttachDocumentResult> {
+    const existing = await this.listForEntity(companyId, "production_order", productionOrderId);
+    // docType="specification" — у заказа со временем появятся и другие
+    // привязанные документы (счета, акты), их версионность эта генерация не
+    // затрагивает.
+    const supersedesDocumentIds = existing.filter((doc) => doc.isCurrentVersion && doc.docType === "specification").map((doc) => doc.id);
     return generateSpecificationDocument(
       { documents: this.documents, documentLinks: this.documentLinks, documentDerivatives: this.documentDerivatives, storage: this.storage, renderer: this.renderer },
-      { companyId, productionOrderId, uploadedBy, data },
+      { companyId, productionOrderId, uploadedBy, data, supersedesDocumentIds },
     );
   }
 

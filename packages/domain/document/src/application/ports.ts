@@ -14,6 +14,11 @@ export interface NewDocumentInput {
 export interface DocumentRepository {
   create(input: NewDocumentInput): Promise<DocumentEntity>;
   findById(companyId: string, id: string): Promise<DocumentEntity | null>;
+  // Снимает флаг "текущая версия" (owner, требование до пилота, 2026-08-04:
+  // "в системе одновременно не может существовать несколько актуальных
+  // версий одной спецификации") — вызывается при генерации новой версии для
+  // всех документов, которые она замещает.
+  markSuperseded(companyId: string, id: string): Promise<void>;
 }
 
 export interface NewDocumentLinkInput {

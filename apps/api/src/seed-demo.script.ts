@@ -10,6 +10,7 @@ import { CatalogService } from "./catalog/catalog.service";
 import { ProcurementService } from "./procurement/procurement.service";
 import { BomService } from "./bom/bom.service";
 import { ContractManufacturingService } from "./contract-manufacturing/contract-manufacturing.service";
+import { ProductionOrderOrchestrationService } from "./ai-production-assistant/production-order-orchestration.service";
 import { WarehouseService } from "./warehouse/warehouse.service";
 import { SalesService } from "./sales/sales.service";
 import { MarketplaceIntegrationService } from "./marketplace-integration/marketplace-integration.service";
@@ -219,6 +220,7 @@ async function run(): Promise<void> {
     const procurement = app.get(ProcurementService);
     const bomService = app.get(BomService);
     const cm = app.get(ContractManufacturingService);
+    const productionOrchestration = app.get(ProductionOrderOrchestrationService);
     const warehouse = app.get(WarehouseService);
     const sales = app.get(SalesService);
     const marketplace = app.get(MarketplaceIntegrationService);
@@ -517,7 +519,12 @@ async function run(): Promise<void> {
         productionOrders.push(record);
         if (target === "draft") continue;
 
-        await cm.confirmProductionOrder(company.id, draft.id);
+        // Оркестрация (не ContractManufacturingService.confirmProductionOrder
+        // напрямую) — фиксирует Snapshot партии при подтверждении
+        // (owner, 2026-08-03 — «Паспорт партии»), иначе демо-компания не
+        // показывала бы главную новую фичу («Экономика партии») ни на одном
+        // заказе.
+        await productionOrchestration.confirmProductionOrder(company.id, draft.id);
         record.status = "placed";
         if (target === "placed") continue;
 

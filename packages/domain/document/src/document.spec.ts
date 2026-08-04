@@ -189,4 +189,47 @@ describe("domain/document", () => {
       expect(renderer.calls[1]?.data.items).toEqual(data.items);
     });
   });
+
+  // Владелец проекта, требование до пилота 2026-08-04: "в системе
+  // одновременно не может существовать несколько актуальных версий одной
+  // спецификации".
+  it("generateSpecificationDocument с supersedesDocumentIds снимает isCurrentVersion со старой версии", async () => {
+    await runInRolledBackTransaction(async (tx) => {
+      const company = await createCompany({ companies: new DrizzleCompanyRepository(tx) }, { name: "Бренд документов 4" });
+      const documents = new DrizzleDocumentRepository(tx);
+      const documentLinks = new DrizzleDocumentLinkRepository(tx);
+      const documentDerivatives = new FakeDocumentDerivativeRepository();
+      const storage = new FakeStorageAdapter();
+      const renderer = new FakeRenderer();
+      const deps = { documents, documentLinks, documentDerivatives, storage, renderer };
+
+      const productionOrderId = "44444444-4444-4444-4444-444444444444";
+      const data = buildSpecificationData();
+
+      const v1 = await generateSpecificationDocument(deps, { companyId: company.id, productionOrderId, uploadedBy: null, data });
+      expect(v1.document.isCurrentVersion).toBe(true);
+      expect(v1.document.supersedesDocumentId).toBeNull();
+
+      const v2 = await generateSpecificationDocument(deps, {
+        companyId: company.id,
+        productionOrderId,
+        uploadedBy: null,
+        data,
+        supersedesDocumentIds: [v1.document.id],
+      });
+      expect(v2.document.isCurrentVersion).toBe(true);
+      expect(v2.document.supersedesDocumentId).toBe(v1.document.id);
+
+      const v1Reloaded = await documents.findById(company.id, v1.document.id);
+      expect(v1Reloaded?.isCurrentVersion).toBe(false);
+
+      // Ровно один документ этого заказа считается текущей версией.
+      const linked = await listDocumentsForEntity(
+        { documentLinks },
+        { companyId: company.id, entityType: "production_order", entityId: productionOrderId },
+      );
+      const current = await Promise.all(linked.map((link) => documents.findById(company.id, link.documentId)));
+      expect(current.filter((doc) => doc?.isCurrentVersion).map((doc) => doc?.id)).toEqual([v2.document.id]);
+    });
+  });
 });

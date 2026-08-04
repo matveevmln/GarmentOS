@@ -17,6 +17,16 @@ export interface GenerateSpecificationDocumentInput {
   // раздел 2 — Document Template Engine) — по умолчанию единственный
   // существующий на сегодня шаблон.
   template?: SpecificationTemplateDefinition;
+  // Документы, которые замещает эта генерация (владелец проекта, требование
+  // до пилота 2026-08-04: "в системе одновременно не может существовать
+  // несколько актуальных версий одной спецификации") — обычно один
+  // (предыдущая "текущая" версия), но может быть несколько, если из-за
+  // прежнего отсутствия этого механизма их накопилось больше одной.
+  // Каждый помечается isCurrentVersion=false; supersedesDocumentId нового
+  // документа указывает на первый элемент списка (Immutable Original,
+  // docs/PRINCIPLES.md принцип 19 — старые строки не удаляются и не
+  // перезаписываются, только помечаются неактуальными).
+  supersedesDocumentIds?: string[];
 }
 
 export interface GenerateSpecificationDocumentDeps {
@@ -41,6 +51,7 @@ export async function generateSpecificationDocument(
   const key = `specifications/${input.companyId}/${input.productionOrderId}-${Date.now()}.pdf`;
   const { url } = await deps.storage.upload(key, pdfBytes, "application/pdf");
 
+  const supersedesDocumentIds = input.supersedesDocumentIds ?? [];
   const result = await attachDocument(
     { documents: deps.documents, documentLinks: deps.documentLinks },
     {
@@ -49,9 +60,14 @@ export async function generateSpecificationDocument(
       fileUrl: url,
       title: `Спецификация №${input.data.fields.specNumber ?? ""}`.trim(),
       uploadedBy: input.uploadedBy,
+      supersedesDocumentId: supersedesDocumentIds[0] ?? null,
       links: [{ entityType: "production_order", entityId: input.productionOrderId, source: "ai" }],
     },
   );
+
+  for (const oldId of supersedesDocumentIds) {
+    await deps.documents.markSuperseded(input.companyId, oldId);
+  }
 
   // generatedBy — что произвело derivative (движок/версия), не пользователь:
   // "кто из людей инициировал" уже есть на самом documents.uploadedBy.
