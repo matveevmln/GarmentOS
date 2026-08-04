@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { productionOrderCostSnapshotSchema } from "../contract-manufacturing/schemas";
+import { documentResponseSchema } from "../document/schemas";
 
 // Контракт модуля Reporting/BI (docs/ARCHITECTURE.md, раздел про Reporting/BI —
 // «агрегированная аналитика, только чтение из других модулей»). Первый
@@ -77,3 +79,60 @@ export const attentionResponseSchema = z.object({
   overdueInvoices: z.array(overdueInvoiceSchema),
 });
 export type AttentionResponseDto = z.infer<typeof attentionResponseSchema>;
+
+// «Паспорт партии» (владелец проекта, 2026-08-03) — центральная карточка
+// производственного заказа: композиция данных из Contract Manufacturing +
+// Catalog + Document Engine + Finance в одном ответе (Reporting/BI, тот же
+// принцип, что и attentionResponseSchema выше — читает поперёк модулей).
+// Сознательно НЕ включает разделы «Материалы»/«ОТК»/«Логистика» из макета —
+// их не с чем агрегировать, пока не утверждены соответствующие разделы
+// docs/PRODUCTION_BATCH_LIFECYCLE_ARCHITECTURE.md (16/4/22); фронтенд
+// показывает честные пустые состояния вместо выдуманных полей.
+export const batchPassportVariantSchema = z.object({
+  productVariantId: z.string().uuid(),
+  size: z.string(),
+  color: z.string(),
+  quantity: z.string(),
+});
+export type BatchPassportVariantDto = z.infer<typeof batchPassportVariantSchema>;
+
+export const batchPassportInvoiceSchema = z.object({
+  id: z.string().uuid(),
+  status: z.string(),
+  amount: z.number(),
+  dueDate: z.string().nullable(),
+});
+export type BatchPassportInvoiceDto = z.infer<typeof batchPassportInvoiceSchema>;
+
+export const batchPassportTimelineEventSchema = z.object({
+  label: z.string(),
+  occurredAt: z.date(),
+});
+export type BatchPassportTimelineEventDto = z.infer<typeof batchPassportTimelineEventSchema>;
+
+export const batchPassportResponseSchema = z.object({
+  id: z.string().uuid(),
+  status: z.string(),
+  plannedQuantity: z.string(),
+  agreedUnitPrice: z.string(),
+  dueDate: z.string().nullable(),
+  // null — срок не просрочен либо не задан.
+  daysOverdue: z.number().int().nullable(),
+  createdAt: z.date(),
+  product: z.object({ id: z.string().uuid(), name: z.string() }),
+  workshop: z.object({
+    id: z.string().uuid(),
+    name: z.string(),
+    contractNumber: z.string().nullable(),
+    contractDate: z.string().nullable(),
+    hasTelegramChat: z.boolean(),
+  }),
+  // Snapshot партии (docs/PRODUCTION_BATCH_LIFECYCLE_ARCHITECTURE.md, §26) —
+  // null у заказов, подтверждённых до появления этого механизма.
+  costSnapshot: productionOrderCostSnapshotSchema.nullable(),
+  variants: z.array(batchPassportVariantSchema),
+  documents: z.array(documentResponseSchema),
+  invoices: z.array(batchPassportInvoiceSchema),
+  timeline: z.array(batchPassportTimelineEventSchema),
+});
+export type BatchPassportResponseDto = z.infer<typeof batchPassportResponseSchema>;

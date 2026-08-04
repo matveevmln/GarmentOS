@@ -16,6 +16,7 @@ import { ProductsPage } from "./pages/ProductsPage";
 import { ProductDetailPage } from "./pages/ProductDetailPage";
 import { PurchaseOrdersPage } from "./pages/PurchaseOrdersPage";
 import { ProductionOrdersPage } from "./pages/ProductionOrdersPage";
+import { BatchPassportPage } from "./pages/BatchPassportPage";
 import { DesignSystemPage } from "./pages/DesignSystemPage";
 
 export function App() {
@@ -40,6 +41,7 @@ export function App() {
               <Route path="/products/:id" element={<ProductDetailPage />} />
               <Route path="/purchase-orders" element={<PurchaseOrdersPage />} />
               <Route path="/production-orders" element={<ProductionOrdersPage />} />
+              <Route path="/production-orders/:id" element={<BatchPassportPage />} />
             </Route>
           </Route>
         </Routes>

@@ -52,4 +52,8 @@ export class DocumentService {
     const docs = await Promise.all(links.map((link) => this.documents.findById(companyId, link.documentId)));
     return docs.filter((doc): doc is DocumentEntity => doc !== null);
   }
+
+  async findById(companyId: string, id: string): Promise<DocumentEntity | null> {
+    return this.documents.findById(companyId, id);
+  }
 }

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   type BomResponseDto,
   type ProductResponseDto,
@@ -39,6 +40,7 @@ const STATUS_FILTERS: FilterOption<"all" | "draft" | "placed" | "in_progress" | 
 ];
 
 export function ProductionOrdersPage() {
+  const navigate = useNavigate();
   const { items: orders, isLoading, reload } = useCrudResource<ProductionOrderResponseDto, never>("/production-orders");
   const [products, setProducts] = useState<ProductResponseDto[]>([]);
   const [workshops, setWorkshops] = useState<WorkshopResponseDto[]>([]);
@@ -288,7 +290,12 @@ export function ProductionOrdersPage() {
         {orders
           .filter((row) => statusFilter === "all" || row.status === statusFilter)
           .map((row) => (
-            <Card key={row.id} interactive className="mb-2.5 flex flex-wrap items-center gap-3 p-3.5">
+            <Card
+              key={row.id}
+              interactive
+              className="mb-2.5 flex flex-wrap items-center gap-3 p-3.5 cursor-pointer"
+              onClick={() => void navigate(`/production-orders/${row.id}`)}
+            >
               <Avatar tone="warning">{productName(row.productId).slice(0, 2).toUpperCase()}</Avatar>
               <div className="min-w-0 flex-1">
                 <div className="truncate text-[14px] font-bold text-foreground">{productName(row.productId)}</div>
@@ -296,7 +303,7 @@ export function ProductionOrdersPage() {
                   {workshopName(row.workshopId)} · {row.plannedQuantity} шт
                 </div>
               </div>
-              <div className="flex flex-none items-center gap-2">
+              <div className="flex flex-none items-center gap-2" onClick={(event) => event.stopPropagation()}>
                 {row.status === "draft" && (
                   <Button
                     type="button"

@@ -5,7 +5,7 @@
 // (docs/AUTH_ARCHITECTURE.md): access короткоживущий, тихо обновляется через
 // refresh при 401, без повторного логина пользователя.
 
-const API_BASE_URL = (import.meta.env.VITE_API_URL as string | undefined) ?? "http://localhost:3000/v1";
+export const API_BASE_URL = (import.meta.env.VITE_API_URL as string | undefined) ?? "http://localhost:3000/v1";
 
 const ACCESS_TOKEN_KEY = "garmentos.accessToken";
 const REFRESH_TOKEN_KEY = "garmentos.refreshToken";
@@ -121,4 +121,29 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
 
   if (response.status === 204) return undefined as T;
   return (await response.json()) as T;
+}
+
+// Отдельно от apiRequest — та же схема авторизации/refresh, но ответ не
+// JSON (PDF), а бинарные данные (Паспорт партии, раздел «Документы»:
+// «Открыть» должен реально открыть файл, не просто показать его имя).
+export async function apiDownload(path: string): Promise<Blob> {
+  const headers: Record<string, string> = {};
+  const token = getAccessToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
+
+  const doFetch = () => fetch(`${API_BASE_URL}${path}`, { headers });
+
+  let response = await doFetch();
+  if (response.status === 401) {
+    const newToken = await refreshAccessToken();
+    if (newToken) {
+      headers.Authorization = `Bearer ${newToken}`;
+      response = await doFetch();
+    }
+  }
+
+  if (!response.ok) {
+    throw new ApiError(response.status, undefined, `Не удалось скачать файл (${response.status})`);
+  }
+  return response.blob();
 }
