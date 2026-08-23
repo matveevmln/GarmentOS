@@ -1,0 +1,102 @@
+/* GarmentOS Design System v2 — токены.
+   Источник: дизайн-концепт владельца проекта (2026-08-23), docs/UI_UX_REDESIGN_PLAN.md §10.
+   Эти же имена станут Tailwind-токенами в apps/web при переносе — файл
+   намеренно написан как плоский набор CSS custom properties, чтобы
+   перенос в @theme был механическим, без пересмотра значений. */
+
+:root {
+  /* ---- Поверхности: 4 слоя глубины ---- */
+  --bg: #0e0f12;
+  --surface: #16181d;
+  --surface-2: #1c1f26;
+  --surface-3: #232733;
+  --border: #262a33;
+  --border-strong: #333945;
+
+  /* ---- Акцент ---- */
+  --primary: #f2543d;
+  --primary-hover: #ff6a52;
+  --primary-tint: rgba(242, 84, 61, 0.12);
+  --primary-fg: #ffffff;
+
+  /* ---- Семантика состояния (не украшение) ---- */
+  --success: #22c55e;
+  --success-tint: rgba(34, 197, 94, 0.13);
+  --warning: #f5a524;
+  --warning-tint: rgba(245, 165, 36, 0.13);
+  --danger: #ef4444;
+  --danger-tint: rgba(239, 68, 68, 0.13);
+  --info: #3b82f6;
+  --info-tint: rgba(59, 130, 246, 0.13);
+  --neutral: #6b7280;
+  --neutral-tint: rgba(107, 114, 128, 0.15);
+
+  /* ---- Текст: 3 уровня ---- */
+  --text: #f2f4f7;
+  --text-2: #9ba1ac;
+  --text-3: #6b7280;
+
+  /* ---- Spacing: единая шкала, других значений быть не должно ---- */
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 20px;
+  --s-6: 24px;
+  --s-8: 32px;
+  --s-10: 40px;
+  --s-12: 48px;
+
+  /* ---- Радиусы ---- */
+  --r-xs: 6px;
+  --r-sm: 8px;
+  --r-md: 12px;
+  --r-lg: 16px;
+  --r-xl: 20px;
+  --r-full: 999px;
+
+  /* ---- Тени: на тёмном фоне работают слабо, поэтому глубина
+         передаётся в первую очередь слоем поверхности, тень — вторична ---- */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.35);
+  --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.45);
+
+  /* ---- Типографика ---- */
+  --font: -apple-system, "SF Pro Text", "Segoe UI Variable", "Segoe UI", Roboto, Inter, Arial, sans-serif;
+
+  --t-display: 28px;
+  --t-metric-lg: 24px;
+  --t-metric: 19px;
+  --t-page-title: 22px;
+  --t-section: 15px;
+  --t-card-title: 14px;
+  --t-body: 14px;
+  --t-table: 13px;
+  --t-meta: 12px;
+  --t-caption: 11px;
+
+  /* ---- Размеры каркаса ---- */
+  --sidebar-w: 232px;
+  --sidebar-rail-w: 68px;
+  --topbar-h: 56px;
+  --bottomnav-h: 60px;
+
+  /* ---- Слои ---- */
+  --z-nav: 30;
+  --z-sticky: 40;
+  --z-overlay: 50;
+  --z-sheet: 60;
+
+  /* ---- Движение ---- */
+  --dur-fast: 120ms;
+  --dur: 180ms;
+  --ease: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@media (min-width: 1024px) {
+  :root {
+    --t-display: 32px;
+    --t-page-title: 26px;
+    --t-metric-lg: 27px;
+  }
+}
