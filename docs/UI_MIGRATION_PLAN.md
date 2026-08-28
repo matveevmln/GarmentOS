@@ -1,0 +1,127 @@
+# План миграции визуального слоя в apps/web
+
+> Источник: `matveevmln/garmentos-ea4078f2` (прототип Lovable, изучен и проверен вживую 2026-08-23).
+> Цель: перенести дизайн-систему и визуальный слой в работающий `apps/web`, не сломав бизнес-логику.
+> Направление подтверждено владельцем проекта.
+
+## 0. Проверка прототипа перед переносом — критичных проблем нет
+
+Прототип собран локально, запущен, снят на 390/768/1440. Проверено автоматически и глазами.
+
+**Проектировать заново не нужно.** Система проработана: oklch-палитра, полные шкалы радиусов/движения/теней/фокуса, Onest + IBM Plex Mono, 25 UI-компонентов + 6 доменных, три режима адаптива работают.
+
+**Соблюдены все ограничения по данным.** Проверено поиском: ни «Раскроя», ни «ОТК», ни выдуманных остатков/прогнозов/процентов готовности. Ровно пять этапов производства. Финансы — честный Empty State.
+
+**Автопроверка:** горизонтального скролла нет ни на одной ширине. Видимый фокус на кнопках есть (`box-shadow 0 0 0 2px`). Изображений без `alt` нет.
+
+### Некритичные замечания (не блокируют перенос)
+
+| # | Что | Оценка |
+|---|---|---|
+| 1 | Кнопка «Состояния» на 390px — 113×36, ниже рекомендованных 40px | Прототипная, в перенос не идёт |
+| 2 | Шрифты грузятся с Google Fonts CDN | Внешняя зависимость. Предлагаю self-host — см. §2 |
+| 3 | В зависимостях балласт: `recharts`, `embla-carousel`, `input-otp`, `react-resizable-panels`, `react-day-picker`, `cmdk` — не используются ни одним экраном | Не переносим |
+| 4 | Тёмная тема — дефолт shadcn, не согласована со светлой | Убираем по решению владельца |
+
+## 1. Что уже решено самим направлением переноса
+
+Две из пяти найденных ранее проблем исчезают, потому что переносим **в** `apps/web`, а не наоборот:
+
+- **Роутинг.** В `apps/web` уже `react-router-dom` v7 с 13 маршрутами. Проблема «экраны через `useState`» — прототипная, при переносе просто не воспроизводится. Роутер не меняем.
+- **Реальные данные.** `apps/web` уже ходит в API. Mock-файл прототипа не переносится вообще.
+
+## 2. Что переносим
+
+| Из прототипа | Куда | Как |
+|---|---|---|
+| `src/styles.css` (875 строк, oklch-токены) | `apps/web/src/design-system/Tokens/tokens.css` | Замена. Блок `.dark` **вырезается** |
+| Шрифты Onest + IBM Plex Mono | `apps/web` | Self-host через `@fontsource` вместо Google CDN — без внешней зависимости в проде |
+| `src/components/gos/ui.tsx` (25 компонентов) | `apps/web/src/design-system/` | По файлам, сохраняя структуру папок apps/web |
+| `src/components/gos/shell.tsx` | `apps/web/src/layout/AppShell.tsx` | Навигация переводится на `NavLink` (react-router) вместо `onNavigate` |
+| `src/components/gos/blocks.tsx` (6 доменных) | `apps/web/src/design-system/Blocks/` | Как есть |
+| `src/components/gos/icons.tsx` | `apps/web/src/design-system/Icons/` | Замена текущего `Icon.tsx` |
+| Keyframes, `.stagger`, glass, motion | вместе с `tokens.css` | Как есть |
+
+**Не переносим:** mock-данные, TanStack Router/Start, неиспользуемые зависимости, `.dark`, экран «Состояния» (остаётся `/design-system` в apps/web).
+
+## 3. Что чиним по ходу
+
+| Проблема | Решение |
+|---|---|
+| Статусы как русские строки | Новый `apps/web/src/lib/status.ts`: `Record<ProductionOrderStatus, {label, tone}>`. Ключи — реальный enum API. Компоненты принимают ключ, не строку |
+| Числа как форматированные строки | Компоненты принимают `number`, форматируют внутри через существующий `Intl.NumberFormat` |
+| Две системы стилей в apps/web | Легаси `apps/web/src/styles.css` (782 строки) удаляется целиком после переноса всех экранов |
+| Мёртвый код | `components/DataTable.tsx` удаляется |
+
+## 4. Четыре экрана-заглушки → реальные данные
+
+API для всех четырёх существует, проверено:
+
+| Экран | Эндпоинт | Статус в apps/web |
+|---|---|---|
+| Цеха | `GET /workshops` | Страница есть, переоформляем |
+| Склады | `GET /warehouses` | Страница есть, переоформляем |
+| Поставщики | `GET /suppliers` | Страница есть, переоформляем |
+| Документы | `GET /documents` + `GET /documents/:id/file` | **Страницы нет — создаём** |
+
+## 5. Порядок этапов
+
+После каждого: `pnpm build` + `pnpm typecheck` + скриншоты 390/768/1440.
+
+| Этап | Содержание | Файлы |
+|---|---|---|
+| **1. Фундамент** | Токены, шрифты, шкалы. Тёмная тема вырезана | `design-system/Tokens/tokens.css`, `package.json`, `main.tsx` |
+| **2. Примитивы** | Card, Button, IconButton, StatusBadge, Badge, PageHeader, Breadcrumbs, SearchField, FilterChips, EmptyState, LoadingState, ErrorState | `design-system/**` (≈20 файлов) |
+| **3. Доменные блоки** | MoneyBlock, ProductionStepper, CostBreakdown, DocumentRow, Timeline, ModelMark, MetricStrip, AttentionList, DataTable, MobileListItem, Accordion, Drawer | `design-system/Blocks/**` (новая папка) |
+| **4. AppShell** | Sidebar 3 режима, topbar, мобильный drawer, нижняя навигация. **Снимается лимит 760px** | `layout/AppShell.tsx`, `App.tsx`, удаление `layout/AppLayout.tsx` |
+| **5. Паспорт партии** | Центральный экран, реальный API | `pages/BatchPassportPage.tsx` |
+| **6. Партии + Главная** | Список и дашборд | `pages/ProductionOrdersPage.tsx`, `pages/DashboardPage.tsx` |
+| **7. Остальные экраны** | Модели, Карточка модели, Материалы, Закупки, Pilot, Login | 6 файлов в `pages/` + `auth/LoginPage.tsx` |
+| **8. Четыре экрана** | Цеха, Склады, Поставщики + новый Документы | 3 файла + `pages/DocumentsPage.tsx` (новый) |
+| **9. Уборка** | Удаление легаси `styles.css`, `DataTable.tsx`, `apps/design-prototype/`, старых компонентов дизайн-системы | Удаления |
+
+## 6. Полный список затрагиваемых файлов
+
+**Изменяются (24):**
+```
+apps/web/package.json                      + @fontsource/onest, @fontsource/ibm-plex-mono
+apps/web/src/main.tsx                      импорт шрифтов
+apps/web/src/App.tsx                       + /documents, AppShell вместо AppLayout
+apps/web/src/design-system/Tokens/tokens.css   полная замена
+apps/web/src/design-system/*/*.tsx         ~20 компонентов переоформляются
+apps/web/src/pages/*.tsx                   12 экранов
+apps/web/src/auth/LoginPage.tsx            перевод с легаси-CSS
+```
+
+**Создаются (4):**
+```
+apps/web/src/layout/AppShell.tsx
+apps/web/src/design-system/Blocks/         (новая папка, ~12 компонентов)
+apps/web/src/lib/status.ts                 enum → label
+apps/web/src/pages/DocumentsPage.tsx
+```
+
+**Удаляются (4):**
+```
+apps/web/src/styles.css                    782 строки легаси
+apps/web/src/layout/AppLayout.tsx          заменён AppShell
+apps/web/src/components/DataTable.tsx      мёртвый код
+apps/design-prototype/                     задачу выполнил
+```
+
+**НЕ трогаются:**
+```
+apps/api/**            весь бэкенд
+packages/**            домен, схема БД, типы
+apps/web/src/api/**    клиент и хуки
+apps/web/src/auth/AuthContext.tsx, RequireAuth.tsx
+```
+
+## 7. Риски
+
+| Риск | Как снимаю |
+|---|---|
+| Экран сломается при переоформлении | Переношу по одному, после каждого — build + typecheck + скриншоты |
+| Расхождение статусов API и UI | Единая карта `lib/status.ts`, типизированная реальным enum. TypeScript поймает пропущенный статус |
+| Регрессия бизнес-логики | Вызовы API и обработчики не переписываются — меняется только разметка вокруг них |
+| Долгий незавершённый переход | Легаси `styles.css` удаляется **последним**, до этого обе системы сосуществуют и приложение работает |
