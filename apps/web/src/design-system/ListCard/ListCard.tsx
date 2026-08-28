@@ -23,7 +23,10 @@ const TINT_VARS: Record<ListCardTone["tint"], { bg: string; fg: string }> = {
   warning: { bg: "var(--warning-tint)", fg: "var(--warning)" },
   danger: { bg: "var(--danger-tint)", fg: "var(--danger)" },
   info: { bg: "var(--info-tint)", fg: "var(--info)" },
-  neutral: { bg: "var(--surface-2)", fg: "var(--muted)" },
+  // --muted в новой системе — цвет ПОВЕРХНОСТИ, а в прежней был цветом
+  // текста третьего уровня. Алиасом это не лечится (имя занято по делу),
+  // поэтому здесь единственная точечная правка: --muted-foreground.
+  neutral: { bg: "var(--surface-2)", fg: "var(--muted-foreground)" },
 };
 
 // Список-карточка — основной способ показать сущность в GarmentOS (иконка +

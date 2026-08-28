@@ -24,6 +24,21 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSepara
 import { Drawer, DrawerClose, DrawerContent, DrawerDescription, DrawerFooter, DrawerHeader, DrawerTitle, DrawerTrigger } from "../design-system/Drawer/Drawer";
 import { Upload } from "../design-system/Upload/Upload";
 import { toast } from "../design-system/Toast/Toast";
+import {
+  Accordion,
+  AttentionList,
+  CostBreakdown,
+  DataTable,
+  DocumentRow,
+  MetricStrip,
+  MobileListItem,
+  ModelMark,
+  MoneyBlock,
+  ProductionStepper,
+  Td,
+  Timeline,
+} from "../design-system/Blocks";
+import { formatQuantity } from "../lib/format";
 
 // Каталог компонентов дизайн-системы GarmentOS (владелец проекта, п.9) —
 // живая страница для проверки состояний, не статичные скриншоты. Не в
@@ -343,6 +358,158 @@ export function DesignSystemPage() {
             Error toast
           </Button>
         </div>
+      </Section>
+
+      {/* Доменные блоки, перенесённые из утверждённого прототипа
+          (docs/UI_MIGRATION_PLAN.md, этап 3). Значения ниже —
+          демонстрационные, как и во всём каталоге: экраны на эти
+          компоненты переводятся на этапах 5-8, тогда данные придут из API. */}
+      <Section title="Блоки — производственная шкала партии">
+        <p className="text-[0.75rem] text-muted-foreground">
+          Пять этапов — это реальный enum <code>production_order_status</code> без{" "}
+          <code>cancelled</code> (отмена не этап, а выход из шкалы). Подписи из{" "}
+          <code>lib/status.ts</code>.
+        </p>
+        <Card>
+          <CardContent className="pt-4 md:pt-5">
+            <ProductionStepper current="in_progress" />
+          </CardContent>
+        </Card>
+      </Section>
+
+      <Section title="Блоки — показатели и внимание">
+        <MetricStrip
+          items={[
+            { label: "Просрочено пошива", value: 6, tone: "danger" },
+            { label: "Просрочено закупок", value: 6, tone: "danger" },
+            { label: "Материалы заканчиваются", value: 144, tone: "warning" },
+            { label: "Партий в работе", value: 18 },
+          ]}
+        />
+        <Card>
+          <CardContent className="pt-4 md:pt-5">
+            <AttentionList
+              items={[
+                {
+                  id: "1",
+                  tone: "danger",
+                  title: "Худи Zip",
+                  sub: "Швейный цех «Родина» · срок был 2026-08-17",
+                  meta: "на 11 дн.",
+                },
+                {
+                  id: "2",
+                  tone: "warning",
+                  title: "Свитшот Heavy",
+                  sub: "Швейный цех «Родина» · срок был 2026-08-20",
+                  meta: "на 8 дн.",
+                },
+              ]}
+            />
+          </CardContent>
+        </Card>
+      </Section>
+
+      <Section title="Блоки — деньги и себестоимость">
+        <Card>
+          <div className="grid grid-cols-2 divide-x divide-border md:grid-cols-4">
+            <MoneyBlock label="Оплачено" value={402_500} />
+            <MoneyBlock label="Остаток" value={172_500} tone="warning" />
+            <MoneyBlock label="Себестоимость ед." value={478.5} decimals={2} />
+            <MoneyBlock label="Партия" value={575_000} sub="1 200 шт" />
+          </div>
+        </Card>
+        <Card>
+          <CardContent className="pt-4 md:pt-5">
+            <CostBreakdown
+              rows={[
+                { label: "Ткань", unitCost: 214.0, total: 256_800, share: 45 },
+                { label: "Фурнитура", unitCost: 62.5, total: 75_000, share: 13 },
+                { label: "Пошив", unitCost: 165.0, total: 198_000, share: 34 },
+                { label: "Упаковка", unitCost: 37.0, total: 44_400, share: 8 },
+              ]}
+              total={{ label: "Итого", unitCost: 478.5, total: 574_200 }}
+            />
+          </CardContent>
+        </Card>
+      </Section>
+
+      <Section title="Блоки — таблица и её мобильный вид">
+        <DataTable
+          columns={[
+            { key: "model", label: "Модель" },
+            { key: "workshop", label: "Цех" },
+            { key: "qty", label: "Кол-во", align: "right", width: "110px" },
+            { key: "status", label: "Статус", align: "right", width: "170px" },
+          ]}
+        >
+          {[
+            { model: "Худи Base", workshop: "Швейный цех «Родина»", qty: 226, status: "received" },
+            { model: "Свитшот Crop", workshop: "Швейный цех «Родина»", qty: 212, status: "placed" },
+            { model: "Юбка Midi", workshop: "Цех «Восток-Шью»", qty: 228, status: "in_progress" },
+          ].map((r) => (
+            <tr key={r.model}>
+              <Td>{r.model}</Td>
+              <Td>{r.workshop}</Td>
+              <Td align="right">{formatQuantity(r.qty, "шт")}</Td>
+              <Td align="right">
+                <StatusBadge status={r.status} />
+              </Td>
+            </tr>
+          ))}
+        </DataTable>
+        <MobileListItem>
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <div className="t-object truncate">Худи Base</div>
+              <div className="t-meta mt-1">Швейный цех «Родина» · 226 шт</div>
+            </div>
+            <StatusBadge status="received" />
+          </div>
+        </MobileListItem>
+      </Section>
+
+      <Section title="Блоки — документы, хронология, знак модели">
+        {/* minmax(0,1fr), а не 1fr: у grid-элемента min-width по умолчанию
+            auto, и колонка раздувается до min-content содержимого вместо
+            того, чтобы дать сработать truncate внутри (поймано на 390px). */}
+        <div className="grid gap-3 [grid-template-columns:minmax(0,1fr)] md:[grid-template-columns:minmax(0,1fr)_200px]">
+          <Card>
+            <CardContent className="pt-4 md:pt-5">
+              <DocumentRow
+                title="Спецификация ХУД-001"
+                version="Актуальная"
+                format="PDF"
+                date="2026-08-12"
+              />
+              <DocumentRow title="Инвойс №142" version="v1" format="PDF" date="2026-08-02" />
+              <DocumentRow title="Фото контроля" format="JPG" />
+            </CardContent>
+          </Card>
+          <ModelMark code="ХУД-001" />
+        </div>
+        <Card>
+          <CardContent className="pt-4 md:pt-5">
+            <Timeline
+              items={[
+                { title: "Партия принята на склад", date: "2026-08-24", by: "Богдан" },
+                { title: "Готово к отгрузке", date: "2026-08-20", by: "Цех «Родина»" },
+                { title: "Заказ размещён", date: "2026-07-30", by: "Богдан" },
+              ]}
+            />
+          </CardContent>
+        </Card>
+      </Section>
+
+      <Section title="Блоки — сворачиваемая секция">
+        <Accordion title="Спецификация" hint="4 позиции" defaultOpen>
+          <p className="t-secondary">
+            Раскрытие через утилиту <code>collapsible</code> (grid-template-rows), без замера высоты в JS.
+          </p>
+        </Accordion>
+        <Accordion title="История изменений" hint="12 записей">
+          <p className="t-secondary">Свёрнутая секция по умолчанию.</p>
+        </Accordion>
       </Section>
     </section>
   );
