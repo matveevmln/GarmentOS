@@ -1,301 +1,893 @@
-/* docs/UI_FOUNDATION.md — Tailwind как инженерный фундамент, не источник
-   вида: здесь Tailwind-токены (color, radius, shadow) указывают
-   на уже утверждённые фирменные значения GarmentOS (перенесены дословно из
-   apps/prototype/index.html), не на дефолтную Tailwind-палитру. Любой
-   компонент shadcn/ui, который использует стандартные семантические имена
-   (bg-primary, text-muted-foreground, rounded-lg, shadow-card) автоматически
-   получает фирменный вид без точечных переопределений — это и есть смысл
-   "используй реализацию shadcn, не внешний вид". */
-
-@import "tailwindcss";
-/* tw-animate-css — даёт utility-классы animate-in, animate-out, fade-in,
-   zoom-in и парные им (Tailwind v4 не включает их по умолчанию, в отличие
-   от v3-плагина tailwindcss-animate, на который расчитан код shadcn/ui).
-   Без этого импорта классы вроде data-[state=open]:animate-in в
-   Dialog/Select были синтаксически валидны, но не генерировали CSS —
-   переходы были no-op. */
+@import "tailwindcss" source(none);
+@source "../../";
 @import "tw-animate-css";
 
-@theme {
-  /* ---- фирменная палитра (см. apps/web/src/styles.css :root — тот же
-     источник истины; со временем styles.css будет полностью вытеснен
-     этим файлом по мере переноса экранов, см. docs/WEB_DESIGN_SYSTEM.md) ---- */
-  --color-background: #fafaf9;
-  --color-foreground: #18181b;
 
-  --color-card: #ffffff;
-  --color-card-foreground: #18181b;
+/*
+ * GarmentOS — дизайн-система (единственный источник визуального языка).
+ *
+ * Перенесена из утверждённого прототипа (matveevmln/garmentos-ea4078f2,
+ * 2026-08-23) без переосмысления — docs/UI_MIGRATION_PLAN.md, этап 1.
+ *
+ * @theme inline связывает CSS-переменные с Tailwind-утилитами
+ * (--color-primary -> bg-primary, text-primary). Значения цветов заданы
+ * в :root в формате oklch — все новые цвета добавлять в том же формате.
+ *
+ * Тёмной темы НЕТ намеренно (решение владельца проекта 2026-08-23):
+ * в прототипе блок .dark оставался дефолтом shadcn и не был согласован
+ * с фирменной светлой палитрой. Единственная тема — светлая тёплая.
+ * Не добавлять .dark обратно без отдельного решения.
+ *
+ * Чтобы добавить семантический цвет:
+ * 1. Объявить переменную в :root
+ * 2. Зарегистрировать в @theme inline как --color-<name>: var(--<name>)
+ */
 
-  --color-popover: #ffffff;
-  --color-popover-foreground: #18181b;
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
+  --radius-3xl: calc(var(--radius) + 12px);
+  --radius-4xl: calc(var(--radius) + 16px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-ring-offset-background: var(--background);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-danger: var(--danger);
+  --color-surface: var(--surface);
+  --font-sans: "Onest", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Onest", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, monospace;
 
-  --color-primary: #d7263d;
-  --color-primary-foreground: #ffffff;
-
-  --color-secondary: #f3f2ef;
-  --color-secondary-foreground: #18181b;
-
-  --color-muted: #f3f2ef;
-  --color-muted-foreground: #75757e;
-
-  --color-accent: #fce9eb;
-  --color-accent-foreground: #d7263d;
-
-  --color-destructive: #e2543a;
-  --color-destructive-foreground: #ffffff;
-
-  --color-success: #16a34a;
-  --color-success-tint: #e8f6ec;
-  --color-warning: #d97706;
-  --color-warning-tint: #fdf1e1;
-  --color-info: #2563eb;
-  --color-info-tint: #eaf0fe;
-
-  --color-border: #eceae5;
-  --color-input: #eceae5;
-  --color-ring: rgba(215, 38, 61, 0.16);
-
-  --color-muted-2: #a0a0a8;
-
-  /* ---- радиусы — дословно из прототипа (r-lg/r-md/r-sm) ---- */
-  --radius-sm: 11px;
-  --radius-md: 16px;
-  --radius-lg: 22px;
-  --radius-xl: 22px;
-
-  /* ---- шкала теней (elevation) — docs/DESIGN_SYSTEM_MAP.md §2.1, смягчено
-     по итогам визуального ревью (2026-08-03: "более мягкие тени") — меньше
-     непрозрачность ближнего слоя, больше размытие дальнего, тень читается
-     как мягкая подсветка снизу, а не жёсткая обводка:
-     sm — лёгкое приподнятие (hover строки списка), card — карточка в покое,
-     lg — то, что "выше" обычной карточки (открытый Dialog/Drawer/Popover),
-     hover — карточка при наведении (между card и lg). ---- */
-  --shadow-sm: 0 1px 2px rgba(20, 20, 25, 0.045);
-  --shadow-card: 0 1px 2px rgba(20, 20, 25, 0.03), 0 10px 30px -14px rgba(20, 20, 25, 0.09);
-  --shadow-hover: 0 2px 6px rgba(20, 20, 25, 0.05), 0 16px 36px -14px rgba(20, 20, 25, 0.12);
-  --shadow-lg: 0 4px 10px rgba(20, 20, 25, 0.05), 0 20px 48px -10px rgba(20, 20, 25, 0.15);
-
-  /* ---- шрифт — тот же системный стек, без кастомного webfont ---- */
-  --font-sans:
-    -apple-system, "SF Pro Text", "Segoe UI Variable", "Segoe UI", Roboto, Arial, sans-serif;
-
-  /* Моноширинные числа (docs/DESIGN_SYSTEM_MAP.md §1, паттерн Stripe) —
-     суммы/количества/номера заказов выравниваются в колонку, не "прыгают"
-     при разной длине значения. Отдельного токена не требует — Tailwind
-     уже даёт готовую утилиту `tabular-nums` (font-variant-numeric),
-     применяется прямо в компонентах (Combobox/MoneyInput и т.д.). */
-
-  /* ---- типографическая шкала — единое место, не разбросано по компонентам ---- */
-  --text-caption: 0.72rem;
-  --text-body-sm: 0.85rem;
-  --text-body: 0.95rem;
-  --text-title: 1.05rem;
-  --text-heading: 1.4rem;
-  --text-display: 1.75rem;
-
-  /* ---- z-index — единая шкала слоёв, чтобы нижняя навигация/модалка/
-     тост/поповер никогда не спорили за порядок наложения по случайности ---- */
-  --z-index-nav: 30;
-  --z-index-overlay: 50;
-  --z-index-popover: 60;
-  --z-index-toast: 70;
-
-  /* ---- длительность анимаций — одна шкала на весь интерфейс ---- */
-  --animate-duration-fast: 120ms;
-  --animate-duration-base: 180ms;
-  --animate-duration-slow: 260ms;
-
-  /* ---- кривые анимации (docs/DESIGN_SYSTEM_MAP.md §2.4) — явные
-     easing-кривые вместо браузерного дефолта на Radix-переходах:
-     standard — вход/выход обычных элементов (Dialog/Drawer/Popover),
-     spring — лёгкий overshoot для микроинтеракций (нажатие, toast). ---- */
-  --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
-  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
-
-  /* ---- shimmer — Skeleton (docs/DESIGN_SYSTEM_MAP.md §6, замена статичного
-     градиента на движущуюся световую полосу, паттерн большинства
-     современных SaaS-лоадеров — читается как "идёт загрузка", не как
-     статичная серая плашка). Tailwind v4 генерирует утилиту animate-shimmer
-     из этого имени, реализация — @keyframes ниже, вне @theme. ---- */
-  --animate-shimmer: shimmer 1.6s ease-in-out infinite;
 }
 
-@keyframes shimmer {
-  0% {
-    background-position: 200% 0;
+:root {
+  --radius: 0.625rem;
+
+  /* Светлая рабочая поверхность: тёплый нейтральный off-white */
+  --background: oklch(0.978 0.002 80);
+  --surface: oklch(1 0 0);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.21 0.006 60);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.21 0.006 60);
+
+  /* Текст */
+  --foreground: oklch(0.21 0.006 60);
+  --muted: oklch(0.966 0.002 80);
+  --muted-foreground: oklch(0.555 0.008 66);
+
+  /* Акцент — тёплая охра/медь */
+  --primary: oklch(0.62 0.135 52);
+  --primary-foreground: oklch(0.99 0.002 80);
+  --secondary: oklch(0.966 0.002 80);
+  --secondary-foreground: oklch(0.21 0.006 60);
+  --accent: oklch(0.962 0.012 60);
+  --accent-foreground: oklch(0.4 0.1 48);
+
+  --destructive: oklch(0.55 0.19 27);
+  --destructive-foreground: oklch(0.99 0.002 80);
+  --success: oklch(0.53 0.1 155);
+  --warning: oklch(0.66 0.12 66);
+  --danger: oklch(0.55 0.19 27);
+
+  --border: oklch(0.925 0.002 80);
+  --input: oklch(0.91 0.003 80);
+  --ring: oklch(0.62 0.135 52);
+
+  --chart-1: oklch(0.62 0.135 52);
+  --chart-2: oklch(0.53 0.1 155);
+  --chart-3: oklch(0.66 0.12 66);
+  --chart-4: oklch(0.45 0.05 250);
+  --chart-5: oklch(0.68 0.015 80);
+
+  /* Рельс — почти чёрный, нейтрально-тёплый */
+  --sidebar: oklch(0.175 0.004 60);
+  --sidebar-foreground: oklch(0.93 0.004 80);
+  --sidebar-primary: oklch(0.72 0.135 60);
+  --sidebar-primary-foreground: oklch(0.17 0.006 60);
+  --sidebar-accent: oklch(0.245 0.008 60);
+  --sidebar-accent-foreground: oklch(0.98 0.003 80);
+  --sidebar-border: oklch(0.28 0.005 60);
+  --sidebar-ring: oklch(0.72 0.135 60);
+
+  /* ====== Токены: радиусы ====== */
+  --r-xs: 4px;
+  --r-sm: 6px;
+  --r-md: 8px;
+  --r-lg: 10px;
+  --r-xl: 12px;
+  --r-2xl: 16px;
+  --r-pill: 999px;
+
+  /* ====== Токены: движение ====== */
+  --dur-1: 120ms;   /* мгновенная реакция: press, цвет */
+  --dur-2: 180ms;   /* hover / focus */
+  --dur-3: 240ms;   /* раскрытие, появление */
+  --dur-4: 320ms;   /* панели, drawer */
+  --ease-out: cubic-bezier(0.22, 0.61, 0.36, 1);
+  --ease-in: cubic-bezier(0.4, 0, 0.7, 0.4);
+  --ease-emphasis: cubic-bezier(0.25, 0.46, 0.45, 0.94);
+
+  /* ====== Токены: тени ====== */
+  --shadow-1:
+    0 1px 2px color-mix(in oklab, var(--foreground) 5%, transparent),
+    0 1px 1px color-mix(in oklab, var(--foreground) 3%, transparent);
+  --shadow-2:
+    0 2px 4px color-mix(in oklab, var(--foreground) 6%, transparent),
+    0 8px 20px -8px color-mix(in oklab, var(--foreground) 12%, transparent);
+  --shadow-3:
+    0 4px 10px color-mix(in oklab, var(--foreground) 8%, transparent),
+    0 18px 42px -12px color-mix(in oklab, var(--foreground) 20%, transparent);
+  --shadow-4:
+    0 8px 18px color-mix(in oklab, var(--foreground) 10%, transparent),
+    0 32px 64px -16px color-mix(in oklab, var(--foreground) 26%, transparent);
+  --shadow-overlay:
+    0 0 0 1px color-mix(in oklab, var(--foreground) 7%, transparent),
+    0 12px 24px -8px color-mix(in oklab, var(--foreground) 14%, transparent),
+    0 36px 72px -24px color-mix(in oklab, var(--foreground) 28%, transparent);
+
+  /* ====== Токены: фокус ====== */
+  --focus-color: color-mix(in oklab, var(--primary) 48%, transparent);
+  --focus-halo: color-mix(in oklab, var(--primary) 12%, transparent);
+  --focus-offset-color: var(--card);
+  --focus-width: 2px;
+
+  /* ====== Токены: стекло ====== */
+  --glass-bg: color-mix(in oklab, var(--card) 72%, transparent);
+  --glass-border: color-mix(in oklab, var(--foreground) 8%, transparent);
+  --glass-blur: 18px;
+}
+
+
+
+
+@layer base {
+  * {
+    border-color: var(--color-border);
   }
-  100% {
-    background-position: -200% 0;
+
+  html {
+    overscroll-behavior-x: none;
+  }
+
+  body {
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    font-family: var(--font-sans);
+    font-size: 13.5px;
+    line-height: 1.5;
+    font-weight: 400;
+    -webkit-font-smoothing: antialiased;
+    overscroll-behavior-x: none;
+  }
+
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-display);
+    font-weight: 600;
+    letter-spacing: -0.015em;
+  }
+
+
+  ::selection {
+    background: color-mix(in oklab, var(--primary) 18%, transparent);
   }
 }
 
-/* ---- Dark mode — docs/DESIGN_SYSTEM_MAP.md §2.2, визуально проверено
-   2026-08-03 (владелец проекта явно попросил показать поддержку тёмной
-   темы). Два независимых механизма переопределяют одни и те же имена
-   токенов, компоненты не меняются ни разу:
-   1) @media (prefers-color-scheme: dark) — системная тема ОС, работает
-      без единой строчки JS.
-   2) :root[data-theme="dark"|"light"] — ручное переключение (ThemeToggle,
-      design-system/Theme/ThemeToggle.tsx), должно побеждать системную
-      настройку в обе стороны, поэтому идёт ПОСЛЕ media-блока и не завязано
-      на него условием. ---- */
-@media (prefers-color-scheme: dark) {
-  :root {
-    --color-background: #121214;
-    --color-foreground: #f4f4f5;
+@utility num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+}
 
-    --color-card: #1c1c1f;
-    --color-card-foreground: #f4f4f5;
+/* Editorial-заголовок: Inter Tight, плотный трекинг, оптический вес */
+@utility editorial {
+  font-family: var(--font-display);
+  font-weight: 600;
+  letter-spacing: -0.028em;
+  line-height: 1.05;
+}
 
-    --color-popover: #1c1c1f;
-    --color-popover-foreground: #f4f4f5;
+/* Надзаголовок секции */
+@utility eyebrow {
+  font-family: var(--font-display);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--muted-foreground);
+}
 
-    --color-primary: #ff4d5e;
-    --color-primary-foreground: #ffffff;
+/* Микро-подпись моноширинно: индексы, коды, служебные метки */
+@utility micro {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: color-mix(in oklab, var(--muted-foreground) 85%, transparent);
+}
 
-    --color-secondary: #232326;
-    --color-secondary-foreground: #f4f4f5;
-
-    --color-muted: #232326;
-    --color-muted-foreground: #a1a1aa;
-
-    --color-accent: #3a1f22;
-    --color-accent-foreground: #ff4d5e;
-
-    --color-destructive: #f0654a;
-    --color-destructive-foreground: #ffffff;
-
-    --color-success: #22c55e;
-    --color-success-tint: #143820;
-    --color-warning: #f59e0b;
-    --color-warning-tint: #3a2a0d;
-    --color-info: #3b82f6;
-    --color-info-tint: #172a4d;
-
-    --color-border: #2c2c30;
-    --color-input: #2c2c30;
-    --color-ring: rgba(255, 77, 94, 0.28);
-
-    --color-muted-2: #6b6b73;
-
-    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.22);
-    --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.22), 0 10px 30px -14px rgba(0, 0, 0, 0.38);
-    --shadow-hover: 0 2px 6px rgba(0, 0, 0, 0.26), 0 16px 36px -14px rgba(0, 0, 0, 0.42);
-    --shadow-lg: 0 4px 10px rgba(0, 0, 0, 0.28), 0 20px 48px -10px rgba(0, 0, 0, 0.48);
-
-    /* Легаси-переменная без прямого аналога в @theme (см. styles.css) —
-       переопределяется здесь же, чтобы вся тема жила в одном месте. */
-    --danger-tint: #3a1f1a;
-    color-scheme: dark;
+/* Медная засечка — фирменный знак начала блока */
+@utility tick {
+  &::before {
+    content: "";
+    display: block;
+    width: 22px;
+    height: 2px;
+    background: var(--primary);
+    margin-bottom: 10px;
   }
 }
 
-:root[data-theme="dark"] {
-  --color-background: #121214;
-  --color-foreground: #f4f4f5;
-
-  --color-card: #1c1c1f;
-  --color-card-foreground: #f4f4f5;
-
-  --color-popover: #1c1c1f;
-  --color-popover-foreground: #f4f4f5;
-
-  --color-primary: #ff4d5e;
-  --color-primary-foreground: #ffffff;
-
-  --color-secondary: #232326;
-  --color-secondary-foreground: #f4f4f5;
-
-  --color-muted: #232326;
-  --color-muted-foreground: #a1a1aa;
-
-  --color-accent: #3a1f22;
-  --color-accent-foreground: #ff4d5e;
-
-  --color-destructive: #f0654a;
-  --color-destructive-foreground: #ffffff;
-
-  --color-success: #22c55e;
-  --color-success-tint: #143820;
-  --color-warning: #f59e0b;
-  --color-warning-tint: #3a2a0d;
-  --color-info: #3b82f6;
-  --color-info-tint: #172a4d;
-
-  --color-border: #2c2c30;
-  --color-input: #2c2c30;
-  --color-ring: rgba(255, 77, 94, 0.28);
-
-  --color-muted-2: #6b6b73;
-
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.22);
-  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.22), 0 10px 30px -14px rgba(0, 0, 0, 0.38);
-  --shadow-hover: 0 2px 6px rgba(0, 0, 0, 0.26), 0 16px 36px -14px rgba(0, 0, 0, 0.42);
-  --shadow-lg: 0 4px 10px rgba(0, 0, 0, 0.28), 0 20px 48px -10px rgba(0, 0, 0, 0.48);
-
-  --danger-tint: #3a1f1a;
-  color-scheme: dark;
+/* Поверхность карточки: тонкая граница + мягкая глубина */
+@utility surface-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  box-shadow:
+    0 1px 2px color-mix(in oklab, var(--foreground) 4%, transparent),
+    0 1px 1px color-mix(in oklab, var(--foreground) 2%, transparent);
 }
 
-:root[data-theme="light"] {
-  --color-background: #fafaf9;
-  --color-foreground: #18181b;
+/* ====== Типографическая шкала (проверена на кириллице) ====== */
 
-  --color-card: #ffffff;
-  --color-card-foreground: #18181b;
-
-  --color-popover: #ffffff;
-  --color-popover-foreground: #18181b;
-
-  --color-primary: #d7263d;
-  --color-primary-foreground: #ffffff;
-
-  --color-secondary: #f3f2ef;
-  --color-secondary-foreground: #18181b;
-
-  --color-muted: #f3f2ef;
-  --color-muted-foreground: #75757e;
-
-  --color-accent: #fce9eb;
-  --color-accent-foreground: #d7263d;
-
-  --color-destructive: #e2543a;
-  --color-destructive-foreground: #ffffff;
-
-  --color-success: #16a34a;
-  --color-success-tint: #e8f6ec;
-  --color-warning: #d97706;
-  --color-warning-tint: #fdf1e1;
-  --color-info: #2563eb;
-  --color-info-tint: #eaf0fe;
-
-  --color-border: #eceae5;
-  --color-input: #eceae5;
-  --color-ring: rgba(215, 38, 61, 0.16);
-
-  --color-muted-2: #a0a0a8;
-
-  --shadow-sm: 0 1px 2px rgba(20, 20, 25, 0.045);
-  --shadow-card: 0 1px 2px rgba(20, 20, 25, 0.03), 0 10px 30px -14px rgba(20, 20, 25, 0.09);
-  --shadow-hover: 0 2px 6px rgba(20, 20, 25, 0.05), 0 16px 36px -14px rgba(20, 20, 25, 0.12);
-  --shadow-lg: 0 4px 10px rgba(20, 20, 25, 0.05), 0 20px 48px -10px rgba(20, 20, 25, 0.15);
-
-  --danger-tint: #fceae6;
-  color-scheme: light;
+/* Заголовок страницы */
+@utility t-page {
+  font-family: var(--font-display);
+  font-size: 27px;
+  font-weight: 600;
+  line-height: 1.14;
+  letter-spacing: -0.025em;
 }
 
-/* Найденный при инженерной ревизии перед заморозкой (2026-08-03) баг:
-   давно задокументированный "едва заметный круглый артефакт за цифрами
-   дней" в DatePicker — react-day-picker рендерит дни как <button>
-   (.rdp-day_button) и ни разу не объявляет box-shadow ни для одного
-   своего класса; легаси-правило `button { box-shadow: ... }` из
-   styles.css остаётся единственным объявлением этого свойства (не
-   перебивается — не о чём спорить в каскаде, свойство просто ничем не
-   переопределено) и применяется к каждой круглой ячейке дня. Тот же
-   класс бага, что уже дважды находился на иконках-кнопках (DropdownMenu-
-   триггер, Tooltip-подсказка) — не оформительский нюанс, а системный
-   риск: любой сторонний <button> без явного box-shadow: none наследует
-   фирменное свечение. */
+/* Заголовок секции / карточки */
+@utility t-section {
+  font-family: var(--font-display);
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.25;
+  letter-spacing: -0.012em;
+}
+
+/* Название объекта: модель, документ, партия */
+@utility t-object {
+  font-family: var(--font-display);
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: -0.008em;
+  color: var(--foreground);
+}
+
+/* Основной текст */
+@utility t-body {
+  font-size: 13.5px;
+  font-weight: 400;
+  line-height: 1.5;
+}
+
+/* Вторичный текст */
+@utility t-secondary {
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 1.45;
+  color: var(--muted-foreground);
+}
+
+/* Подписи и метаданные */
+@utility t-meta {
+  font-size: 11.5px;
+  font-weight: 400;
+  line-height: 1.35;
+  letter-spacing: 0.005em;
+  color: color-mix(in oklab, var(--muted-foreground) 92%, transparent);
+}
+
+/* Ключевая цифра: суммы, количества, KPI */
+@utility t-figure {
+  font-family: var(--font-mono);
+  font-size: 26px;
+  font-weight: 500;
+  line-height: 1.05;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Числовое значение внутри строки данных */
+@utility t-value {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+
+
+
+/* ====== Глубина: уровни поверхностей ====== */
+
+@utility elev-1 {
+  box-shadow: var(--shadow-1);
+}
+
+@utility elev-2 {
+  box-shadow: var(--shadow-2);
+}
+
+@utility elev-3 {
+  box-shadow: var(--shadow-3);
+}
+
+@utility elev-4 {
+  box-shadow: var(--shadow-4);
+}
+
+/* Едва заметный градиент материала поверхности */
+@utility surface-grad {
+  background-image: linear-gradient(
+    180deg,
+    color-mix(in oklab, var(--foreground) 1.2%, transparent) 0%,
+    transparent 42%
+  );
+}
+
+/* Интерактивность: мягкий hover + внятный press */
+@utility interactive {
+  transition:
+    background-color var(--dur-2) var(--ease-out),
+    border-color var(--dur-2) var(--ease-out),
+    color var(--dur-2) var(--ease-out),
+    box-shadow var(--dur-2) var(--ease-out),
+    transform var(--dur-1) var(--ease-out);
+
+  &:active {
+    transform: translateY(0.5px) scale(0.995);
+  }
+}
+
+/* Единый focus-ring для всех интерактивных элементов */
+@utility focus-ring {
+  outline: none;
+
+  &:focus-visible {
+    box-shadow:
+      0 0 0 var(--focus-width) var(--focus-offset-color),
+      0 0 0 calc(var(--focus-width) + 2px) var(--focus-color),
+      0 0 0 calc(var(--focus-width) + 7px) var(--focus-halo);
+    border-color: color-mix(in oklab, var(--primary) 45%, var(--border));
+  }
+}
+
+/* Интерактивная строка таблицы / списка */
+@utility row-interactive {
+  transition:
+    background-color var(--dur-2) var(--ease-out),
+    box-shadow var(--dur-2) var(--ease-out);
+
+  &:hover {
+    background-color: color-mix(in oklab, var(--primary) 4%, var(--muted));
+    box-shadow: inset 2px 0 0 0 color-mix(in oklab, var(--primary) 55%, transparent);
+  }
+
+  &:active {
+    background-color: color-mix(in oklab, var(--primary) 7%, var(--muted));
+  }
+}
+
+/* Поле ввода: единая логика hover / focus */
+@utility field {
+  transition:
+    border-color var(--dur-2) var(--ease-out),
+    box-shadow var(--dur-2) var(--ease-out),
+    background-color var(--dur-2) var(--ease-out);
+
+  &:hover {
+    border-color: color-mix(in oklab, var(--primary) 22%, var(--border));
+  }
+
+  &:focus,
+  &:focus-visible {
+    outline: none;
+    border-color: color-mix(in oklab, var(--primary) 55%, var(--border));
+    box-shadow: 0 0 0 4px var(--focus-halo);
+  }
+}
+
+/* Стеклянная плавающая поверхность: popover, палитра, drawer, floating controls */
+@utility glass-panel {
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur)) saturate(160%);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--shadow-overlay);
+}
+
+
+/* Идентификатор: номер партии, артикул, код */
+@utility t-id {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  font-variant-numeric: tabular-nums;
+  color: color-mix(in oklab, var(--foreground) 78%, transparent);
+}
+
+/* Денежная сумма в строке данных */
+@utility t-amount {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.012em;
+}
+
+/* Выбранная строка / выбранный объект */
+@utility is-selected {
+  background: color-mix(in oklab, var(--primary) 7%, transparent);
+  box-shadow: inset 2px 0 0 0 var(--primary);
+}
+
+/* Оверлей верхнего уровня: диалоги, палитра команд, popover */
+@utility elev-overlay {
+  box-shadow: var(--shadow-overlay);
+}
+
+@keyframes gos-dialog-in {
+  from { opacity: 0; transform: translateY(-6px) scale(0.985); }
+  to { opacity: 1; transform: none; }
+}
+
+@utility anim-dialog {
+  animation: gos-dialog-in var(--dur-2) var(--ease-out) both;
+}
+
+
+
+/* ====== Движение ====== */
+
+@keyframes gos-content-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes gos-overlay-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes gos-sheet-up {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes gos-panel-in {
+  from {
+    opacity: 0;
+    transform: translateX(18px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes gos-panel-in-left {
+  from { transform: translateX(-18px); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+
+@keyframes gos-pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes gos-shimmer {
+  from { background-position: 180% 0; }
+  to { background-position: -80% 0; }
+}
+
+@utility anim-content {
+  animation: gos-content-in var(--dur-3) var(--ease-out) both;
+}
+
+@utility anim-overlay {
+  animation: gos-overlay-in var(--dur-2) var(--ease-out) both;
+}
+
+@utility anim-sheet {
+  animation: gos-sheet-up var(--dur-4) var(--ease-out) both;
+}
+
+@utility anim-panel {
+  animation: gos-panel-in var(--dur-3) var(--ease-out) both;
+}
+
+@utility anim-panel-left {
+  animation: gos-panel-in-left var(--dur-3) var(--ease-out) both;
+}
+
+@utility anim-pop {
+  animation: gos-pop-in var(--dur-2) var(--ease-out) both;
+}
+
+/* Сдержанный skeleton shimmer */
+@utility skeleton {
+  background-color: var(--muted);
+  background-image: linear-gradient(
+    90deg,
+    transparent 0%,
+    color-mix(in oklab, var(--foreground) 4%, transparent) 45%,
+    transparent 90%
+  );
+  background-size: 180% 100%;
+  animation: gos-shimmer 1.6s linear infinite;
+}
+
+/* Плавное раскрытие деталей без фиксированной высоты */
+@utility collapsible {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows var(--dur-3) var(--ease-out);
+
+  & > * {
+    overflow: hidden;
+    min-height: 0;
+  }
+}
+
+@utility collapsible-open {
+  grid-template-rows: 1fr;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+@keyframes gos-panel-out-left {
+  from { transform: none; opacity: 1; }
+  to { transform: translateX(-100%); opacity: 0.6; }
+}
+
+@keyframes gos-panel-in-left-full {
+  from { transform: translateX(-100%); }
+  to { transform: none; }
+}
+
+@keyframes gos-overlay-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+@utility anim-panel-left-full {
+  animation: gos-panel-in-left-full 220ms cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+
+@utility anim-panel-left-out {
+  animation: gos-panel-out-left 200ms cubic-bezier(0.4, 0, 0.7, 0.4) both;
+}
+
+@utility anim-overlay-out {
+  animation: gos-overlay-out 200ms ease-in both;
+}
+
+/* ====== Экспрессивный слой: свет, глубина, вход контента ====== */
+
+/* Крупная выразительная типографика */
+@utility t-display {
+  font-family: var(--font-display);
+  font-size: 34px;
+  font-weight: 600;
+  line-height: 1.06;
+  letter-spacing: -0.032em;
+}
+
+/* Акцентная поверхность: мягкий свет вместо плоской заливки */
+@utility accent-surface {
+  background-image:
+    radial-gradient(
+      120% 140% at 0% 0%,
+      color-mix(in oklab, var(--primary) 12%, transparent) 0%,
+      transparent 58%
+    ),
+    linear-gradient(
+      180deg,
+      color-mix(in oklab, var(--foreground) 1.5%, transparent) 0%,
+      transparent 40%
+    );
+}
+
+/* Тонкая градиентная кромка сверху карточки */
+@utility hairline-accent {
+  position: relative;
+
+  &::before {
+    content: "";
+    position: absolute;
+    inset: 0 0 auto 0;
+    height: 1px;
+    background: linear-gradient(
+      90deg,
+      transparent 0%,
+      color-mix(in oklab, var(--primary) 55%, transparent) 22%,
+      color-mix(in oklab, var(--primary) 18%, transparent) 60%,
+      transparent 100%
+    );
+    opacity: 0.75;
+    pointer-events: none;
+  }
+}
+
+/* Едва различимое свечение акцента */
+@utility glow-accent {
+  box-shadow:
+    0 1px 2px color-mix(in oklab, var(--foreground) 5%, transparent),
+    0 14px 34px -18px color-mix(in oklab, var(--primary) 45%, transparent);
+}
+
+/* Подъём карточки при наведении */
+@utility lift {
+  transition:
+    transform var(--dur-3) var(--ease-out),
+    box-shadow var(--dur-3) var(--ease-out),
+    border-color var(--dur-2) var(--ease-out);
+
+  &:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-3);
+  }
+
+  &:active {
+    transform: translateY(0) scale(0.997);
+    box-shadow: var(--shadow-1);
+  }
+}
+
+/* Появление контента */
+@keyframes gos-rise {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: none; }
+}
+
+@utility anim-rise {
+  animation: gos-rise 380ms cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+
+/* Каскадный вход дочерних блоков */
+.stagger > * {
+  animation: gos-rise 420ms cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+.stagger > *:nth-child(1) { animation-delay: 20ms; }
+.stagger > *:nth-child(2) { animation-delay: 70ms; }
+.stagger > *:nth-child(3) { animation-delay: 120ms; }
+.stagger > *:nth-child(4) { animation-delay: 170ms; }
+.stagger > *:nth-child(5) { animation-delay: 210ms; }
+.stagger > *:nth-child(n + 6) { animation-delay: 250ms; }
+
+/* Аккуратные полосы прокрутки */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in oklab, var(--foreground) 18%, transparent) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: color-mix(in oklab, var(--foreground) 16%, transparent);
+  border: 3px solid transparent;
+  background-clip: content-box;
+  border-radius: 999px;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in oklab, var(--foreground) 28%, transparent);
+  background-clip: content-box;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* ====== Атмосферный слой: свет, стекло, ambient glow ====== */
+
+/* Фоновое поле рабочей области: два очень мягких световых пятна */
+@utility ambient-field {
+  position: relative;
+
+  &::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: -1;
+    background-image:
+      radial-gradient(
+        58% 42% at 18% -6%,
+        color-mix(in oklab, var(--primary) 10%, transparent) 0%,
+        transparent 62%
+      ),
+      radial-gradient(
+        46% 38% at 96% 4%,
+        color-mix(in oklab, var(--chart-4) 7%, transparent) 0%,
+        transparent 60%
+      ),
+      radial-gradient(
+        70% 50% at 50% 108%,
+        color-mix(in oklab, var(--foreground) 3.5%, transparent) 0%,
+        transparent 68%
+      );
+  }
+}
+
+/* Стеклянная панель: полупрозрачность + размытие подложки */
+@utility glass-bar {
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur)) saturate(150%);
+  border-color: var(--glass-border);
+}
+
+/* Ambient-свет внутри тёмного рельса */
+@utility rail-ambient {
+  position: relative;
+
+  &::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: -1;
+    background-image:
+      radial-gradient(
+        86% 26% at 12% 0%,
+        color-mix(in oklab, var(--sidebar-primary) 16%, transparent) 0%,
+        transparent 64%
+      ),
+      radial-gradient(
+        70% 22% at 90% 100%,
+        color-mix(in oklab, var(--sidebar-primary) 9%, transparent) 0%,
+        transparent 70%
+      );
+  }
+}
+
+/* Активный пункт навигации: стеклянная плашка с подсветкой края */
+@utility nav-active {
+  background:
+    linear-gradient(
+      90deg,
+      color-mix(in oklab, var(--sidebar-primary) 20%, transparent) 0%,
+      color-mix(in oklab, var(--sidebar-primary) 7%, transparent) 46%,
+      transparent 100%
+    );
+  box-shadow:
+    inset 0 1px 0 0 color-mix(in oklab, var(--sidebar-foreground) 10%, transparent),
+    0 8px 22px -14px color-mix(in oklab, var(--sidebar-primary) 70%, transparent);
+}
+
+/* Мягкий световой ореол интерактивного элемента при наведении */
+@utility hover-halo {
+  transition:
+    box-shadow var(--dur-2) var(--ease-out),
+    border-color var(--dur-2) var(--ease-out),
+    background-color var(--dur-2) var(--ease-out);
+
+  &:hover {
+    box-shadow: 0 0 0 3px color-mix(in oklab, var(--primary) 8%, transparent);
+  }
+}
+
+
+/* Фокус внутри тёмного рельса: подложка и цвет от токенов сайдбара */
+[data-rail] {
+  --focus-offset-color: var(--sidebar);
+  --focus-color: color-mix(in oklab, var(--sidebar-primary) 60%, transparent);
+  --focus-halo: color-mix(in oklab, var(--sidebar-primary) 14%, transparent);
+}
+
+
+/* ============================================================
+   МОСТ СОВМЕСТИМОСТИ — временный, удаляется на этапе 9
+   ------------------------------------------------------------
+   Экраны apps/web, ещё не переведённые на новую систему,
+   используют токены прежней дизайн-системы (shadow-card,
+   text-muted-2, bg-success-tint и т.д.). Пока обе системы
+   сосуществуют (docs/UI_MIGRATION_PLAN.md, §7 «Риски»), эти
+   имена выражаются через новые значения — приложение остаётся
+   рабочим на каждом шаге миграции.
+
+   Удалить целиком вместе с legacy styles.css на этапе 9.
+   ============================================================ */
+@theme inline {
+  /* Тени прежней шкалы -> новая шкала elevation */
+  --shadow-sm: var(--shadow-1);
+  --shadow-card: var(--shadow-2);
+  --shadow-hover: var(--shadow-3);
+  --shadow-lg: var(--shadow-4);
+
+  /* Третий уровень текста прежней системы */
+  --color-muted-2: var(--color-mix-muted-2);
+
+  /* Полупрозрачные подложки статусов */
+  --color-success-tint: var(--tint-success);
+  --color-warning-tint: var(--tint-warning);
+  --color-info-tint: var(--tint-info);
+  --color-info: var(--info);
+}
+
+:root {
+  --color-mix-muted-2: color-mix(in oklab, var(--muted-foreground) 72%, var(--background));
+  --info: oklch(0.52 0.14 250);
+  --tint-success: color-mix(in oklab, var(--success) 12%, var(--card));
+  --tint-warning: color-mix(in oklab, var(--warning) 14%, var(--card));
+  --tint-info: color-mix(in oklab, var(--info) 12%, var(--card));
+}
+
+/* Фикс, перенесённый из прежних токенов (найден при инженерной ревизии
+   2026-08-03): react-day-picker рендерит дни как <button> и не объявляет
+   box-shadow ни для одного своего класса. Любое глобальное правило для
+   <button> протекает на круглые ячейки дня и даёт артефакт-свечение.
+   Держим явное обнуление, пока в проекте есть DatePicker. */
 .rdp-day_button,
 .rdp-button_previous,
 .rdp-button_next {

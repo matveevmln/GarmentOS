@@ -24,33 +24,35 @@
    алиасы новых токенов — единый источник истины, тема переключается
    в одном месте (Tokens/tokens.css), а не дублируется в двух системах. */
 :root {
-  --bg: var(--color-background);
-  --surface: var(--color-card);
-  --surface-2: var(--color-secondary);
-  --border: var(--color-border);
-  --ink: var(--color-foreground);
-  --muted: var(--color-muted-foreground);
-  --muted-2: var(--color-muted-2);
-  --accent: var(--color-primary);
-  --accent-ink: var(--color-primary-foreground);
-  --accent-tint: var(--color-accent);
-  --accent-ring: var(--color-ring);
-  --success: var(--color-success);
-  --success-tint: var(--color-success-tint);
-  --warning: var(--color-warning);
-  --warning-tint: var(--color-warning-tint);
-  --danger: var(--color-destructive);
-  --danger-tint: #fceae6;
-  --info: var(--color-info);
-  --info-tint: var(--color-info-tint);
-  --r-lg: var(--radius-lg);
-  --r-md: var(--radius-md);
-  --r-sm: var(--radius-sm);
-  /* --shadow-card не переопределяется здесь: то же имя уже определено
-     в Tokens/tokens.css @theme (неслоистый CSS, побеждает по правилам
-     cascade layers, docs/UI_REVIEW.md §5) — второе объявление внутри
-     @layer base было бы просто мёртвым кодом и рискует опечаткой вида
-     var(--shadow-card) внутри самого себя (циклическая ссылка). */
+  /* Мост совместимости: легаси-переменные этого файла выражены через
+     новую дизайн-систему (Tokens/tokens.css). Префикс --lg- гарантирует,
+     что они не сталкиваются с одноимёнными токенами новой системы:
+     например, новый --muted это ЦВЕТ ПОВЕРХНОСТИ, а легаси --lg-muted
+     это ЦВЕТ ТЕКСТА. Без префикса объявление ниже перебивало бы новый
+     токен и ломало bg-muted во всех новых компонентах.
+     Весь файл удаляется на этапе 9 (docs/UI_MIGRATION_PLAN.md). */
+  --lg-bg: var(--background);
+  --lg-surface: var(--card);
+  --lg-surface-2: var(--secondary);
+  --lg-border: var(--border);
+  --lg-ink: var(--foreground);
+  --lg-muted: var(--muted-foreground);
+  --lg-muted-2: var(--color-mix-muted-2);
+  --lg-accent: var(--primary);
+  --lg-accent-ink: var(--primary-foreground);
+  --lg-accent-tint: var(--accent);
+  --lg-accent-ring: var(--ring);
+  --lg-success: var(--success);
+  --lg-success-tint: var(--tint-success);
+  --lg-warning: var(--warning);
+  --lg-warning-tint: var(--tint-warning);
+  --lg-danger: var(--destructive);
+  --lg-danger-tint: color-mix(in oklab, var(--destructive) 12%, var(--card));
+  --lg-info: var(--info);
+  --lg-info-tint: var(--tint-info);
+  --lg-r-lg: var(--radius-lg);
+  --lg-r-md: var(--radius-md);
+  --lg-r-sm: var(--radius-sm);
   color-scheme: light;
 }
 
@@ -59,13 +61,13 @@
   -webkit-tap-highlight-color: transparent;
 }
 
+/* Типографика, цвет и фон body задаются новой дизайн-системой
+   (Tokens/tokens.css, @layer base) — Onest + фирменная светлая палитра.
+   Здесь эти объявления убраны намеренно: styles.css импортируется ПОСЛЕ
+   токенов и в том же слое, поэтому дублирование молча перебивало бы
+   новый шрифт системным. Осталось только обнуление отступа. */
 body {
   margin: 0;
-  font-family:
-    -apple-system, "SF Pro Text", "Segoe UI Variable", "Segoe UI", Roboto, Arial, sans-serif;
-  color: var(--ink);
-  background: var(--bg);
-  -webkit-font-smoothing: antialiased;
 }
 
 input,
@@ -93,13 +95,13 @@ button {
   align-items: center;
   justify-content: center;
   padding: 16px;
-  background: var(--bg);
+  background: var(--lg-bg);
 }
 
 .auth-card {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--r-lg);
+  background: var(--lg-surface);
+  border: 1px solid var(--lg-border);
+  border-radius: var(--lg-r-lg);
   box-shadow: var(--shadow-card);
   padding: 28px;
   width: 100%;
@@ -111,12 +113,12 @@ button {
 
 .auth-card h1 {
   margin: 0;
-  color: var(--accent);
+  color: var(--lg-accent);
   letter-spacing: -0.02em;
 }
 
 .auth-subtitle {
-  color: var(--muted);
+  color: var(--lg-muted);
   margin: 0 0 10px;
 }
 
@@ -125,36 +127,36 @@ label {
   flex-direction: column;
   gap: 4px;
   font-size: 0.9rem;
-  color: var(--muted);
+  color: var(--lg-muted);
   font-weight: 650;
 }
 
 input,
 select {
   padding: 10px 12px;
-  border: 1px solid var(--border);
-  background: var(--surface);
-  color: var(--ink);
-  border-radius: var(--r-sm);
+  border: 1px solid var(--lg-border);
+  background: var(--lg-surface);
+  color: var(--lg-ink);
+  border-radius: var(--lg-r-sm);
   min-height: 44px;
 }
 
 input:focus,
 select:focus {
-  outline: 2px solid var(--accent-ring);
-  border-color: var(--accent);
+  outline: 2px solid var(--lg-accent-ring);
+  border-color: var(--lg-accent);
 }
 
 button {
   padding: 10px 16px;
   min-height: 44px;
-  border-radius: var(--r-sm);
+  border-radius: var(--lg-r-sm);
   border: none;
-  background: var(--accent);
-  color: var(--accent-ink);
+  background: var(--lg-accent);
+  color: var(--lg-accent-ink);
   font-weight: 800;
   cursor: pointer;
-  box-shadow: 0 10px 22px -10px var(--accent-ring);
+  box-shadow: 0 10px 22px -10px var(--lg-accent-ring);
 }
 
 button:disabled {
@@ -169,8 +171,8 @@ button:disabled {
   border: none;
   border-radius: 15px;
   padding: 15px 16px;
-  background: var(--accent);
-  color: var(--accent-ink);
+  background: var(--lg-accent);
+  color: var(--lg-accent-ink);
   font-size: 0.95rem;
   font-weight: 800;
   display: flex;
@@ -178,14 +180,14 @@ button:disabled {
   justify-content: center;
   gap: 9px;
   letter-spacing: -0.005em;
-  box-shadow: 0 10px 22px -10px var(--accent-ring);
+  box-shadow: 0 10px 22px -10px var(--lg-accent-ring);
   min-height: 48px;
 }
 
 .cta.secondary {
-  background: var(--surface);
-  color: var(--ink);
-  border: 1px solid var(--border);
+  background: var(--lg-surface);
+  color: var(--lg-ink);
+  border: 1px solid var(--lg-border);
   box-shadow: none;
 }
 
@@ -196,7 +198,7 @@ button:disabled {
 
 .field-error,
 .form-error {
-  color: var(--danger);
+  color: var(--lg-danger);
   font-size: 0.85rem;
   margin: -4px 0 0;
   font-weight: 650;
@@ -214,13 +216,13 @@ button:disabled {
   align-items: center;
   justify-content: space-between;
   padding: 14px 20px;
-  background: var(--surface);
-  border-bottom: 1px solid var(--border);
+  background: var(--lg-surface);
+  border-bottom: 1px solid var(--lg-border);
 }
 
 .app-title {
   font-weight: 800;
-  color: var(--accent);
+  color: var(--lg-accent);
   letter-spacing: -0.01em;
 }
 
@@ -233,9 +235,9 @@ button:disabled {
 }
 
 .app-user button {
-  background: var(--surface);
-  color: var(--muted);
-  border: 1px solid var(--border);
+  background: var(--lg-surface);
+  color: var(--lg-muted);
+  border: 1px solid var(--lg-border);
   box-shadow: none;
   min-height: 36px;
   padding: 4px 12px;
@@ -254,8 +256,8 @@ button:disabled {
   overflow-x: auto;
   gap: 4px;
   padding: 10px 16px;
-  background: var(--surface-2);
-  border-bottom: 1px solid var(--border);
+  background: var(--lg-surface-2);
+  border-bottom: 1px solid var(--lg-border);
 }
 
 .app-nav a {
@@ -266,19 +268,19 @@ button:disabled {
   padding: 8px 14px;
   border-radius: 999px;
   text-decoration: none;
-  color: var(--muted);
+  color: var(--lg-muted);
   font-size: 0.85rem;
   font-weight: 700;
   transition: background-color var(--animate-duration-fast, 120ms) ease, color var(--animate-duration-fast, 120ms) ease;
 }
 
 .app-nav a:not(.active):hover {
-  background: var(--surface-2);
-  color: var(--ink);
+  background: var(--lg-surface-2);
+  color: var(--lg-ink);
 }
 
 .app-nav a:focus-visible {
-  outline: 2px solid var(--accent-ring);
+  outline: 2px solid var(--lg-accent-ring);
   outline-offset: 2px;
 }
 
@@ -289,10 +291,10 @@ button:disabled {
 
 .app-nav a.active {
   /* Тот же паттерн, что .filters button.active (см. комментарий там) —
-     --bg вместо захардкоженного #fff, чтобы пара оставалась контрастной
+     --lg-bg вместо захардкоженного #fff, чтобы пара оставалась контрастной
      после инверсии в тёмной теме. */
-  background: var(--ink);
-  color: var(--bg);
+  background: var(--lg-ink);
+  color: var(--lg-bg);
 }
 
 .app-main {
@@ -320,7 +322,7 @@ button:disabled {
     padding: 8px 4px calc(8px + env(safe-area-inset-bottom, 0px));
     background: rgba(255, 255, 255, 0.92);
     backdrop-filter: blur(14px);
-    border-top: 1px solid var(--border);
+    border-top: 1px solid var(--lg-border);
     border-bottom: none;
   }
 
@@ -331,7 +333,7 @@ button:disabled {
     padding: 4px 10px;
     border-radius: 12px;
     font-size: 10px;
-    color: var(--muted-2);
+    color: var(--lg-muted-2);
   }
 
   .app-nav a .icon {
@@ -341,7 +343,7 @@ button:disabled {
 
   .app-nav a.active {
     background: none;
-    color: var(--accent);
+    color: var(--lg-accent);
   }
 
   .app-main {
@@ -354,9 +356,9 @@ button:disabled {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--r-lg);
+  background: var(--lg-surface);
+  border: 1px solid var(--lg-border);
+  border-radius: var(--lg-r-lg);
   box-shadow: var(--shadow-card);
   padding: 18px;
   margin-bottom: 20px;
@@ -383,8 +385,8 @@ button:disabled {
   width: 100%;
   overflow-x: auto;
   overflow-y: hidden;
-  border: 1px solid var(--border);
-  border-radius: var(--r-lg);
+  border: 1px solid var(--lg-border);
+  border-radius: var(--lg-r-lg);
   box-shadow: var(--shadow-card);
   -webkit-overflow-scrolling: touch;
 }
@@ -393,19 +395,19 @@ button:disabled {
   width: 100%;
   min-width: 480px;
   border-collapse: collapse;
-  background: var(--surface);
+  background: var(--lg-surface);
 }
 
 .data-table th,
 .data-table td {
   text-align: left;
   padding: 12px 14px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--lg-border);
   font-size: 0.9rem;
 }
 
 .data-table th {
-  color: var(--muted);
+  color: var(--lg-muted);
   font-weight: 800;
   font-size: 0.72rem;
   letter-spacing: 0.05em;
@@ -418,9 +420,9 @@ button:disabled {
 
 /* ---- .card / .card-pad — базовая переиспользуемая обёртка, дословно из прототипа ---- */
 .card {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--r-lg);
+  background: var(--lg-surface);
+  border: 1px solid var(--lg-border);
+  border-radius: var(--lg-r-lg);
   box-shadow: var(--shadow-card);
 }
 
@@ -483,8 +485,8 @@ button.list-card:active {
   justify-content: center;
   font-weight: 800;
   font-size: 13px;
-  background: var(--surface-2);
-  color: var(--muted);
+  background: var(--lg-surface-2);
+  color: var(--lg-muted);
 }
 
 .list-card .body {
@@ -500,13 +502,13 @@ button.list-card:active {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  color: var(--ink);
+  color: var(--lg-ink);
 }
 
 .list-card .meta {
   display: block;
   font-size: 11.5px;
-  color: var(--muted);
+  color: var(--lg-muted);
   margin-top: 2px;
   white-space: nowrap;
   overflow: hidden;
@@ -514,7 +516,7 @@ button.list-card:active {
 }
 
 .list-card .chev {
-  color: var(--muted-2);
+  color: var(--lg-muted-2);
   flex: none;
 }
 
@@ -553,9 +555,9 @@ button.list-card:active {
 
 .filters button {
   flex: none;
-  border: 1px solid var(--border);
-  background: var(--surface);
-  color: var(--muted);
+  border: 1px solid var(--lg-border);
+  background: var(--lg-surface);
+  color: var(--lg-muted);
   border-radius: 999px;
   padding: 8px 14px;
   font-size: 0.8rem;
@@ -574,25 +576,25 @@ button.list-card:active {
    элементов, docs/UX_PRINCIPLES.md §3, и базовой доступности —
    клавиатурная навигация должна быть видна). */
 .filters button:not(.active):hover {
-  background: var(--surface-2);
-  color: var(--ink);
+  background: var(--lg-surface-2);
+  color: var(--lg-ink);
 }
 
 .filters button:focus-visible {
-  outline: 2px solid var(--accent-ring);
+  outline: 2px solid var(--lg-accent-ring);
   outline-offset: 2px;
 }
 
 .filters button.active {
-  /* Раньше color: #fff — верно только в светлой теме, где --ink тёмный.
-     В тёмной теме --ink светлый (алиас --color-foreground), и захардкоженный
+  /* Раньше color: #fff — верно только в светлой теме, где --lg-ink тёмный.
+     В тёмной теме --lg-ink светлый (алиас --color-foreground), и захардкоженный
      белый текст становился невидимым на светлой пилюле (найдено на
-     визуальном ревью тёмной темы 2026-08-03). --bg тоже теперь алиас темы
+     визуальном ревью тёмной темы 2026-08-03). --lg-bg тоже теперь алиас темы
      (--color-background) — пара ink/bg инвертируется вместе, контраст
      остаётся верным в обеих темах без двух наборов правил. */
-  background: var(--ink);
-  color: var(--bg);
-  border-color: var(--ink);
+  background: var(--lg-ink);
+  color: var(--lg-bg);
+  border-color: var(--lg-ink);
 }
 
 /* ---- .search — строка поиска, дословно из прототипа ---- */
@@ -600,11 +602,11 @@ button.list-card:active {
   display: flex;
   align-items: center;
   gap: 9px;
-  background: var(--surface-2);
+  background: var(--lg-surface-2);
   border-radius: 13px;
   padding: 11px 14px;
   margin: 2px 0 16px;
-  color: var(--muted);
+  color: var(--lg-muted);
   border: 1.5px solid transparent;
   transition: border-color var(--animate-duration-fast, 120ms) ease;
 }
@@ -615,7 +617,7 @@ button.list-card:active {
    полным отсутствием видимого фокуса при табуляции, реальный пробел
    доступности, не оформительское решение. */
 .search:has(input:focus-visible) {
-  border-color: var(--accent);
+  border-color: var(--lg-accent);
 }
 
 .search .icon {
@@ -629,7 +631,7 @@ button.list-card:active {
   background: none;
   outline: none;
   font-size: 14px;
-  color: var(--ink);
+  color: var(--lg-ink);
   width: 100%;
   min-height: 0;
   padding: 0;
@@ -672,12 +674,12 @@ button.list-card:active {
 .model-card .mt {
   font-size: 13.5px;
   font-weight: 800;
-  color: var(--ink);
+  color: var(--lg-ink);
 }
 
 .model-card .ms {
   font-size: 11px;
-  color: var(--muted);
+  color: var(--lg-muted);
   margin-top: 2px;
 }
 
@@ -685,20 +687,20 @@ button.list-card:active {
 .empty {
   text-align: center;
   padding: 50px 20px;
-  color: var(--muted);
+  color: var(--lg-muted);
 }
 
 .empty .icon {
   width: 34px;
   height: 34px;
   margin: 0 auto 12px;
-  color: var(--muted-2);
+  color: var(--lg-muted-2);
 }
 
 .empty .t {
   font-size: 14px;
   font-weight: 700;
-  color: var(--ink);
+  color: var(--lg-ink);
   margin-bottom: 4px;
 }
 
@@ -714,12 +716,12 @@ button.list-card:active {
 .pending-list {
   margin: 0;
   padding-left: 18px;
-  color: var(--muted);
+  color: var(--lg-muted);
   font-size: 0.9rem;
 }
 
 .muted {
-  color: var(--muted);
+  color: var(--lg-muted);
 }
 
 h1 {
@@ -743,33 +745,33 @@ h2 {
   padding: 5px 10px;
   border-radius: 999px;
   white-space: nowrap;
-  background: var(--surface-2);
-  color: var(--muted);
+  background: var(--lg-surface-2);
+  color: var(--lg-muted);
 }
 
 .status-badge.tone-success {
-  background: var(--success-tint);
-  color: var(--success);
+  background: var(--lg-success-tint);
+  color: var(--lg-success);
 }
 
 .status-badge.tone-warning {
-  background: var(--warning-tint);
-  color: var(--warning);
+  background: var(--lg-warning-tint);
+  color: var(--lg-warning);
 }
 
 .status-badge.tone-danger {
-  background: var(--danger-tint);
-  color: var(--danger);
+  background: var(--lg-danger-tint);
+  color: var(--lg-danger);
 }
 
 .status-badge.tone-info {
-  background: var(--info-tint);
-  color: var(--info);
+  background: var(--lg-info-tint);
+  color: var(--lg-info);
 }
 
 .status-badge.tone-accent {
-  background: var(--accent-tint);
-  color: var(--accent);
+  background: var(--lg-accent-tint);
+  color: var(--lg-accent);
 }
 
 @media (max-width: 600px) {
