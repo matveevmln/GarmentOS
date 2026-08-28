@@ -1,35 +1,59 @@
-import { AlertTriangle } from "lucide-react";
+import { IconAlert, IconRefresh } from "../Icons/icons";
 import { Button } from "../Button/Button";
 
-// GarmentErrorState — docs/DESIGN_SYSTEM_MAP.md §4.5: реальный пробел —
-// если API недоступен при первой загрузке списка (не при отправке формы),
-// экран показывал пустой список, неотличимый от «нет данных»
-// (UX_PRINCIPLES.md §5 — ошибка обязана называть, что произошло и что делать).
 interface ErrorStateProps {
   title?: string;
   description?: string;
   onRetry?: () => void;
 }
 
+// GarmentErrorState — визуальный слой из утверждённого прототипа
+// (docs/UI_MIGRATION_PLAN.md, этап 2): рамка и подложка в тоне danger,
+// чтобы состояние ошибки читалось как ошибка, а не как обычная карточка.
+// API сохранён ({title, description, onRetry}) — 12 вызовов на страницах
+// продолжают работать.
 export function ErrorState({
   title = "Не удалось загрузить данные",
   description = "Проверьте подключение к интернету и попробуйте ещё раз.",
   onRetry,
 }: ErrorStateProps) {
   return (
-    <div className="flex flex-col items-center gap-3 rounded-[22px] border border-border bg-card p-8 text-center shadow-card">
-      <span className="flex h-11 w-11 items-center justify-center rounded-full bg-destructive/10 text-destructive">
-        <AlertTriangle className="h-5 w-5" />
+    <div className="flex flex-col items-center justify-center rounded-[10px] border border-danger/20 bg-danger/[0.03] px-6 py-12 text-center">
+      <span className="mb-3 inline-flex h-10 w-10 items-center justify-center rounded-[8px] border border-danger/20 bg-danger/[0.08] text-danger">
+        <IconAlert size={18} />
       </span>
-      <div className="flex flex-col gap-1">
-        <p className="text-[0.95rem] font-bold text-foreground">{title}</p>
-        <p className="text-[0.85rem] text-muted-foreground">{description}</p>
-      </div>
+      <h3 className="text-[14px] font-semibold">{title}</h3>
+      <p className="mt-1.5 max-w-[360px] text-[12px] leading-relaxed text-muted-foreground">{description}</p>
       {onRetry && (
-        <Button type="button" variant="secondary" size="sm" onClick={onRetry}>
-          Повторить
-        </Button>
+        <div className="mt-4">
+          <Button variant="secondary" size="sm" onClick={onRetry}>
+            <IconRefresh size={14} />
+            Повторить
+          </Button>
+        </div>
       )}
+    </div>
+  );
+}
+
+// AccessDeniedState — новый компонент из прототипа. Отдельное состояние
+// «нет прав» вместо пустого экрана: RBAC уже работает на бэкенде, но UI
+// раньше не отличал «данных нет» от «доступ закрыт».
+export function AccessDeniedState({
+  description = "У вашей роли нет доступа к этому разделу. Запросите расширение прав у владельца компании.",
+}: {
+  description?: string;
+}) {
+  return (
+    <div className="flex flex-col items-center justify-center rounded-[10px] border border-border bg-card px-6 py-12 text-center">
+      <span className="mb-3 inline-flex h-10 w-10 items-center justify-center rounded-[8px] border border-border bg-muted/60 text-muted-foreground">
+        <svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <rect x="4.5" y="10.5" width="15" height="10" rx="2" />
+          <path d="M8 10.5V7.5a4 4 0 0 1 8 0v3" />
+        </svg>
+      </span>
+      <h3 className="text-[14px] font-semibold">Нет прав доступа</h3>
+      <p className="mt-1.5 max-w-[360px] text-[12px] leading-relaxed text-muted-foreground">{description}</p>
     </div>
   );
 }

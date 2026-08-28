@@ -68,8 +68,13 @@
   --color-warning: var(--warning);
   --color-danger: var(--danger);
   --color-surface: var(--surface);
-  --font-sans: "Onest", ui-sans-serif, system-ui, sans-serif;
-  --font-display: "Onest", ui-sans-serif, system-ui, sans-serif;
+  /* Пакет @fontsource-variable/onest регистрирует @font-face под именем
+     "Onest Variable" (переменное начертание), а не "Onest". Без первого
+     имени в стеке браузер молча падал на системный sans-serif — проверено
+     измерением ширины строки. "Onest" оставлен вторым на случай, если
+     шрифт установлен в системе пользователя. */
+  --font-sans: "Onest Variable", "Onest", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Onest Variable", "Onest", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, monospace;
 
 }
