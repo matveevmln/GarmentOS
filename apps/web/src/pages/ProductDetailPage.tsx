@@ -95,9 +95,9 @@ export function ProductDetailPage() {
     try {
       await createVariant({ ...data, productId: id });
       reset();
-      toast.success("SKU добавлен");
+      toast.success("Вариант модели добавлен");
     } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "Не удалось добавить SKU");
+      toast.error(err instanceof ApiError ? err.message : "Не удалось добавить вариант модели");
     }
   };
 
@@ -118,7 +118,7 @@ export function ProductDetailPage() {
       await reloadBoms();
       toast.success("Спецификация сохранена черновиком");
     } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "Не удалось создать спецификацию (BOM)");
+      toast.error(err instanceof ApiError ? err.message : "Не удалось сохранить нормы расхода");
     } finally {
       setIsSubmittingBom(false);
     }
@@ -166,7 +166,7 @@ export function ProductDetailPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Размеры и цвета (SKU)</CardTitle>
+          <CardTitle>Размеры и цвета</CardTitle>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
           <form
@@ -179,22 +179,22 @@ export function ProductDetailPage() {
             <Field label="Цвет" className="min-w-[120px] flex-1">
               <Input {...register("color")} placeholder="Петроль" />
             </Field>
-            <Field label="Код SKU" className="min-w-[160px] flex-1">
+            <Field label="Артикул варианта" className="min-w-[160px] flex-1">
               <Input {...register("skuCode")} placeholder={`${product.code}-M-PETROL`} />
             </Field>
             <Button type="submit" size="sm" loading={isSubmitting} className="sm:w-auto">
-              Добавить SKU
+              Добавить размер и цвет
             </Button>
           </form>
           {(errors.size ?? errors.color ?? errors.skuCode) && (
-            <p className="text-[0.8rem] font-semibold text-destructive">Заполните размер, цвет и код SKU</p>
+            <p className="text-[0.8rem] font-semibold text-destructive">Заполните размер, цвет и артикул варианта</p>
           )}
 
           {variantsLoading ? (
             <SkeletonList rows={2} />
           ) : (
             variants.length === 0 ? (
-              <EmptyState compact title="Пока нет ни одного SKU" description="Добавьте размер и цвет в форме выше." />
+              <EmptyState compact title="Пока нет ни одного варианта модели" description="Добавьте размер и цвет в форме выше." />
             ) : (
               <>
                 {/* Плотная таблица на планшете и десктопе — как на всех
@@ -204,7 +204,7 @@ export function ProductDetailPage() {
                     columns={[
                       { key: "size", label: "Размер", width: "120px" },
                       { key: "color", label: "Цвет" },
-                      { key: "sku", label: "Код SKU", align: "right", width: "240px" },
+                      { key: "sku", label: "Артикул варианта", align: "right", width: "240px" },
                     ]}
                   >
                     {variants.map((row) => (
@@ -239,7 +239,7 @@ export function ProductDetailPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Спецификация (BOM)</CardTitle>
+          <CardTitle>Нормы расхода материалов</CardTitle>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
           <div className="flex flex-col gap-3 rounded-[10px] border border-border bg-muted/40 p-3.5 sm:flex-row sm:flex-wrap sm:items-end">

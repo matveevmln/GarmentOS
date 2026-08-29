@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import type { BatchPassportResponseDto } from "@garmentos/shared-types";
+import type { BatchPassportResponseDto, DocumentResponseDto } from "@garmentos/shared-types";
 import { apiDownload, apiRequest, ApiError } from "../api/client";
 import { Card, CardTitle, SectionLabel } from "../design-system/Card/Card";
 import { StatusBadge } from "../design-system/StatusBadge/StatusBadge";
@@ -20,6 +20,14 @@ import {
   isProductionStage,
   type CostRow,
 } from "../design-system/Blocks";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "../design-system/Modal/Dialog";
 import { statusMeta } from "../lib/status";
 import { formatDate, formatMoney, formatQuantity } from "../lib/format";
 import { cn } from "../design-system/utils";
@@ -46,6 +54,22 @@ import { toast } from "../design-system/Toast/Toast";
 
 type TabKey = "cost" | "docs" | "colors" | "contract" | "history";
 
+// Тип документа хранится в базе строкой (`documents.doc_type`) и намеренно не
+// ограничен списком: у каждой компании свой словарь документов. В интерфейсе
+// известные типы получают русское название, незнакомые показываются как есть,
+// а не прячутся — иначе загруженный документ выглядел бы безымянным.
+const DOC_TYPE_LABELS: Record<string, string> = {
+  specification: "Спецификация",
+  specification_signed: "Подписанная спецификация",
+  invoice: "Счёт",
+  contract: "Договор",
+  act: "Акт",
+};
+
+function documentTypeLabel(docType: string): string {
+  return DOC_TYPE_LABELS[docType] ?? docType;
+}
+
 const TABS: { key: TabKey; label: string }[] = [
   { key: "cost", label: "Себестоимость" },
   { key: "docs", label: "Документы" },
@@ -61,6 +85,8 @@ export function BatchPassportPage() {
   const [passport, setPassport] = useState<BatchPassportResponseDto | null>(null);
   const [error, setError] = useState(false);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [confirmRegenerate, setConfirmRegenerate] = useState(false);
   const [tab, setTab] = useState<TabKey>("cost");
 
   const load = () => {
@@ -72,6 +98,33 @@ export function BatchPassportPage() {
   };
 
   useEffect(load, [id]);
+
+  // Спецификация формируется существующим механизмом Document Engine —
+  // второго генератора не заводится. Номер документа резервируется по
+  // договору цеха, реквизиты берутся из зафиксированных данных партии, а не
+  // из карточек модели и цеха, которые могли измениться после подтверждения.
+  //
+  // Повторное формирование не создаёт неучтённых дубликатов: сервер
+  // помечает прежнюю спецификацию неактуальной и связывает новую с ней
+  // (Document Engine, версионность). Кнопка блокируется на время запроса, а
+  // повтор при уже существующем документе требует подтверждения — чтобы
+  // номер спецификации не расходовался случайным нажатием.
+  const generateSpecification = async () => {
+    if (!id) return;
+    setIsGenerating(true);
+    try {
+      const document = await apiRequest<DocumentResponseDto>(`/production-orders/${id}/generate-specification`, {
+        method: "POST",
+      });
+      load();
+      toast.success(`Спецификация сформирована`, { description: document.title ?? undefined });
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Не удалось сформировать спецификацию");
+    } finally {
+      setIsGenerating(false);
+      setConfirmRegenerate(false);
+    }
+  };
 
   const openDocument = async (docId: string, title: string) => {
     setDownloadingId(docId);
@@ -96,14 +149,22 @@ export function BatchPassportPage() {
   // apiRequest не восстанавливает Date из JSON (createdAt приходит строкой,
   // хотя тип DocumentResponseDto утверждает Date) — сравнение через new
   // Date(...) обязательно, .valueOf() на сырой строке даёт NaN и ломает
-  // сортировку молча. Самый свежий документ считается «текущей версией» по
-  // факту, а не по isCurrentVersion — на сегодня повторная генерация
-  // спецификации создаёт независимый документ, не новую версию через
-  // supersedesDocumentId (известный пробел, не в объёме этой задачи).
+  // сортировку молча.
+  //
+  // Актуальная версия определяется флагом isCurrentVersion, который ставит
+  // сервер при формировании новой редакции, а не «самой свежей датой».
+  // Прежний комментарий здесь утверждал, что повторное формирование создаёт
+  // независимый документ — это неверно: Document Engine связывает редакции
+  // через supersedesDocumentId и гасит флаг у предыдущей (проверено).
   const sortedDocuments = [...passport.documents].sort(
     (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
   );
-  const [currentDoc, ...previousDocs] = sortedDocuments;
+  const currentDoc = sortedDocuments.find((doc) => doc.isCurrentVersion) ?? sortedDocuments[0];
+  const previousDocs = sortedDocuments.filter((doc) => doc.id !== currentDoc?.id);
+
+  // Спецификация выпускается по подтверждённому заказу — у черновика ещё нет
+  // ни зафиксированных данных партии, ни основания для номера документа.
+  const canGenerate = passport.status !== "draft" && passport.status !== "cancelled";
 
   // Матрица размер×цвет — союз всех размеров/цветов в порядке первого
   // появления (не предполагаем, что у каждого цвета один и тот же набор
@@ -154,7 +215,7 @@ export function BatchPassportPage() {
             description={
               passport.status === "draft"
                 ? "При подтверждении заказа GarmentOS зафиксирует себестоимость по текущим закупочным ценам — этот снимок больше не изменится, даже если цены вырастут."
-                : "Этот заказ подтверждён до появления Snapshot партии — данные о себестоимости для него не сохранены."
+                : "Этот заказ подтверждён до того, как система начала фиксировать данные партии — себестоимость для него не сохранена."
             }
           />
         );
@@ -162,7 +223,7 @@ export function BatchPassportPage() {
       return (
         <div>
           <div className="num mb-3 text-[11px] text-muted-foreground">
-            Snapshot зафиксирован: {formatDate(snapshot.capturedAt)} · больше не пересчитывается
+            Данные партии зафиксированы {formatDate(snapshot.capturedAt)} · больше не пересчитываются
           </div>
           {costRows.length > 0 ? (
             <CostBreakdown
@@ -212,7 +273,18 @@ export function BatchPassportPage() {
           <EmptyState
             compact
             title="Спецификация ещё не сформирована"
-            description="Документы партии появятся здесь после генерации спецификации."
+            description={
+              canGenerate
+                ? "Сформируйте спецификацию — она появится здесь и будет доступна для скачивания."
+                : "Спецификация формируется по подтверждённому заказу. Сначала подтвердите заказ в списке заказов пошива."
+            }
+            action={
+              canGenerate ? (
+                <Button size="sm" loading={isGenerating} onClick={() => void generateSpecification()}>
+                  Сформировать спецификацию
+                </Button>
+              ) : undefined
+            }
           />
         );
       }
@@ -220,7 +292,7 @@ export function BatchPassportPage() {
         <div className="divide-y divide-border">
           {currentDoc ? (
             <DocumentRow
-              title={currentDoc.title ?? currentDoc.docType}
+              title={`${documentTypeLabel(currentDoc.docType)} · ${currentDoc.title ?? ""}`.replace(/ · $/, "")}
               version="Актуальная"
               format="PDF"
               date={currentDoc.createdAt}
@@ -230,12 +302,20 @@ export function BatchPassportPage() {
           {previousDocs.map((doc) => (
             <DocumentRow
               key={doc.id}
-              title={doc.title ?? doc.docType}
+              title={`${documentTypeLabel(doc.docType)} · ${doc.title ?? ""}`.replace(/ · $/, "")}
+              version="Предыдущая редакция"
               format="PDF"
               date={doc.createdAt}
               onOpen={() => void openDocument(doc.id, doc.title ?? "Спецификация")}
             />
           ))}
+          {canGenerate ? (
+            <div className="pt-3">
+              <Button variant="secondary" size="sm" onClick={() => setConfirmRegenerate(true)}>
+                Сформировать заново
+              </Button>
+            </div>
+          ) : null}
         </div>
       );
     }
@@ -243,7 +323,7 @@ export function BatchPassportPage() {
     if (key === "colors") {
       if (colors.length === 0 || sizes.length === 0) {
         return (
-          <EmptyState compact title="Размеры не заданы" description="В заказе нет ни одного SKU с размером и цветом." />
+          <EmptyState compact title="Размеры не заданы" description="В заказе нет ни одного варианта модели с размером и цветом." />
         );
       }
       return (
@@ -333,6 +413,19 @@ export function BatchPassportPage() {
             <Button variant="secondary" size="sm" onClick={() => void navigate("/production-orders")}>
               К списку
             </Button>
+            {/* Спецификация выпускается по подтверждённому заказу: реквизиты
+                договора и себестоимость фиксируются в момент подтверждения,
+                у черновика их ещё нет. Поэтому у черновика вместо кнопки —
+                подсказка, что нужно сделать раньше. */}
+            {canGenerate && !currentDoc ? (
+              <Button size="sm" loading={isGenerating} onClick={() => void generateSpecification()}>
+                Сформировать спецификацию
+              </Button>
+            ) : null}
+            {/* В шапке — не больше двух действий: на 390px третья кнопка
+                выталкивала страницу за пределы экрана (поймано проверкой
+                адаптива). Повторное формирование живёт во вкладке
+                «Документы», рядом с самими документами. */}
             {currentDoc ? (
               <Button
                 size="sm"
@@ -345,6 +438,30 @@ export function BatchPassportPage() {
           </>
         }
       />
+
+      {/* Повторное формирование расходует номер спецификации по договору
+          цеха и делает прежнюю редакцию неактуальной — поэтому оно требует
+          явного подтверждения, а не одного нажатия. */}
+      <Dialog open={confirmRegenerate} onOpenChange={setConfirmRegenerate}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Сформировать спецификацию заново?</DialogTitle>
+            <DialogDescription>
+              Будет создана новая редакция со следующим номером по договору цеха.
+              {currentDoc?.title ? ` Текущая — «${currentDoc.title}» — ` : " Текущая редакция "}
+              станет неактуальной, но останется в документах партии.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="secondary" size="sm" onClick={() => setConfirmRegenerate(false)}>
+              Отмена
+            </Button>
+            <Button size="sm" loading={isGenerating} onClick={() => void generateSpecification()}>
+              Сформировать
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* 1. Идентичность */}
       <section className="elev-2 flex flex-wrap items-center gap-x-8 gap-y-4 rounded-[10px] bg-sidebar bg-[linear-gradient(180deg,color-mix(in_oklab,var(--sidebar-primary)_9%,transparent)_0%,transparent_60%)] px-4 py-4 text-sidebar-foreground md:px-5">
@@ -421,7 +538,7 @@ export function BatchPassportPage() {
                 description={
                   passport.status === "draft"
                     ? "При подтверждении заказа GarmentOS зафиксирует себестоимость по текущим закупочным ценам."
-                    : "Этот заказ подтверждён до появления Snapshot партии."
+                    : "Этот заказ подтверждён до того, как система начала фиксировать данные партии."
                 }
               />
             </div>
@@ -532,7 +649,7 @@ export function BatchPassportPage() {
         {[
           {
             title: "Материалы",
-            hint: "Что уже куплено, что заказано, чего не хватает для кроя — автоматически по BOM и остаткам склада (MRP-lite, раздел 16), ждёт реализации.",
+            hint: "Что уже куплено, что заказано, чего не хватает для кроя — автоматически по нормам расхода модели и остаткам склада. Ждёт реализации.",
           },
           {
             title: "ОТК и брак",

@@ -87,7 +87,7 @@ export function PilotDashboardPage() {
             </span>
           </div>
           <div className="flex items-center justify-between gap-3 rounded-[10px] border border-border px-3 py-2.5">
-            <span className="font-semibold text-foreground">Последний Snapshot партии</span>
+            <span className="font-semibold text-foreground">Последняя зафиксированная партия</span>
             <span className="text-[0.85rem] text-muted-foreground">{formatDateTime(data.lastSnapshotAt)}</span>
           </div>
           <div className="flex items-center justify-between gap-3 rounded-[10px] border border-border px-3 py-2.5">

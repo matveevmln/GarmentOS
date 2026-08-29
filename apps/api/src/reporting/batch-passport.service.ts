@@ -70,7 +70,9 @@ export class BatchPassportService {
     const timeline: BatchPassportResponseDto["timeline"] = [{ label: "Заказ создан", occurredAt: order.createdAt }];
     const snapshot = order.costSnapshot as ProductionOrderCostSnapshot | null;
     if (snapshot) {
-      timeline.push({ label: "Подтверждён, себестоимость зафиксирована (Snapshot)", occurredAt: new Date(snapshot.capturedAt) });
+      // Подписи ленты уходят прямо в интерфейс, поэтому здесь — язык
+      // пользователя, а не внутренние названия механизмов.
+      timeline.push({ label: "Подтверждён, данные партии зафиксированы", occurredAt: new Date(snapshot.capturedAt) });
     }
     for (const doc of documents) {
       timeline.push({ label: `Спецификация «${doc.title ?? doc.docType}» сформирована`, occurredAt: doc.createdAt });

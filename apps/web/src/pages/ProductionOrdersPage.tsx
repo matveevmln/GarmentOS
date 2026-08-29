@@ -231,7 +231,7 @@ export function ProductionOrdersPage() {
 
             {productId && !approvedBom && (
               <p className="text-[0.85rem] font-semibold text-destructive">
-                У этой модели нет утверждённой спецификации (BOM) — сначала утвердите её на карточке модели.
+                У этой модели не заданы нормы расхода материалов — задайте их на карточке модели.
               </p>
             )}
 
@@ -275,7 +275,7 @@ export function ProductionOrdersPage() {
 
             <div className="flex flex-col gap-3 rounded-[16px] bg-secondary p-3.5 sm:flex-row sm:items-end sm:flex-wrap">
               <label className="flex flex-1 min-w-[140px] flex-col gap-1.5 text-[0.9rem] font-semibold text-muted-foreground">
-                SKU
+                Размер и цвет
                 <Select value={pendingVariantId} onValueChange={setPendingVariantId} disabled={!productId}>
                   <SelectTrigger>
                     <SelectValue placeholder="Размер / цвет" />
