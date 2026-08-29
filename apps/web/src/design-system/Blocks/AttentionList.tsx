@@ -33,7 +33,7 @@ export function AttentionList({
           <button
             type="button"
             onClick={() => onSelect?.(it.id)}
-            className="btn-unset interactive focus-ring -mx-2 flex w-full items-start gap-3 rounded-[8px] px-2 py-3 text-left hover:bg-muted/50 active:bg-muted"
+            className="interactive focus-ring -mx-2 flex w-full items-start gap-3 rounded-[8px] px-2 py-3 text-left hover:bg-muted/50 active:bg-muted"
           >
             <span
               className={cn(

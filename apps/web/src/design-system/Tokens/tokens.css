@@ -852,140 +852,28 @@
 
 
 /* ============================================================
-   МОСТ СОВМЕСТИМОСТИ — временный, удаляется на этапе 9
+   Тени и движение для наложенных слоёв
    ------------------------------------------------------------
-   Экраны apps/web, ещё не переведённые на новую систему,
-   используют токены прежней дизайн-системы (shadow-card,
-   text-muted-2, bg-success-tint и т.д.). Пока обе системы
-   сосуществуют (docs/UI_MIGRATION_PLAN.md, §7 «Риски»), эти
-   имена выражаются через новые значения — приложение остаётся
-   рабочим на каждом шаге миграции.
+   Что осталось от моста совместимости после этапа 9. Легаси
+   удалён целиком; здесь — только имена, которые реально
+   используются оставшимися компонентами:
 
-   Удалить целиком вместе с legacy styles.css на этапе 9.
+     --shadow-card  -> Modal/Dialog, Form/DatePicker
+     --shadow-lg    -> Popover, Tooltip, DropdownMenu, CommandPalette
+     --ease-standard, --animate-duration-slow -> Feedback/Progress
+
+   Остальное (shadow-sm/hover, color-muted-2, *-tint, surface-2,
+   animate-duration-base) удалено: проверено поиском по классам и
+   var() — ни одной ссылки не осталось.
    ============================================================ */
 @theme inline {
-  /* Тени прежней шкалы -> новая шкала elevation */
-  --shadow-sm: var(--shadow-1);
   --shadow-card: var(--shadow-2);
-  --shadow-hover: var(--shadow-3);
   --shadow-lg: var(--shadow-4);
-
-  /* Третий уровень текста прежней системы */
-  --color-muted-2: var(--color-mix-muted-2);
-
-  /* Полупрозрачные подложки статусов */
-  --color-success-tint: var(--tint-success);
-  --color-warning-tint: var(--tint-warning);
-  --color-info-tint: var(--tint-info);
-  --color-info: var(--info);
 }
 
 :root {
-  --color-mix-muted-2: color-mix(in oklab, var(--muted-foreground) 72%, var(--background));
-  --info: oklch(0.52 0.14 250);
-  --tint-success: color-mix(in oklab, var(--success) 12%, var(--card));
-  --tint-warning: color-mix(in oklab, var(--warning) 14%, var(--card));
-  --tint-info: color-mix(in oklab, var(--info) 12%, var(--card));
-
-  /* Дефект этапа 1, найден на этапе 3: часть компонентов читает переменные
-     напрямую из TSX (style={{ background: "var(--accent-tint)" }}), а не
-     через утилиты Tailwind. Такие обращения переименование легаси-токенов
-     в --lg-* не поймало — переменные стали неопределёнными, и подложки
-     иконок в ListCard/KpiCard/Progress молча пропали. Возвращаем имена
-     как алиасы новых значений; сами компоненты переводятся на новые
-     токены на этапах 5-8, после чего эти строки уходят вместе с мостом. */
-  --accent-tint: color-mix(in oklab, var(--primary) 10%, var(--card));
-  --success-tint: var(--tint-success);
-  --warning-tint: var(--tint-warning);
-  --danger-tint: color-mix(in oklab, var(--danger) 12%, var(--card));
-  --info-tint: var(--tint-info);
-  --surface-2: var(--muted);
-
-  /* Прежняя шкала движения -> новая шкала dur/ease */
-  --animate-duration-base: var(--dur-2);
   --animate-duration-slow: var(--dur-4);
   --ease-standard: var(--ease-out);
-}
-
-/* Нейтрализация легаси-правила для <button> — временная, уходит вместе с
-   legacy styles.css на этапе 9.
-
-   В styles.css есть безусловный селектор по элементу:
-     button { padding:10px 16px; min-height:44px; background:var(--lg-accent);
-              color:...; font-weight:800; box-shadow:...; border-radius:...; }
-   Он красит оранжевым КАЖДУЮ кнопку в приложении. Компоненты этапа 2 это
-   не задевало: они задают свой фон/высоту/радиус утилитами, а класс всегда
-   сильнее селектора по элементу. Но блоки этапа 3 (DocumentRow,
-   AttentionList, Accordion) — это кнопки-строки без собственного фона, и
-   легаси-правило превращало их в сплошные оранжевые плашки.
-
-   Трогать сам легаси-селектор нельзя: на нём держатся ещё не перенесённые
-   экраны (вход, формы) — они переводятся на этапах 5-8. Поэтому здесь
-   класс-нейтрализатор, который эти блоки ставят явно.
-
-   Важно, что это @layer components, а не @utility. Легаси-правило лежит в
-   @layer base, поэтому components его перекрывает; а утилиты Tailwind
-   (@layer utilities) перекрывают уже сам нейтрализатор — то есть px-4,
-   bg-card, rounded-[10px] на конкретном блоке продолжают работать. Будь
-   это @utility, порядок между ним и px-4 определялся бы внутренней
-   сортировкой Tailwind — то есть был бы не определён. */
-@layer components {
-  .btn-unset {
-    min-height: 0;
-    border-radius: 0;
-    background: transparent;
-    color: inherit;
-    font-weight: inherit;
-    box-shadow: none;
-    padding: 0;
-    border: none;
-  }
-
-  /* То же самое для полей ввода — временная изоляция, уходит на этапе 9.
-
-     В styles.css есть безусловные селекторы по элементам:
-       input, select { padding:10px 12px; min-height:44px;
-                       border:1px solid var(--lg-border);
-                       background:var(--lg-surface); border-radius:...; }
-       input:focus, select:focus { outline:2px solid var(--lg-accent-ring); }
-     Первый навязывает новым полям прежнюю геометрию (44px и радиус старой
-     системы) там, где компонент задаёт не все свойства; второй рисует
-     оранжевую системную обводку вместо ореола фокуса дизайн-системы.
-
-     Селектор по элементу с псевдоклассом (0,1,1) слабее класса с
-     псевдоклассом (0,2,0), а @layer components сильнее @layer base — так
-     что и утилиты Tailwind поверх этого класса продолжают выигрывать. */
-  .field-unset {
-    min-height: 0;
-    padding: 0;
-    border-radius: 0;
-    border: none;
-    background: transparent;
-    color: inherit;
-  }
-
-  .field-unset:focus,
-  .field-unset:focus-visible {
-    outline: none;
-  }
-
-  /* Легаси-правило `label { display:flex; flex-direction:column; gap:4px;
-     font-size:.9rem; color:var(--lg-muted); font-weight:650 }` навязывает
-     каждой подписи прежнюю типографику. Класс возвращает подпись к
-     обычному потоку, а размер/цвет задаются утилитами на месте. */
-  .label-unset {
-    display: block;
-    /* flex-direction обязателен: легаси задаёт column, и если компонент
-       поверх включает `flex items-center`, то items-center начинает
-       центрировать текст ПО ГОРИЗОНТАЛИ (в колонке это поперечная ось) —
-       подпись уезжала в середину поля. Поймано измерением позиции
-       текстового узла, а не глазами по классам. */
-    flex-direction: row;
-    gap: 0;
-    font-size: inherit;
-    font-weight: inherit;
-    color: inherit;
-  }
 }
 
 /* Фикс, перенесённый из прежних токенов (найден при инженерной ревизии

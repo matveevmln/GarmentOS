@@ -79,24 +79,24 @@ export function PilotDashboardPage() {
           <CardTitle>Состояние системы</CardTitle>
         </CardHeader>
         <CardContent className="flex flex-col gap-2">
-          <div className="flex items-center justify-between gap-3 rounded-2xl border border-border px-3 py-2.5">
+          <div className="flex items-center justify-between gap-3 rounded-[10px] border border-border px-3 py-2.5">
             <span className="font-semibold text-foreground">Последняя спецификация</span>
             <span className="text-[0.85rem] text-muted-foreground">
               {data.lastSpecificationNumber !== null ? `№${data.lastSpecificationNumber}` : "ещё не создана"}
               {data.lastSpecificationAt && ` · ${formatDateTime(data.lastSpecificationAt)}`}
             </span>
           </div>
-          <div className="flex items-center justify-between gap-3 rounded-2xl border border-border px-3 py-2.5">
+          <div className="flex items-center justify-between gap-3 rounded-[10px] border border-border px-3 py-2.5">
             <span className="font-semibold text-foreground">Последний Snapshot партии</span>
             <span className="text-[0.85rem] text-muted-foreground">{formatDateTime(data.lastSnapshotAt)}</span>
           </div>
-          <div className="flex items-center justify-between gap-3 rounded-2xl border border-border px-3 py-2.5">
+          <div className="flex items-center justify-between gap-3 rounded-[10px] border border-border px-3 py-2.5">
             <span className="font-semibold text-foreground">Последний бэкап</span>
             <span className="text-[0.85rem] text-muted-foreground">
               {data.lastBackupAt ? formatDateTime(data.lastBackupAt) : "не отслеживается автоматически — проверить вручную (infra/backup/)"}
             </span>
           </div>
-          <div className="flex items-center justify-between gap-3 rounded-2xl border border-border px-3 py-2.5">
+          <div className="flex items-center justify-between gap-3 rounded-[10px] border border-border px-3 py-2.5">
             <span className="font-semibold text-foreground">Последний деплой</span>
             <span className="text-[0.85rem] text-muted-foreground">
               {data.lastDeployCommit ? `commit ${data.lastDeployCommit}` : "неизвестно (не Railway)"}

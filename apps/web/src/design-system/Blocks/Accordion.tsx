@@ -28,7 +28,7 @@ export function Accordion({
         type="button"
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
-        className="btn-unset interactive focus-ring flex min-h-[48px] w-full items-center justify-between gap-3 rounded-[10px] px-4 py-3 text-left hover:bg-muted/45 active:bg-muted/60"
+        className="interactive focus-ring flex min-h-[48px] w-full items-center justify-between gap-3 rounded-[10px] px-4 py-3 text-left hover:bg-muted/45 active:bg-muted/60"
       >
         <span className="flex items-baseline gap-2">
           <span className="text-[13px] font-semibold">{title}</span>

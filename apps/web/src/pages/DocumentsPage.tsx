@@ -140,7 +140,7 @@ export function DocumentsPage() {
                       onClick={() => setSelectedId(row.id)}
                       aria-current={isActive || undefined}
                       className={cn(
-                        "btn-unset interactive focus-ring -mx-2 flex w-full items-center gap-3 rounded-[8px] px-2 py-3 text-left",
+                        "interactive focus-ring -mx-2 flex w-full items-center gap-3 rounded-[8px] px-2 py-3 text-left",
                         isActive ? "bg-primary/[0.07]" : "hover:bg-muted/50",
                       )}
                     >

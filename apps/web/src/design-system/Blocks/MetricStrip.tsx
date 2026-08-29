@@ -58,7 +58,7 @@ export function MetricStrip({ items }: { items: MetricItem[] }) {
             key={m.label}
             {...(m.onSelect ? { type: "button" as const, onClick: m.onSelect } : {})}
             className={cn(
-              "btn-unset surface-card hairline-accent lift group relative flex flex-col overflow-hidden rounded-[12px] px-4 py-4 text-left md:px-5 md:py-5",
+              "surface-card hairline-accent lift group relative flex flex-col overflow-hidden rounded-[12px] px-4 py-4 text-left md:px-5 md:py-5",
               m.tone ? "accent-surface" : "surface-grad",
               "hover:elev-3 hover:border-primary/25",
               m.onSelect && "focus-ring",

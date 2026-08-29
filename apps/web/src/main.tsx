@@ -11,7 +11,6 @@ import "@fontsource/ibm-plex-mono/400.css";
 import "@fontsource/ibm-plex-mono/500.css";
 import "@fontsource/ibm-plex-mono/600.css";
 import "./design-system/Tokens/tokens.css";
-import "./styles.css";
 
 const container = document.getElementById("root");
 if (!container) throw new Error("Не найден элемент #root");

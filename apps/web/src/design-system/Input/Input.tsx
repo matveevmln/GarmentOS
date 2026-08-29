@@ -10,7 +10,7 @@ export const Input = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputE
         // Геометрия поля — из прототипа (SearchField): 10px радиус,
         // 40px высота на мобильном / 36px на десктопе, 13px текст.
         // Фокус даёт утилита `field` (ореол), а не собственный ring.
-        "field-unset field h-10 min-h-10 rounded-[10px] border border-border bg-card px-3 text-[13px] md:h-9 md:min-h-9 flex w-full text-foreground placeholder:text-muted-foreground",
+        "field h-10 min-h-10 rounded-[10px] border border-border bg-card px-3 text-[13px] md:h-9 md:min-h-9 flex w-full text-foreground placeholder:text-muted-foreground",
         "disabled:cursor-not-allowed disabled:opacity-45",
         className,
       )}

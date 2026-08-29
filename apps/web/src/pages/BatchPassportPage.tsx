@@ -495,7 +495,7 @@ export function BatchPassportPage() {
                 type="button"
                 onClick={() => setTab(t.key)}
                 className={cn(
-                  "btn-unset interactive relative -mb-px h-9 rounded-t-[6px] px-3 text-[13px]",
+                  "interactive relative -mb-px h-9 rounded-t-[6px] px-3 text-[13px]",
                   tab === t.key
                     ? "font-medium text-foreground"
                     : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",

@@ -30,9 +30,9 @@ export function FilterTabs<T extends string>({ options, value, onChange, classNa
             aria-selected={isActive}
             onClick={() => onChange(option.value)}
             className={cn(
-              // btn-unset: легаси-правило `button {}` добавляет чипу оранжевое
+              //: легаси-правило `button {}` добавляет чипу оранжевое
               // свечение box-shadow, которого нет в прототипе.
-              "btn-unset interactive focus-ring h-9 rounded-[10px] border px-2.5 text-[12px] font-medium md:h-8",
+              "interactive focus-ring h-9 rounded-[10px] border px-2.5 text-[12px] font-medium md:h-8",
               isActive
                 ? "border-primary/35 bg-primary/[0.10] text-primary shadow-[inset_0_-2px_0_0_color-mix(in_oklab,var(--primary)_45%,transparent)]"
                 : "border-border bg-card text-muted-foreground hover:border-primary/25 hover:bg-muted hover:text-foreground",

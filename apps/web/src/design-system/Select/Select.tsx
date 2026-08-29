@@ -18,7 +18,7 @@ export const SelectTrigger = forwardRef<
     ref={ref}
     className={cn(
       // Та же геометрия поля, что у Input — из прототипа.
-      "btn-unset field-unset field h-10 min-h-10 rounded-[10px] border border-border bg-card px-3 text-[13px] md:h-9 md:min-h-9 flex w-full items-center justify-between text-foreground",
+      "field h-10 min-h-10 rounded-[10px] border border-border bg-card px-3 text-[13px] md:h-9 md:min-h-9 flex w-full items-center justify-between text-foreground",
       "disabled:cursor-not-allowed disabled:opacity-45 [&>span]:line-clamp-1",
       className,
     )}

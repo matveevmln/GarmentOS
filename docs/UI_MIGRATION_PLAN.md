@@ -109,7 +109,24 @@ API для всех четырёх существует, проверено:
 | **6. Партии + Главная** | Список и дашборд | `pages/ProductionOrdersPage.tsx`, `pages/DashboardPage.tsx` |
 | **7. Остальные экраны** | Модели, Карточка модели, Материалы, Закупки, Pilot, Login | 6 файлов в `pages/` + `auth/LoginPage.tsx` |
 | **8. Четыре экрана** | Цеха, Склады, Поставщики + новый Документы | 3 файла + `pages/DocumentsPage.tsx` (новый) |
-| **9. Уборка** | Удаление легаси `styles.css`, `DataTable.tsx`, `apps/design-prototype/`, старых компонентов дизайн-системы | Удаления |
+| **9. Уборка** ✅ | Удалены: легаси `styles.css` (784 строки), `components/DataTable.tsx`, `apps/design-prototype/`, `ListCard`, `KpiCard`, `Avatar`, `ThemeToggle`, `EmptyIllustration`, мосты `.btn-unset`/`.field-unset`/`.label-unset` и неиспользуемые токены моста | Удаления |
+
+**Итог этапа 9.** Легаси-слоя больше нет: единственный источник визуального
+языка — `Tokens/tokens.css` + примитивы + Blocks + AppShell. Удаление
+проверено сравнением computed styles до и после на 24 снимках
+(12 экранов × 2 ширины, 3552 элемента): единственное отличие —
+`min-height: 0px -> auto`, то есть начальное значение CSS у элементов с
+явной высотой. Визуальных изменений нет.
+
+**Оставлено намеренно (не легаси):**
+- `apps/prototype/` — отдельный workspace-пакет `@garmentos/prototype` со
+  своей сборкой, в lockfile и в `docs/REPOSITORY_STRUCTURE.md`; в плане
+  этапа 9 к удалению не значился.
+- `Textarea`, `DropdownMenu`, `Progress` — примитивы актуальной системы,
+  сейчас без вызовов, но не относятся к прежнему визуальному языку.
+- Часть моста (`--shadow-card`, `--shadow-lg`, `--ease-standard`,
+  `--animate-duration-slow`) — реально используется Dialog, DatePicker,
+  Popover, Tooltip, DropdownMenu, CommandPalette, Progress.
 
 ## 6. Полный список затрагиваемых файлов
 

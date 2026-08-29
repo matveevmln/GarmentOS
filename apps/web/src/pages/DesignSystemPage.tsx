@@ -5,13 +5,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { Combobox } from "../design-system/Select/Combobox";
 import { NumberInput, MoneyInput, PercentInput } from "../design-system/Input/NumberInput";
 import { DatePicker } from "../design-system/Form/DatePicker";
-import { Card, CardContent, CardHeader, CardTitle } from "../design-system/Card/Card";
-import { KpiCard } from "../design-system/Card/KpiCard";
-import { ThemeToggle } from "../design-system/Theme/ThemeToggle";
-import { Package, TrendingUp, Wallet } from "lucide-react";
-import { Avatar } from "../design-system/Avatar/Avatar";
+import { Card, CardContent } from "../design-system/Card/Card";
 import { StatusBadge } from "../design-system/StatusBadge/StatusBadge";
-import { ListCard, ListCardItem } from "../design-system/ListCard/ListCard";
 import { FilterTabs } from "../design-system/Tabs/FilterTabs";
 import { SearchBar } from "../design-system/Search/SearchBar";
 import { SkeletonList } from "../design-system/Feedback/Skeleton";
@@ -20,7 +15,6 @@ import { Progress } from "../design-system/Feedback/Progress";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "../design-system/Modal/Dialog";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../design-system/Tooltip/Tooltip";
 import { Popover, PopoverContent, PopoverTrigger } from "../design-system/Popover/Popover";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "../design-system/DropdownMenu/DropdownMenu";
 import { Drawer, DrawerClose, DrawerContent, DrawerDescription, DrawerFooter, DrawerHeader, DrawerTitle, DrawerTrigger } from "../design-system/Drawer/Drawer";
 import { Upload } from "../design-system/Upload/Upload";
 import { toast } from "../design-system/Toast/Toast";
@@ -40,10 +34,12 @@ import {
 } from "../design-system/Blocks";
 import { formatQuantity } from "../lib/format";
 
-// Каталог компонентов дизайн-системы GarmentOS (владелец проекта, п.9) —
-// живая страница для проверки состояний, не статичные скриншоты. Не в
-// основной навигации (AppLayout) — служебный маршрут для ревью, не
-// пользовательский экран.
+// Каталог компонентов дизайн-системы GarmentOS — живая страница для
+// проверки состояний, не статичные скриншоты. Не в основной навигации
+// (AppShell) — служебный маршрут для ревью, не пользовательский экран.
+// После этапа 9 показывает только актуальную систему: демонстрации
+// прежних KpiCard/ListCard/Avatar/ThemeToggle удалены вместе с самими
+// компонентами.
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div className="flex flex-col gap-3">
@@ -77,36 +73,7 @@ export function DesignSystemPage() {
             приложения — командная палитра.
           </p>
         </div>
-        <ThemeToggle />
       </div>
-
-      <Section title="KPI-блоки (Главная, принцип 22 — «что происходит сейчас?»)">
-        <p className="text-[0.75rem] text-muted-foreground">
-          Синтетические значения для демонстрации компонента — экран Главная ещё не спроектирован (нет реального
-          источника данных, docs/DESIGN_SYSTEM_MAP.md §3.5).
-        </p>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-          <KpiCard
-            label="Партий в работе"
-            value={18}
-            hint="в 6 цехах"
-            icon={<Package className="h-4 w-4" />}
-            trend={{ direction: "up", label: "+3 за неделю", tone: "neutral" }}
-          />
-          <KpiCard
-            label="Ожидаемая прибыль"
-            value="612 400 ₽"
-            icon={<TrendingUp className="h-4 w-4" />}
-            trend={{ direction: "up", label: "+8%" }}
-          />
-          <KpiCard
-            label="В незавершённом производстве"
-            value="1 240 000 ₽"
-            icon={<Wallet className="h-4 w-4" />}
-            trend={{ direction: "down", label: "-4%", tone: "danger" }}
-          />
-        </div>
-      </Section>
 
       <Section title="Buttons">
         <div className="flex flex-wrap gap-2">
@@ -176,78 +143,6 @@ export function DesignSystemPage() {
             <StatusBadge key={status} status={status} />
           ))}
         </div>
-      </Section>
-
-      <Section title="Avatar">
-        <div className="flex gap-2">
-          <Avatar tone="accent">ДП</Avatar>
-          <Avatar tone="success">ХС</Avatar>
-          <Avatar tone="warning">СГ</Avatar>
-          <Avatar tone="info">ММ</Avatar>
-          <Avatar tone="neutral">—</Avatar>
-        </div>
-      </Section>
-
-      <Section title="Card / ListCard">
-        <Card>
-          <CardHeader>
-            <CardTitle>Пример карточки</CardTitle>
-          </CardHeader>
-          <CardContent>Содержимое карточки — тот же .card/.card-pad, что и в прототипе.</CardContent>
-        </Card>
-        <p className="text-[0.75rem] text-muted-foreground">Наведите на строку — приподнимается (кликабельная).</p>
-        <ListCard
-          items={[{ id: "1", title: "Пример строки", meta: "Подпись" }]}
-          getKey={(row) => row.id}
-          getIcon={() => "box"}
-          getTitle={(row) => row.title}
-          getMeta={(row) => row.meta}
-          onItemClick={() => toast.success("Открыли бы карточку сущности")}
-        />
-        <ListCard<{ id: string }>
-          items={[]}
-          getKey={(row) => row.id}
-          getTitle={() => ""}
-          emptyTitle="Пока нет заказов пошива"
-          emptyHint="Создайте первый заказ — займёт меньше минуты."
-          emptyActionLabel="Создать заказ пошива"
-          onEmptyAction={() => toast.success("Открыли бы форму создания")}
-        />
-      </Section>
-
-      <Section title="ListCard — hover-actions (DropdownMenu, паттерн Notion)">
-        <p className="text-[0.8rem] text-muted-foreground">
-          Наведите курсор на строку (на телефоне действия видны всегда — наведения не существует физически).
-        </p>
-        <ListCardItem
-          icon="factory"
-          tone="accent"
-          title="Цех «Стежок»"
-          meta="12 заказов в работе"
-          trailing={
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <button
-                  type="button"
-                  className="h-8 w-8 min-h-0 rounded-full bg-transparent p-0 text-muted-foreground shadow-none hover:bg-secondary"
-                  aria-label="Действия"
-                >
-                  <svg viewBox="0 0 24 24" className="mx-auto h-4 w-4" fill="currentColor">
-                    <circle cx="5" cy="12" r="1.8" />
-                    <circle cx="12" cy="12" r="1.8" />
-                    <circle cx="19" cy="12" r="1.8" />
-                  </svg>
-                </button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent>
-                <DropdownMenuItem>Открыть карточку</DropdownMenuItem>
-                <DropdownMenuItem>Позвонить</DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem variant="destructive">Архивировать</DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          }
-        />
       </Section>
 
       <Section title="Tooltip / Popover">

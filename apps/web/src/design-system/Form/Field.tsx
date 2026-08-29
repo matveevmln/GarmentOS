@@ -9,11 +9,6 @@ import { cn } from "../utils";
 // `field`). Этот компонент не изобретает новый визуальный язык: он
 // применяет ту же конвенцию к подписи и переносит её в одно место вместо
 // восьми одинаковых <label> с ручными классами на страницах.
-//
-// `label-unset` обязателен: легаси-правило `label { display:flex;
-// flex-direction:column; gap:4px; font-size:.9rem; font-weight:650 }`
-// иначе навязывает подписи прежнюю типографику (изоляция в tokens.css,
-// уходит на этапе 9).
 
 export function Field({
   label,
@@ -36,7 +31,7 @@ export function Field({
     <div className={cn("flex flex-col gap-1.5", className)}>
       <label
         htmlFor={htmlFor}
-        className="label-unset flex items-center gap-1.5 text-[12px] font-medium text-muted-foreground"
+        className="flex items-center gap-1.5 text-[12px] font-medium text-muted-foreground"
       >
         {label}
         {hint}

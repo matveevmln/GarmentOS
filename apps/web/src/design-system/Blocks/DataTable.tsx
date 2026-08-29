@@ -5,10 +5,6 @@ import { cn } from "../utils";
 // перенесено из утверждённого прототипа дословно (docs/UI_MIGRATION_PLAN.md,
 // этап 3): заголовки капителью, строки высотой 52px, вся строка кликабельна.
 //
-// Это НЕ тот же файл, что components/DataTable.tsx: тот — мёртвый код и
-// удаляется на этапе 9 (docs/UI_MIGRATION_PLAN.md §6). Пока сосуществуют,
-// поэтому лежат в разных папках и импортируются по разным путям.
-//
 // Таблица предназначена для десктопа; на мобильном тот же список
 // показывается через MobileListItem — так же, как в прототипе.
 
@@ -110,7 +106,7 @@ export function MobileListItem({
         type="button"
         onClick={onClick}
         className={cn(
-          "btn-unset interactive focus-ring hover:border-primary/30 hover:elev-2 active:bg-muted/50",
+          "interactive focus-ring hover:border-primary/30 hover:elev-2 active:bg-muted/50",
           surface,
           className,
         )}
@@ -125,7 +121,7 @@ export function MobileListItem({
       <button
         type="button"
         onClick={onClick}
-        className="btn-unset focus-ring block w-full text-left active:opacity-80"
+        className="focus-ring block w-full text-left active:opacity-80"
       >
         {children}
       </button>

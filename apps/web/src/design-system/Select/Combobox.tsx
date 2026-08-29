@@ -44,7 +44,7 @@ export function Combobox({
           type="button"
           disabled={disabled}
           className={cn(
-            "btn-unset field-unset field h-10 min-h-10 rounded-[10px] border border-border bg-card px-3 text-[13px] md:h-9 md:min-h-9 flex w-full items-center justify-between gap-2 text-left",
+            "field h-10 min-h-10 rounded-[10px] border border-border bg-card px-3 text-[13px] md:h-9 md:min-h-9 flex w-full items-center justify-between gap-2 text-left",
             "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 focus-visible:border-primary",
             "disabled:cursor-not-allowed disabled:opacity-50",
             !selected && "text-muted-foreground",
@@ -58,7 +58,7 @@ export function Combobox({
         <CommandPrimitive className="flex flex-col">
           <CommandPrimitive.Input
             placeholder={searchPlaceholder}
-            className="field-unset h-10 w-full border-b border-border bg-transparent px-3 text-[13px] outline-none placeholder:text-muted-foreground"
+            className="h-10 w-full border-b border-border bg-transparent px-3 text-[13px] outline-none placeholder:text-muted-foreground"
           />
           <CommandPrimitive.List className="max-h-64 overflow-y-auto p-1.5">
             <CommandPrimitive.Empty className="px-3 py-6 text-center text-[0.85rem] text-muted-foreground">

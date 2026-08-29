@@ -29,7 +29,7 @@ export function DocumentRow({
     <button
       type="button"
       onClick={onOpen}
-      className="btn-unset flex min-h-[44px] w-full items-center gap-3 py-2.5 text-left transition-colors hover:bg-muted/40"
+      className="flex min-h-[44px] w-full items-center gap-3 py-2.5 text-left transition-colors hover:bg-muted/40"
     >
       <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-[8px] border border-border bg-muted/50 text-muted-foreground">
         <IconDocument size={14} />

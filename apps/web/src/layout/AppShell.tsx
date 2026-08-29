@@ -27,9 +27,7 @@ import {
 // Структура и оформление перенесены из утверждённого прототипа дословно
 // (docs/UI_MIGRATION_PLAN.md, этап 4).
 //
-// Заменяет layout/AppLayout.tsx. Главное следствие: у основной области
-// больше нет предела 760px (`.app-main` в легаси styles.css) — контент
-// занимает до 1440px, как в прототипе.
+// Основная область не ограничена по ширине сверх 1440px — как в прототипе.
 //
 // Отличие от прототипа — способ навигации. Там экраны переключались через
 // `onNavigate(ScreenKey)` и useState, здесь остаётся react-router: NavLink
@@ -107,7 +105,7 @@ function NavLinkItem({
         onClick={onNavigate}
         title={item.label}
         className={cn(
-          "btn-unset interactive focus-ring group relative flex w-full items-center gap-3 rounded-[8px] pl-3 pr-2",
+          "interactive focus-ring group relative flex w-full items-center gap-3 rounded-[8px] pl-3 pr-2",
           mobile ? "min-h-[48px] py-3 text-[15px]" : "py-2.5 text-[13.5px]",
           collapsed && "justify-center px-0",
           isActive
@@ -251,7 +249,7 @@ function SidebarBody({
             <button
               type="button"
               onClick={logout}
-              className="btn-unset interactive focus-ring shrink-0 rounded-[6px] px-2 py-1.5 text-[12px] text-sidebar-foreground/55 hover:bg-sidebar-accent hover:text-sidebar-foreground"
+              className="interactive focus-ring shrink-0 rounded-[6px] px-2 py-1.5 text-[12px] text-sidebar-foreground/55 hover:bg-sidebar-accent hover:text-sidebar-foreground"
             >
               Выйти
             </button>
@@ -515,7 +513,7 @@ export function AppShell() {
             type="button"
             aria-label="Закрыть меню"
             onClick={closeNav}
-            className="btn-unset interactive focus-ring absolute right-2 top-4 z-10 inline-flex h-11 w-11 items-center justify-center rounded-[8px] text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground"
+            className="interactive focus-ring absolute right-2 top-4 z-10 inline-flex h-11 w-11 items-center justify-center rounded-[8px] text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground"
           >
             <IconClose size={18} />
           </button>
@@ -545,7 +543,7 @@ export function AppShell() {
             <button
               type="button"
               onClick={openCommandPalette}
-              className="btn-unset interactive focus-ring hidden h-9 items-center gap-2 rounded-full border border-border bg-card px-3 text-[12px] text-muted-foreground hover:border-primary/25 hover:bg-muted hover:text-foreground lg:inline-flex"
+              className="interactive focus-ring hidden h-9 items-center gap-2 rounded-full border border-border bg-card px-3 text-[12px] text-muted-foreground hover:border-primary/25 hover:bg-muted hover:text-foreground lg:inline-flex"
             >
               <IconSearch size={14} />
               Быстрый переход
@@ -571,7 +569,7 @@ export function AppShell() {
         <button
           type="button"
           onClick={() => setMobileNavOpen(true)}
-          className="btn-unset interactive focus-ring flex min-h-[56px] flex-col items-center justify-center gap-1 text-[11px] text-muted-foreground"
+          className="interactive focus-ring flex min-h-[56px] flex-col items-center justify-center gap-1 text-[11px] text-muted-foreground"
         >
           <IconMenu size={18} />
           Ещё
@@ -589,7 +587,7 @@ function BottomNavItem({ item }: { item: NavItem }) {
     <NavLink
       to={item.to}
       className={cn(
-        "btn-unset interactive focus-ring relative flex min-h-[56px] flex-col items-center justify-center gap-1 text-[11px]",
+        "interactive focus-ring relative flex min-h-[56px] flex-col items-center justify-center gap-1 text-[11px]",
         isActive ? "font-semibold text-primary" : "text-muted-foreground",
       )}
     >

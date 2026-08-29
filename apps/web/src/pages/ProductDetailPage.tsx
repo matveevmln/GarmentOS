@@ -13,7 +13,8 @@ import {
 } from "@garmentos/shared-types";
 import { apiRequest, ApiError } from "../api/client";
 import { useCrudResource } from "../api/useCrudResource";
-import { ListCard } from "../design-system/ListCard/ListCard";
+import { DataTable, Td, MobileListItem } from "../design-system/Blocks";
+import { EmptyState } from "../design-system/Feedback/EmptyState";
 import { StatusBadge } from "../design-system/StatusBadge/StatusBadge";
 import { Field } from "../design-system/Form/Field";
 import { PageHeader, Breadcrumbs } from "../design-system/PageHeader/PageHeader";
@@ -192,15 +193,46 @@ export function ProductDetailPage() {
           {variantsLoading ? (
             <SkeletonList rows={2} />
           ) : (
-            <ListCard
-              items={variants}
-              getKey={(row) => row.id}
-              getIcon={() => "layers"}
-              getTitle={(row) => `${row.size} / ${row.color}`}
-              getMeta={(row) => row.skuCode}
-              emptyTitle="Пока нет ни одного SKU"
-              emptyHint="Добавьте размер и цвет в форме выше."
-            />
+            variants.length === 0 ? (
+              <EmptyState compact title="Пока нет ни одного SKU" description="Добавьте размер и цвет в форме выше." />
+            ) : (
+              <>
+                {/* Плотная таблица на планшете и десктопе — как на всех
+                    остальных справочных экранах (этап 9, пункт B3). */}
+                <div className="hidden md:block">
+                  <DataTable
+                    columns={[
+                      { key: "size", label: "Размер", width: "120px" },
+                      { key: "color", label: "Цвет" },
+                      { key: "sku", label: "Код SKU", align: "right", width: "240px" },
+                    ]}
+                  >
+                    {variants.map((row) => (
+                      <tr key={row.id} className="cursor-default">
+                        <Td className="t-object">{row.size}</Td>
+                        <Td className="text-muted-foreground">{row.color}</Td>
+                        <Td align="right" className="num text-muted-foreground">
+                          {row.skuCode}
+                        </Td>
+                      </tr>
+                    ))}
+                  </DataTable>
+                </div>
+
+                <div className="space-y-2 md:hidden">
+                  {variants.map((row) => (
+                    <MobileListItem key={row.id}>
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-[13px] font-medium">
+                          {row.size} / {row.color}
+                        </span>
+                        <span className="num text-[12px] text-muted-foreground">{row.skuCode}</span>
+                      </div>
+                    </MobileListItem>
+                  ))}
+                </div>
+              </>
+            )
           )}
         </CardContent>
       </Card>
@@ -250,24 +282,78 @@ export function ProductDetailPage() {
             </Button>
           )}
 
-          <ListCard
-            items={boms}
-            getKey={(row) => row.id}
-            getIcon={() => "file"}
-            getTitle={(row) => `Версия ${row.version}`}
-            getMeta={(row) => `${row.items.length} материалов`}
-            getTrailing={(row) =>
-              row.status === "draft" ? (
-                <Button type="button" size="sm" loading={approvingBomId === row.id} onClick={() => void approveBom(row.id)}>
-                  Утвердить
-                </Button>
-              ) : (
-                <StatusBadge status={row.status} />
-              )
-            }
-            emptyTitle="Спецификация ещё не создана"
-            emptyHint="Добавьте материалы в форме выше."
-          />
+          {boms.length === 0 ? (
+            <EmptyState compact title="Спецификация ещё не создана" description="Добавьте материалы в форме выше." />
+          ) : (
+            <>
+              {/* Действие «Утвердить» сохранено без изменений — POST на
+                  /boms/:id/approve, как и раньше. */}
+              <div className="hidden md:block">
+                <DataTable
+                  columns={[
+                    { key: "version", label: "Версия", width: "140px" },
+                    { key: "items", label: "Материалов", width: "160px" },
+                    { key: "status", label: "Статус", align: "right", width: "180px" },
+                  ]}
+                >
+                  {boms.map((row) => (
+                    <tr key={row.id} className="cursor-default">
+                      <Td className="t-object">Версия {row.version}</Td>
+                      <Td className="num text-muted-foreground">{row.items.length}</Td>
+                      <Td align="right">
+                        <div className="flex items-center justify-end gap-2">
+                          {row.status === "draft" ? (
+                            <Button
+                              type="button"
+                              size="sm"
+                              loading={approvingBomId === row.id}
+                              onClick={() => void approveBom(row.id)}
+                            >
+                              Утвердить
+                            </Button>
+                          ) : (
+                            <StatusBadge status={row.status} />
+                          )}
+                        </div>
+                      </Td>
+                    </tr>
+                  ))}
+                </DataTable>
+              </div>
+
+              <div className="space-y-2 md:hidden">
+                {boms.map((row) => (
+                  <MobileListItem
+                    key={row.id}
+                    footer={
+                      row.status === "draft" ? (
+                        <div className="mt-3 border-t border-border pt-3">
+                          <Button
+                            type="button"
+                            size="sm"
+                            loading={approvingBomId === row.id}
+                            onClick={() => void approveBom(row.id)}
+                          >
+                            Утвердить
+                          </Button>
+                        </div>
+                      ) : undefined
+                    }
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="text-[13px] font-medium">Версия {row.version}</div>
+                        <div className="num mt-1 text-[12px] text-muted-foreground">
+                          {row.items.length} материалов
+                        </div>
+                      </div>
+                      {row.status !== "draft" ? <StatusBadge status={row.status} /> : null}
+                    </div>
+                  </MobileListItem>
+                ))}
+              </div>
+            </>
+          )}
         </CardContent>
       </Card>
     </div>

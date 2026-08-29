@@ -17,7 +17,7 @@ import { cn } from "../utils";
 // sm/md); переименование потребовало бы переписать все страницы, что
 // выходит за рамки этапа 2 и создаёт риск для бизнес-логики.
 export const buttonVariants = cva(
-  "btn-unset interactive focus-ring inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-[6px] font-medium tracking-[-0.005em] disabled:pointer-events-none disabled:opacity-45 disabled:shadow-none",
+  "interactive focus-ring inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-[6px] font-medium tracking-[-0.005em] disabled:pointer-events-none disabled:opacity-45 disabled:shadow-none",
   {
     variants: {
       variant: {
@@ -102,11 +102,7 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(
       aria-label={label}
       title={label}
       className={cn(
-        // btn-unset обязателен: у IconButton нет собственного фона, а
-        // легаси-правило `button {}` в styles.css заливает такие кнопки
-        // акцентным оранжевым (см. мост в tokens.css). Найдено на этапе 4,
-        // когда IconButton впервые попал в верхнюю панель.
-        "btn-unset interactive focus-ring inline-flex h-11 w-11 items-center justify-center rounded-[8px] border border-transparent text-muted-foreground hover:bg-muted hover:text-foreground active:bg-muted md:h-9 md:w-9",
+        "interactive focus-ring inline-flex h-11 w-11 items-center justify-center rounded-[8px] border border-transparent text-muted-foreground hover:bg-muted hover:text-foreground active:bg-muted md:h-9 md:w-9",
         active && "border-primary/25 bg-primary/[0.08] text-primary",
         className,
       )}

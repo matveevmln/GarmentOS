@@ -25,7 +25,7 @@ export function Breadcrumbs({ items, className }: { items: Crumb[]; className?: 
             <button
               type="button"
               onClick={item.onClick}
-              className="btn-unset focus-ring rounded-[4px] transition-colors hover:text-foreground"
+              className="focus-ring rounded-[4px] transition-colors hover:text-foreground"
             >
               {item.label}
             </button>
