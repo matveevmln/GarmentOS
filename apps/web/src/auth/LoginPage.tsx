@@ -65,7 +65,16 @@ export function LoginPage() {
 
         <p className="t-secondary mt-4">Войдите, чтобы продолжить</p>
 
-        <form className="mt-5 flex flex-col gap-4" onSubmit={(event) => void handleSubmit(onSubmit)(event)}>
+        {/* noValidate обязателен: у поля email тип `email`, и без него
+            браузер перехватывает submit своей проверкой и показывает
+            системный пузырёк на английском («Please include an '@'...»)
+            вместо русского сообщения zod. Валидация не ослабевает —
+            loginSchema строже нативной и продолжает работать. */}
+        <form
+          noValidate
+          className="mt-5 flex flex-col gap-4"
+          onSubmit={(event) => void handleSubmit(onSubmit)(event)}
+        >
           <Field label="Email" htmlFor="login-email" error={errors.email?.message}>
             <Input id="login-email" type="email" autoComplete="email" {...register("email")} />
           </Field>
