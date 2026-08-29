@@ -11,6 +11,7 @@ import type {
   NewProductionOrderInput,
   NewWorkshopInput,
   ProductionOrderRepository,
+  WorkshopPatch,
   WorkshopRepository,
 } from "../application/ports";
 
@@ -80,6 +81,23 @@ export class DrizzleWorkshopRepository implements WorkshopRepository {
   async create(input: NewWorkshopInput): Promise<Workshop> {
     const [row] = await this.db.insert(workshops).values(input).returning();
     if (!row) throw new Error("INSERT workshops не вернул строку");
+    return toWorkshop(row);
+  }
+
+  async update(id: string, patch: WorkshopPatch): Promise<Workshop> {
+    // Ключи со значением undefined отбрасываются явно, а не полагаясь на
+    // поведение драйвера: undefined означает «поле не передано» и не должно
+    // попасть в SET, тогда как null означает «очистить» и попасть обязан.
+    const values = Object.fromEntries(
+      Object.entries(patch).filter(([, value]) => value !== undefined),
+    ) as Record<string, unknown>;
+
+    const [row] = await this.db
+      .update(workshops)
+      .set({ ...values, updatedAt: new Date() })
+      .where(eq(workshops.id, id))
+      .returning();
+    if (!row) throw new Error(`UPDATE workshops не нашёл строку id=${id}`);
     return toWorkshop(row);
   }
 

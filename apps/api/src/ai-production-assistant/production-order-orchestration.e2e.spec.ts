@@ -297,4 +297,140 @@ describe("Вертикальный сценарий Итерации 7 (e2e): т
       .expect(200);
     expect((orderAfterWorkshopReply.body as ProductionOrderResponseDto).status).toBe("ready_for_pickup");
   });
+
+  // Pilot v1, этап 1. До появления PATCH /workshops/:id цех, заведённый
+  // обычным путём (без договорных реквизитов), становился тупиком: заказ к
+  // нему создавался, но подтвердиться не мог никогда, а исправить карточку
+  // было нечем. Тест фиксирует обе стороны: инвариант продолжает работать и
+  // теперь у него есть выход.
+  it("цех без договора блокирует подтверждение заказа, PATCH карточки снимает блокировку", async () => {
+    const companyName = `E2E Workshop Contract ${Date.now()}`;
+    createdCompanyNames.push(companyName);
+    const { accessToken } = await setupAuthenticatedCompany(db, httpServer, companyName, "owner");
+
+    const product = (
+      await request(httpServer)
+        .post("/v1/products")
+        .set(...authHeader(accessToken))
+        .send({ name: "Стеганка", code: `STEG-${Date.now()}` })
+        .expect(201)
+    ).body as ProductResponseDto;
+
+    const variantResponse = await request(httpServer)
+      .post("/v1/product-variants")
+      .set(...authHeader(accessToken))
+      .send({ productId: product.id, size: "M", color: "чёрный", skuCode: `STEG-M-${product.id.slice(0, 6)}` })
+      .expect(201);
+    const variantId = (variantResponse.body as { id: string }).id;
+
+    const material = (
+      await request(httpServer)
+        .post("/v1/materials")
+        .set(...authHeader(accessToken))
+        .send({ name: "Стёганое полотно", type: "fabric", unit: "m" })
+        .expect(201)
+    ).body as MaterialResponseDto;
+
+    const bomDraft = (
+      await request(httpServer)
+        .post("/v1/boms")
+        .set(...authHeader(accessToken))
+        .send({ productId: product.id, items: [{ materialId: material.id, quantityPerUnit: 2.6 }] })
+        .expect(201)
+    ).body as BomResponseDto;
+    await request(httpServer)
+      .post(`/v1/boms/${bomDraft.id}/approve`)
+      .set(...authHeader(accessToken))
+      .expect(201);
+
+    // Цех заводится ровно так, как это делал интерфейс до этапа 1 — без
+    // единого договорного поля.
+    const workshop = (
+      await request(httpServer)
+        .post("/v1/workshops")
+        .set(...authHeader(accessToken))
+        .send({ name: "Цех без договора", inn: "0101", specialization: "стеганка" })
+        .expect(201)
+    ).body as WorkshopResponseDto;
+    expect(workshop.contractNumber).toBeNull();
+
+    const order = (
+      await request(httpServer)
+        .post("/v1/production-orders")
+        .set(...authHeader(accessToken))
+        .send({
+          productId: product.id,
+          bomId: bomDraft.id,
+          workshopId: workshop.id,
+          plannedQuantity: 12,
+          agreedUnitPrice: 1234.5,
+          variants: [{ productVariantId: variantId, quantity: 12 }],
+        })
+        .expect(201)
+    ).body as ProductionOrderResponseDto;
+
+    // Инвариант «основания генерации» продолжает действовать.
+    const blocked = await request(httpServer)
+      .post(`/v1/production-orders/${order.id}/confirm`)
+      .set(...authHeader(accessToken))
+      .expect(400);
+    expect((blocked.body as ErrorResponseBody).code).toBe("WORKSHOP_CONTRACT_NUMBER_MISSING");
+
+    const patched = (
+      await request(httpServer)
+        .patch(`/v1/workshops/${workshop.id}`)
+        .set(...authHeader(accessToken))
+        .send({
+          contractNumber: "АС-2026/14",
+          contractDate: "2026-08-01",
+          paymentTerms: "Предоплата 70%, остаток по приёмке",
+          signerRole: "Директор",
+          signerName: "Абдыраимов К.А.",
+        })
+        .expect(200)
+    ).body as WorkshopResponseDto;
+    expect(patched.contractNumber).toBe("АС-2026/14");
+    // Частичный PATCH не затирает поля, которых в нём не было.
+    expect(patched.name).toBe("Цех без договора");
+    expect(patched.inn).toBe("0101");
+    expect(patched.specialization).toBe("стеганка");
+
+    // Пустая строка очищает поле — иначе ошибочно введённый реквизит
+    // остался бы в карточке навсегда.
+    const cleared = (
+      await request(httpServer)
+        .patch(`/v1/workshops/${workshop.id}`)
+        .set(...authHeader(accessToken))
+        .send({ signerRole: "" })
+        .expect(200)
+    ).body as WorkshopResponseDto;
+    expect(cleared.signerRole).toBeNull();
+    expect(cleared.contractNumber).toBe("АС-2026/14");
+
+    // Тот же заказ теперь подтверждается, а реквизиты попадают в Snapshot
+    // партии — тот, из которого потом печатается спецификация.
+    const confirmed = (
+      await request(httpServer)
+        .post(`/v1/production-orders/${order.id}/confirm`)
+        .set(...authHeader(accessToken))
+        .expect(201)
+    ).body as ProductionOrderResponseDto;
+    expect(confirmed.status).toBe("placed");
+    expect(confirmed.costSnapshot?.contractNumber).toBe("АС-2026/14");
+    expect(confirmed.costSnapshot?.contractDate).toBe("2026-08-01");
+    expect(confirmed.costSnapshot?.paymentTerms).toBe("Предоплата 70%, остаток по приёмке");
+    expect(confirmed.costSnapshot?.contractorSignerName).toBe("Абдыраимов К.А.");
+
+    await request(httpServer)
+      .patch("/v1/workshops/00000000-0000-4000-8000-000000000099")
+      .set(...authHeader(accessToken))
+      .send({ signerName: "нет такого цеха" })
+      .expect(404);
+
+    await request(httpServer)
+      .patch(`/v1/workshops/${workshop.id}`)
+      .set(...authHeader(accessToken))
+      .send({})
+      .expect(400);
+  });
 });

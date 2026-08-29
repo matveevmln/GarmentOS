@@ -14,9 +14,11 @@ export type {
   NewProductionOrderInput,
   NewWorkshopInput,
   ProductionOrderRepository,
+  WorkshopPatch,
   WorkshopRepository,
 } from "./application/ports";
 export { createWorkshop, type CreateWorkshopDeps, type CreateWorkshopInput } from "./application/create-workshop";
+export { updateWorkshop, type UpdateWorkshopDeps, type UpdateWorkshopInput } from "./application/update-workshop";
 export {
   createProductionOrderDraft,
   type CreateProductionOrderDeps,

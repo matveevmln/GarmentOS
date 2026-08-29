@@ -21,8 +21,27 @@ export interface NewWorkshopInput {
   createdBy: string | null;
 }
 
+// Правка карточки цеха: заданы только те поля, которые действительно
+// меняются (undefined — «не трогать», null — «очистить»). Отдельный тип от
+// NewWorkshopInput, потому что у него другая семантика: там отсутствие
+// значения означает null, здесь — сохранение прежнего.
+export interface WorkshopPatch {
+  name?: string;
+  inn?: string | null;
+  contactInfo?: string | null;
+  specialization?: string | null;
+  status?: WorkshopStatus;
+  contractNumber?: string | null;
+  contractDate?: string | null;
+  paymentTerms?: string | null;
+  deliveryMethod?: string | null;
+  signerRole?: string | null;
+  signerName?: string | null;
+}
+
 export interface WorkshopRepository {
   create(input: NewWorkshopInput): Promise<Workshop>;
+  update(id: string, patch: WorkshopPatch): Promise<Workshop>;
   findById(companyId: string, id: string): Promise<Workshop | null>;
   findByTelegramChatId(chatId: string): Promise<Workshop | null>;
   setTelegramChatId(id: string, chatId: string): Promise<Workshop>;

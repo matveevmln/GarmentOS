@@ -5,6 +5,7 @@ import {
   createWorkshop,
   receiveProductionOrder as receiveProductionOrderUseCase,
   updateProductionOrderStatusFromWorkshop,
+  updateWorkshop,
   type BomApprovalPort,
   type ProductionOrder,
   type ProductionOrderRepository,
@@ -16,12 +17,36 @@ import {
   distributeQuantityEvenly,
   DomainError as CatalogDomainError,
 } from "@garmentos/domain-catalog";
-import type { CreateProductionOrderDto, CreateProductionOrderFromQuantityDto, CreateWorkshopDto } from "@garmentos/shared-types";
+import type {
+  CreateProductionOrderDto,
+  CreateProductionOrderFromQuantityDto,
+  CreateWorkshopDto,
+  UpdateWorkshopDto,
+} from "@garmentos/shared-types";
 import type { AuthenticatedRequestUser } from "../auth/current-user.decorator";
 import { AuditService } from "../audit/audit.service";
 import { CatalogService } from "../catalog/catalog.service";
 import { WarehouseService } from "../warehouse/warehouse.service";
 import { BOM_APPROVAL_PORT, PRODUCTION_ORDER_REPOSITORY, WORKSHOP_REPOSITORY } from "./contract-manufacturing.tokens";
+
+// Срез карточки цеха для audit_log — только содержательные поля, без
+// служебных дат и идентификаторов: они не несут смысла в диффе «до/после»,
+// но зашумляют его.
+function toWorkshopAuditJson(workshop: Workshop): Record<string, unknown> {
+  return {
+    name: workshop.name,
+    inn: workshop.inn,
+    contactInfo: workshop.contactInfo,
+    specialization: workshop.specialization,
+    status: workshop.status,
+    contractNumber: workshop.contractNumber,
+    contractDate: workshop.contractDate,
+    paymentTerms: workshop.paymentTerms,
+    deliveryMethod: workshop.deliveryMethod,
+    signerRole: workshop.signerRole,
+    signerName: workshop.signerName,
+  };
+}
 
 // Тонкий presentation-адаптер поверх packages/domain/contract-manufacturing
 // (docs/ARCHITECTURE.md, раздел 2) — репозитории и порт BomApprovalPort
@@ -39,6 +64,32 @@ export class ContractManufacturingService {
 
   async createWorkshop(companyId: string, input: CreateWorkshopDto): Promise<Workshop> {
     return createWorkshop({ workshops: this.workshops }, { ...input, companyId });
+  }
+
+  // Правка карточки цеха. Пишется в audit_log, потому что договорные
+  // реквизиты цеха попадают в Snapshot партии и в подписываемую
+  // спецификацию — «кто и когда сменил номер договора» должно быть видно
+  // (владелец проекта, 2026-08-04: старое/новое значение по каждой правке).
+  async updateWorkshop(
+    currentUser: AuthenticatedRequestUser,
+    workshopId: string,
+    input: UpdateWorkshopDto,
+  ): Promise<Workshop> {
+    const before = await this.workshops.findById(currentUser.companyId, workshopId);
+    const workshop = await updateWorkshop(
+      { workshops: this.workshops },
+      { ...input, companyId: currentUser.companyId, workshopId },
+    );
+
+    await this.auditService.recordForUser(currentUser, {
+      entityType: "workshop",
+      entityId: workshop.id,
+      action: "workshop.updated",
+      beforeJson: before ? toWorkshopAuditJson(before) : null,
+      afterJson: toWorkshopAuditJson(workshop),
+    });
+
+    return workshop;
   }
 
   async createProductionOrderDraft(companyId: string, input: CreateProductionOrderDto): Promise<ProductionOrder> {

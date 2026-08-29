@@ -1,12 +1,18 @@
-import { Body, Controller, Get, Post } from "@nestjs/common";
+import { Body, Controller, Get, Param, Patch, Post } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
 import { createZodDto } from "nestjs-zod";
-import { createWorkshopSchema, workshopResponseSchema, type WorkshopResponseDto } from "@garmentos/shared-types";
+import {
+  createWorkshopSchema,
+  updateWorkshopSchema,
+  workshopResponseSchema,
+  type WorkshopResponseDto,
+} from "@garmentos/shared-types";
 import { CurrentUser, type AuthenticatedRequestUser } from "../auth/current-user.decorator";
 import { RequirePermissions } from "../auth/require-permissions.decorator";
 import { ContractManufacturingService } from "./contract-manufacturing.service";
 
 class CreateWorkshopDto extends createZodDto(createWorkshopSchema) {}
+class UpdateWorkshopDto extends createZodDto(updateWorkshopSchema) {}
 
 @ApiTags("workshops")
 @Controller("workshops")
@@ -20,6 +26,23 @@ export class WorkshopsController {
     @CurrentUser() currentUser: AuthenticatedRequestUser,
   ): Promise<WorkshopResponseDto> {
     const workshop = await this.contractManufacturingService.createWorkshop(currentUser.companyId, body);
+    return workshopResponseSchema.parse(workshop);
+  }
+
+  // Правка карточки цеха (Pilot v1, этап 1). Договорные реквизиты
+  // (номер/дата договора, условия оплаты, способ доставки, подписанты) до
+  // этого задавались только при создании — а подтверждение заказа пошива
+  // требует номер договора и отсылает пользователя «заполнить его в карточке
+  // цеха». Уже подтверждённые заказы правка не затрагивает: их реквизиты
+  // зафиксированы в Snapshot партии.
+  @RequirePermissions("contract_manufacturing.write")
+  @Patch(":id")
+  async update(
+    @Param("id") id: string,
+    @Body() body: UpdateWorkshopDto,
+    @CurrentUser() currentUser: AuthenticatedRequestUser,
+  ): Promise<WorkshopResponseDto> {
+    const workshop = await this.contractManufacturingService.updateWorkshop(currentUser, id, body);
     return workshopResponseSchema.parse(workshop);
   }
 

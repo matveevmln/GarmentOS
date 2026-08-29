@@ -29,6 +29,34 @@ export const createWorkshopSchema = z.object({
 });
 export type CreateWorkshopDto = z.infer<typeof createWorkshopSchema>;
 
+// Правка карточки цеха (Pilot v1, этап 1). Без неё договорные реквизиты,
+// заданные при создании, нельзя исправить: подтверждение заказа пошива
+// требует номер договора и сообщает «заполните его в карточке цеха», а
+// самой карточки до этого не существовало.
+//
+// Семантика PATCH: поле не передано — не меняется; передана пустая строка —
+// значение очищается (то же приведение пустой строки к null, что и в
+// createWorkshop). Поэтому `name` здесь тоже min(1) — название очистить
+// нельзя, оно обязательно у цеха.
+export const updateWorkshopSchema = z
+  .object({
+    name: z.string().min(1, "Название цеха не может быть пустым").optional(),
+    inn: z.string().optional(),
+    contactInfo: z.string().optional(),
+    specialization: z.string().optional(),
+    status: workshopStatusSchema.optional(),
+    contractNumber: z.string().optional(),
+    contractDate: z.string().optional(),
+    paymentTerms: z.string().optional(),
+    deliveryMethod: z.string().optional(),
+    signerRole: z.string().optional(),
+    signerName: z.string().optional(),
+  })
+  .refine((value) => Object.keys(value).length > 0, {
+    message: "Не передано ни одного поля для изменения",
+  });
+export type UpdateWorkshopDto = z.infer<typeof updateWorkshopSchema>;
+
 export const workshopResponseSchema = z.object({
   id: z.string().uuid(),
   companyId: z.string().uuid(),
