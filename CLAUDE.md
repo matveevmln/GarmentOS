@@ -49,6 +49,7 @@
 | [`docs/QUALITY_STANDARDS.md`](./docs/QUALITY_STANDARDS.md) | Стандарты качества кода, тестирования, CI/CD |
 | [`docs/ARCHITECTURE_SELF_REVIEW.md`](./docs/ARCHITECTURE_SELF_REVIEW.md) | Самопроверка архитектуры, риски, открытые вопросы |
 | [`docs/ARCHITECTURE_REVIEW.md`](./docs/ARCHITECTURE_REVIEW.md) | Независимая архитектурная ревизия перед первым реальным запуском на Railway (2026-08-02) — сверка `docs/*` с фактическим кодом/схемой БД, приоритеты P0-P3 |
+| [`docs/UI_MIGRATION_PLAN.md`](./docs/UI_MIGRATION_PLAN.md) | **Единый источник дизайна GarmentOS (раздел 0)** — GitHub-прототип `matveevmln/garmentos-ea4078f2` (Lovable) как источник визуальной истины, `apps/web` как источник функциональности и данных; план переноса по этапам 1-9. Правило действует на всю дальнейшую разработку, не только на миграцию |
 | [`docs/WEB_DESIGN_SYSTEM.md`](./docs/WEB_DESIGN_SYSTEM.md) | Эталонный визуальный язык GarmentOS (утверждённый `apps/prototype`) — аудит соответствия `apps/web`, план переноса компонент за компонентом |
 | [`docs/UI_FOUNDATION.md`](./docs/UI_FOUNDATION.md) | Инженерный фундамент UI Kit — какие open-source библиотеки (shadcn/ui, Radix UI, Tailwind, TanStack и др.) лежат в основе фирменных Garment-компонентов, какие компоненты строятся сейчас, какие зарезервированы на будущее |
 | [`docs/DESIGN_SYSTEM_MAP.md`](./docs/DESIGN_SYSTEM_MAP.md) | Полная карта компонентов Design System (расширяет `UI_FOUNDATION.md`) — исследование лучших SaaS/библиотек, полная таблица компонентов по категориям с Tier A/B-now/B-later, самостоятельный UX-аудит, benchmark |

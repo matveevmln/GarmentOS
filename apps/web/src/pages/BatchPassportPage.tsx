@@ -1,53 +1,59 @@
 import { useEffect, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import type { BatchPassportResponseDto } from "@garmentos/shared-types";
 import { apiDownload, apiRequest, ApiError } from "../api/client";
-import { Card, CardContent, CardHeader, CardTitle } from "../design-system/Card/Card";
+import { Card, CardTitle, SectionLabel } from "../design-system/Card/Card";
 import { StatusBadge } from "../design-system/StatusBadge/StatusBadge";
 import { Button } from "../design-system/Button/Button";
+import { PageHeader, Breadcrumbs } from "../design-system/PageHeader/PageHeader";
 import { SkeletonList } from "../design-system/Feedback/Skeleton";
 import { ErrorState } from "../design-system/Feedback/ErrorState";
+import { EmptyState } from "../design-system/Feedback/EmptyState";
+import { IconAlert } from "../design-system/Icons/icons";
+import {
+  Accordion,
+  CostBreakdown,
+  DocumentRow,
+  MoneyBlock,
+  ProductionStepper,
+  Timeline,
+  isProductionStage,
+  type CostRow,
+} from "../design-system/Blocks";
+import { statusMeta } from "../lib/status";
+import { formatDate, formatMoney, formatQuantity } from "../lib/format";
+import { cn } from "../design-system/utils";
 import { toast } from "../design-system/Toast/Toast";
 
-// «Паспорт партии» (владелец проекта, 2026-08-03) — центральный экран
-// заказа пошива, утверждённый макет (артефакт "Паспорт партии — макет").
-// Порядок блоков — не порядок таблиц в БД, а порядок вопросов владельца
-// бренда: деньги → производство → материалы → ОТК → документы → размеры →
-// логистика → история (docs/PRINCIPLES.md, принцип 23).
+// «Паспорт партии» — центральный экран заказа пошива.
 //
-// Три раздела макета (Материалы/ОТК/Логистика) намеренно не подключены к
-// API — для них нет источника данных (MRP-lite и разделы 4/22 «Баланса
-// партии» не реализованы, docs/PRODUCTION_BATCH_LIFECYCLE_ARCHITECTURE.md,
-// §26.5) — честные пустые состояния вместо выдуманных нулей.
+// Композиция перенесена из GitHub-прототипа (`matveevmln/garmentos-ea4078f2`,
+// PassportScreen) — единого источника визуальной истины
+// (docs/UI_MIGRATION_PLAN.md §0, этап 5): шапка с хлебными крошками →
+// тёмная полоса идентичности → деньги + «требует внимания» →
+// производственная шкала → детали (табы на десктопе, аккордеоны на
+// мобильном).
+//
+// Данные и действия — только реальные, из `GET /production-orders/:id/passport`
+// и `GET /documents/:id/file`. Mock-файл прототипа не используется, новых
+// метрик и статусов не вводится.
+//
+// Три раздела (Материалы/ОТК/Логистика) остаются честными пустыми
+// состояниями: агрегировать их не из чего, пока не утверждены разделы
+// 16/4/22 docs/PRODUCTION_BATCH_LIFECYCLE_ARCHITECTURE.md. В прототипе им
+// соответствия нет, поэтому они показаны отдельными карточками через
+// перенесённый EmptyState, а не выдуманной вкладкой с нулями.
 
-const STATUS_STEPS: { key: string; label: string }[] = [
-  { key: "placed", label: "Размещён" },
-  { key: "in_progress", label: "В работе" },
-  { key: "ready_for_pickup", label: "Готово к отгрузке" },
-  { key: "received", label: "Принято" },
+type TabKey = "cost" | "docs" | "colors" | "contract" | "history";
+
+const TABS: { key: TabKey; label: string }[] = [
+  { key: "cost", label: "Себестоимость" },
+  { key: "docs", label: "Документы" },
+  { key: "colors", label: "Размеры и цвета" },
+  { key: "contract", label: "Договор" },
+  { key: "history", label: "История" },
 ];
 
-function formatMoney(amount: number): string {
-  return new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount);
-}
-
-function formatDate(value: string | null): string {
-  if (!value) return "—";
-  return new Intl.DateTimeFormat("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric" }).format(new Date(value));
-}
-
-function formatDateTime(value: string | Date): string {
-  const date = typeof value === "string" ? new Date(value) : value;
-  return new Intl.DateTimeFormat("ru-RU", { day: "2-digit", month: "long", hour: "2-digit", minute: "2-digit" }).format(date);
-}
-
-const INVOICE_STATUS_LABEL: Record<string, string> = {
-  draft: "Черновик",
-  issued: "Выставлен",
-  paid: "Оплачен",
-  overdue: "Просрочен",
-  cancelled: "Отменён",
-};
 
 export function BatchPassportPage() {
   const { id } = useParams<{ id: string }>();
@@ -55,6 +61,7 @@ export function BatchPassportPage() {
   const [passport, setPassport] = useState<BatchPassportResponseDto | null>(null);
   const [error, setError] = useState(false);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
+  const [tab, setTab] = useState<TabKey>("cost");
 
   const load = () => {
     if (!id) return;
@@ -80,18 +87,16 @@ export function BatchPassportPage() {
     }
   };
 
-  if (error) {
-    return <ErrorState title="Не удалось загрузить партию" onRetry={load} />;
-  }
+  if (error) return <ErrorState title="Не удалось загрузить партию" onRetry={load} />;
   if (!passport) return <SkeletonList />;
 
-  const isTerminalStatus = passport.status === "received" || passport.status === "cancelled";
-  const currentStepIndex = STATUS_STEPS.findIndex((step) => step.key === passport.status);
   const snapshot = passport.costSnapshot;
+  const plannedQuantity = Math.round(Number(passport.plannedQuantity));
+
   // apiRequest не восстанавливает Date из JSON (createdAt приходит строкой,
   // хотя тип DocumentResponseDto утверждает Date) — сравнение через new
   // Date(...) обязательно, .valueOf() на сырой строке даёт NaN и ломает
-  // сортировку молча. Самый свежий документ считается "текущей версией" по
+  // сортировку молча. Самый свежий документ считается «текущей версией» по
   // факту, а не по isCurrentVersion — на сегодня повторная генерация
   // спецификации создаёт независимый документ, не новую версию через
   // supersedesDocumentId (известный пробел, не в объёме этой задачи).
@@ -109,317 +114,443 @@ export function BatchPassportPage() {
     if (!colors.includes(variant.color)) colors.push(variant.color);
     if (!sizes.includes(variant.size)) sizes.push(variant.size);
   }
-  const quantityFor = (color: string, size: string): string | null => {
+  const quantityFor = (color: string, size: string): number | null => {
     const variant = passport.variants.find((row) => row.color === color && row.size === size);
-    return variant ? String(Math.round(Number(variant.quantity))) : null;
+    return variant ? Math.round(Number(variant.quantity)) : null;
   };
 
-  const batchSum = snapshot ? snapshot.specificationPricePerUnit * Number(passport.plannedQuantity) : null;
-  const costBreakdown = snapshot
+  const batchSum = snapshot ? snapshot.specificationPricePerUnit * plannedQuantity : null;
+
+  // Строки себестоимости — те же пять статей, что показывались и раньше;
+  // доля считается от их суммы, а не вводится как новая величина.
+  const rawCost = snapshot
     ? [
-        { label: "Ткань", value: snapshot.fabricCostPerUnit, color: "#d7263d" },
-        { label: "Пошив", value: snapshot.sewingCostPerUnit, color: "#f2a154" },
-        { label: "Фурнитура", value: snapshot.trimCostPerUnit, color: "#2563eb" },
-        { label: "Упаковка", value: snapshot.packagingCostPerUnit, color: "#16a34a" },
-        { label: "Прочее", value: snapshot.otherCostPerUnit, color: "#a0a0a8" },
-      ].filter((row) => row.value > 0)
+        { label: "Ткань", unitCost: snapshot.fabricCostPerUnit },
+        { label: "Пошив", unitCost: snapshot.sewingCostPerUnit },
+        { label: "Фурнитура", unitCost: snapshot.trimCostPerUnit },
+        { label: "Упаковка", unitCost: snapshot.packagingCostPerUnit },
+        { label: "Прочее", unitCost: snapshot.otherCostPerUnit },
+      ].filter((row) => row.unitCost > 0)
     : [];
-  const costTotal = costBreakdown.reduce((sum, row) => sum + row.value, 0);
+  const costUnitTotal = rawCost.reduce((sum, row) => sum + row.unitCost, 0);
+  const costRows: CostRow[] = rawCost.map((row) => ({
+    label: row.label,
+    unitCost: row.unitCost,
+    total: row.unitCost * plannedQuantity,
+    share: costUnitTotal > 0 ? Math.round((row.unitCost / costUnitTotal) * 100) : 0,
+  }));
 
-  return (
-    <section className="flex flex-col gap-5">
-      <button
-        type="button"
-        onClick={() => void navigate("/production-orders")}
-        className="w-fit border-none bg-transparent p-0 text-[0.82rem] font-semibold text-muted-foreground hover:text-foreground"
-      >
-        ← Заказы пошива
-      </button>
-
-      {/* ---------- Заголовок ---------- */}
-      <div className="flex flex-wrap items-start justify-between gap-3">
+  const renderTab = (key: TabKey) => {
+    if (key === "cost") {
+      if (!snapshot) {
+        return (
+          <EmptyState
+            compact
+            title={
+              passport.status === "draft"
+                ? "Себестоимость появится после подтверждения"
+                : "Снимок стоимости недоступен"
+            }
+            description={
+              passport.status === "draft"
+                ? "При подтверждении заказа GarmentOS зафиксирует себестоимость по текущим закупочным ценам — этот снимок больше не изменится, даже если цены вырастут."
+                : "Этот заказ подтверждён до появления Snapshot партии — данные о себестоимости для него не сохранены."
+            }
+          />
+        );
+      }
+      return (
         <div>
-          <div className="flex flex-wrap items-center gap-2.5">
-            <h1>{passport.product.name}</h1>
-            <StatusBadge status={passport.status} />
+          <div className="num mb-3 text-[11px] text-muted-foreground">
+            Snapshot зафиксирован: {formatDate(snapshot.capturedAt)} · больше не пересчитывается
           </div>
-          <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 text-[0.85rem] text-muted-foreground">
-            <span>Цех <b className="font-semibold text-foreground">{passport.workshop.name}</b></span>
-            {passport.workshop.contractNumber && (
-              <span>
-                Договор <b className="font-semibold text-foreground">№{passport.workshop.contractNumber}</b>
-                {passport.workshop.contractDate && ` от ${formatDate(passport.workshop.contractDate)}`}
-              </span>
+          {costRows.length > 0 ? (
+            <CostBreakdown
+              rows={costRows}
+              total={{
+                label: "Себестоимость факт",
+                unitCost: snapshot.actualCostPerUnit,
+                total: snapshot.actualCostPerUnit * plannedQuantity,
+              }}
+            />
+          ) : null}
+
+          {snapshot.materialsWithoutPriceHistory.length > 0 && (
+            <p className="mt-4 rounded-[10px] border border-warning/30 bg-warning/[0.06] px-3 py-2 text-[12px] font-medium text-warning">
+              Без истории закупочной цены на момент снимка:{" "}
+              {snapshot.materialsWithoutPriceHistory.join(", ")} — не учтены в себестоимости.
+            </p>
+          )}
+
+          <div className="mt-4">
+            <SectionLabel>Счета по этой партии</SectionLabel>
+            {passport.invoices.length === 0 ? (
+              <p className="t-meta mt-2">Пока не выставлены.</p>
+            ) : (
+              <ul className="mt-2 divide-y divide-border rounded-[10px] border border-border px-3">
+                {passport.invoices.map((invoice) => (
+                  <li key={invoice.id} className="flex items-center justify-between gap-3 py-2.5">
+                    <span className="num text-[13px] font-medium">{formatMoney(invoice.amount, "сом", 2)}</span>
+                    <span className="flex items-center gap-2">
+                      {invoice.dueDate ? (
+                        <span className="num text-[11px] text-muted-foreground">до {formatDate(invoice.dueDate)}</span>
+                      ) : null}
+                      <StatusBadge status={invoice.status} />
+                    </span>
+                  </li>
+                ))}
+              </ul>
             )}
-            <span>Срок <b className="font-semibold text-foreground">{formatDate(passport.dueDate)}</b></span>
           </div>
         </div>
-        {currentDoc && (
-          <Button type="button" loading={downloadingId === currentDoc.id} onClick={() => void openDocument(currentDoc.id, currentDoc.title ?? "Спецификация")}>
-            Скачать спецификацию
-          </Button>
+      );
+    }
+
+    if (key === "docs") {
+      if (passport.documents.length === 0) {
+        return (
+          <EmptyState
+            compact
+            title="Спецификация ещё не сформирована"
+            description="Документы партии появятся здесь после генерации спецификации."
+          />
+        );
+      }
+      return (
+        <div className="divide-y divide-border">
+          {currentDoc ? (
+            <DocumentRow
+              title={currentDoc.title ?? currentDoc.docType}
+              version="Актуальная"
+              format="PDF"
+              date={currentDoc.createdAt}
+              onOpen={() => void openDocument(currentDoc.id, currentDoc.title ?? "Спецификация")}
+            />
+          ) : null}
+          {previousDocs.map((doc) => (
+            <DocumentRow
+              key={doc.id}
+              title={doc.title ?? doc.docType}
+              format="PDF"
+              date={doc.createdAt}
+              onOpen={() => void openDocument(doc.id, doc.title ?? "Спецификация")}
+            />
+          ))}
+        </div>
+      );
+    }
+
+    if (key === "colors") {
+      if (colors.length === 0 || sizes.length === 0) {
+        return (
+          <EmptyState compact title="Размеры не заданы" description="В заказе нет ни одного SKU с размером и цветом." />
+        );
+      }
+      return (
+        <div className="space-y-4">
+          {colors.map((color) => (
+            <div key={color}>
+              <SectionLabel>{color}</SectionLabel>
+              {/* Три колонки — как в прототипе; при большем числе размеров
+                  ячейки переносятся на следующую строку. */}
+              <div className="mt-2 grid grid-cols-3 gap-px overflow-hidden rounded-[10px] border border-border bg-border">
+                {sizes.map((size) => (
+                  <div key={size} className="bg-card px-3 py-2.5 text-center">
+                    <div className="num text-[11px] text-muted-foreground">{size}</div>
+                    <div className="num mt-1 text-[16px] font-semibold">{quantityFor(color, size) ?? "—"}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      );
+    }
+
+    if (key === "contract") {
+      // Все поля — из снимка партии (productionOrderCostSnapshotSchema);
+      // до этого экрана они доезжали, но не показывались.
+      if (!snapshot) {
+        return (
+          <EmptyState
+            compact
+            title="Условия договора не зафиксированы"
+            description="Реквизиты договора сохраняются в снимке партии при подтверждении заказа."
+          />
+        );
+      }
+      return (
+        <dl className="grid grid-cols-1 gap-y-2.5 text-[13px] sm:grid-cols-[180px_1fr]">
+          <dt className="text-muted-foreground">Договор</dt>
+          <dd className="num">
+            {snapshot.contractNumber} от {formatDate(snapshot.contractDate)}
+          </dd>
+          <dt className="text-muted-foreground">Заказчик</dt>
+          <dd>{snapshot.customerName}</dd>
+          <dt className="text-muted-foreground">Исполнитель</dt>
+          <dd>{snapshot.contractorName}</dd>
+          <dt className="text-muted-foreground">Доставка</dt>
+          <dd>{snapshot.deliveryMethod}</dd>
+          <dt className="text-muted-foreground">Условия оплаты</dt>
+          <dd>{snapshot.paymentTerms}</dd>
+        </dl>
+      );
+    }
+
+    return passport.timeline.length > 0 ? (
+      <Timeline
+        items={passport.timeline.map((event) => ({
+          title: event.label,
+          date: event.occurredAt,
+        }))}
+      />
+    ) : (
+      <EmptyState compact title="Событий пока нет" description="История заказа наполняется по мере его прохождения." />
+    );
+  };
+
+  return (
+    <div className="mx-auto max-w-[1400px]">
+      <PageHeader
+        breadcrumbs={
+          <Breadcrumbs
+            items={[
+              { label: "GarmentOS" },
+              { label: "Заказы пошива", onClick: () => void navigate("/production-orders") },
+              { label: passport.product.name },
+            ]}
+          />
+        }
+        title={passport.product.name}
+        subtitle={
+          <span className="num">
+            {passport.workshop.name} · {formatQuantity(plannedQuantity, "изделий")} · срок{" "}
+            {formatDate(passport.dueDate)}
+          </span>
+        }
+        actions={
+          <>
+            <Button variant="secondary" size="sm" onClick={() => void navigate("/production-orders")}>
+              К списку
+            </Button>
+            {currentDoc ? (
+              <Button
+                size="sm"
+                loading={downloadingId === currentDoc.id}
+                onClick={() => void openDocument(currentDoc.id, currentDoc.title ?? "Спецификация")}
+              >
+                Скачать спецификацию
+              </Button>
+            ) : null}
+          </>
+        }
+      />
+
+      {/* 1. Идентичность */}
+      <section className="elev-2 flex flex-wrap items-center gap-x-8 gap-y-4 rounded-[10px] bg-sidebar bg-[linear-gradient(180deg,color-mix(in_oklab,var(--sidebar-primary)_9%,transparent)_0%,transparent_60%)] px-4 py-4 text-sidebar-foreground md:px-5">
+        <div className="flex items-center gap-3">
+          <div>
+            <div className="editorial text-[17px] leading-tight">{passport.product.name}</div>
+            <div className="text-[12px] text-sidebar-foreground/60">{passport.workshop.name}</div>
+          </div>
+        </div>
+        <div className="h-8 w-px bg-sidebar-border max-md:hidden" />
+        <div>
+          <div className="eyebrow text-sidebar-foreground/50">Количество</div>
+          <div className="num mt-1 text-[14px] font-medium">{formatQuantity(plannedQuantity, "изделий")}</div>
+        </div>
+        <div className="ml-auto inline-flex items-center gap-2 rounded-[4px] border border-sidebar-border bg-sidebar-accent px-2.5 py-1.5 text-[12px] font-medium">
+          <span className="h-1.5 w-1.5 rounded-full bg-sidebar-primary" />
+          {statusMeta(passport.status).label}
+        </div>
+      </section>
+
+      {/* 2. Деньги + 4. Требует внимания */}
+      <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+        <Card className="overflow-hidden">
+          <div className="px-4 pt-4 md:px-5">
+            <div className="flex items-center justify-between gap-3">
+              <CardTitle className="text-[16px]">Деньги</CardTitle>
+              <span className="t-meta shrink-0">по партии</span>
+            </div>
+          </div>
+          {snapshot ? (
+            <div className="mt-2 grid grid-cols-1 gap-px bg-border sm:grid-cols-2 xl:grid-cols-4">
+              <div className="bg-card">
+                <MoneyBlock
+                  label="Сумма партии"
+                  value={batchSum ?? 0}
+                  sub={`по спецификации, ${formatQuantity(plannedQuantity, "шт")}`}
+                />
+              </div>
+              <div className="bg-card">
+                <MoneyBlock
+                  label="Цена в спецификации"
+                  value={snapshot.specificationPricePerUnit}
+                  decimals={2}
+                  sub="за единицу"
+                />
+              </div>
+              <div className="bg-card">
+                <MoneyBlock
+                  label="Себестоимость факт"
+                  value={snapshot.actualCostPerUnit}
+                  decimals={2}
+                  sub="за единицу"
+                />
+              </div>
+              <div className="bg-card">
+                <MoneyBlock
+                  label="Разница (нал.)"
+                  value={snapshot.deductionPerUnit}
+                  decimals={2}
+                  sub="за единицу"
+                  tone="warning"
+                />
+              </div>
+            </div>
+          ) : (
+            <div className="p-4 md:p-5">
+              <EmptyState
+                compact
+                title={
+                  passport.status === "draft"
+                    ? "Себестоимость появится после подтверждения"
+                    : "Снимок стоимости недоступен"
+                }
+                description={
+                  passport.status === "draft"
+                    ? "При подтверждении заказа GarmentOS зафиксирует себестоимость по текущим закупочным ценам."
+                    : "Этот заказ подтверждён до появления Snapshot партии."
+                }
+              />
+            </div>
+          )}
+        </Card>
+
+        {/* Слот «Требует внимания» из прототипа. В apps/web единственный
+            реальный повод для тревоги на этом экране — просрочка срока
+            сдачи; сумма неоплаченного счёта здесь не считается, чтобы не
+            вводить метрику, которой в системе нет. */}
+        {passport.daysOverdue !== null ? (
+          <Card className="border-warning/30 bg-warning/[0.03] p-4 md:p-5">
+            <div className="flex items-center justify-between gap-3">
+              <CardTitle className="text-[16px]">Требует внимания</CardTitle>
+              <span className="t-meta shrink-0">1 позиция</span>
+            </div>
+            <div className="mt-3 flex items-start gap-3">
+              <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-[8px] bg-warning/[0.1] text-warning">
+                <IconAlert size={15} />
+              </span>
+              <div className="min-w-0 flex-1">
+                <div className="text-[13px] font-medium">Просрочен срок сдачи цехом</div>
+                <div className="num mt-1 text-[20px] font-semibold text-warning">
+                  {passport.daysOverdue} дн.
+                </div>
+                <div className="num mt-1 text-[11px] text-muted-foreground">
+                  срок был {formatDate(passport.dueDate)}
+                </div>
+              </div>
+            </div>
+          </Card>
+        ) : (
+          <Card className="p-4 md:p-5">
+            <div className="flex items-center justify-between gap-3">
+              <CardTitle className="text-[16px]">Требует внимания</CardTitle>
+            </div>
+            <p className="t-secondary mt-3">Срок сдачи не нарушен.</p>
+          </Card>
         )}
       </div>
 
-      {passport.daysOverdue !== null && (
-        <div className="flex items-center gap-2.5 rounded-[16px] bg-destructive/10 px-4 py-3 text-[0.86rem] font-semibold text-destructive">
-          ⏰ Просрочено на {passport.daysOverdue} {passport.daysOverdue === 1 ? "день" : "дней"} — срок сдачи цехом был {formatDate(passport.dueDate)}
+      {/* 3. Производство */}
+      <Card className="mt-4 p-4 md:p-5">
+        <div className="flex items-center justify-between gap-3">
+          <CardTitle className="text-[16px]">Производство</CardTitle>
+          <span className="t-meta shrink-0">5 этапов</span>
         </div>
-      )}
-
-      {/* ---------- Экономика партии ---------- */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Экономика партии</CardTitle>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-4">
-          {!snapshot ? (
-            <div className="flex flex-col items-center gap-1 py-6 text-center text-muted-foreground">
-              <p className="text-[0.86rem] font-bold text-foreground">
-                {passport.status === "draft" ? "Себестоимость появится после подтверждения" : "Снимок стоимости недоступен"}
-              </p>
-              <p className="max-w-[420px] text-[0.8rem] leading-relaxed">
-                {passport.status === "draft"
-                  ? "При подтверждении заказа GarmentOS зафиксирует себестоимость по текущим закупочным ценам — этот снимок больше не изменится, даже если цены вырастут."
-                  : "Этот заказ подтверждён до появления Snapshot партии — данные о себестоимости для него не сохранены."}
-              </p>
-            </div>
+        <div className="mt-4">
+          {isProductionStage(passport.status) ? (
+            <ProductionStepper current={passport.status} />
           ) : (
-            <>
-              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                <div className="rounded-[16px] bg-secondary p-3.5">
-                  <div className="text-[0.72rem] text-muted-foreground">Фактическая себестоимость</div>
-                  <div className="text-[1.15rem] font-extrabold tabular-nums">{formatMoney(snapshot.actualCostPerUnit)} ₽<span className="text-[0.7rem] font-normal text-muted-2"> /шт</span></div>
-                </div>
-                <div className="rounded-[16px] bg-secondary p-3.5">
-                  <div className="text-[0.72rem] text-muted-foreground">Цена в спецификации</div>
-                  <div className="text-[1.15rem] font-extrabold tabular-nums text-primary">{formatMoney(snapshot.specificationPricePerUnit)} ₽<span className="text-[0.7rem] font-normal text-muted-2"> /шт</span></div>
-                </div>
-                <div className="rounded-[16px] bg-secondary p-3.5">
-                  <div className="text-[0.72rem] text-muted-foreground">Разница (нал.)</div>
-                  <div className="text-[1.15rem] font-extrabold tabular-nums">{formatMoney(snapshot.deductionPerUnit)} ₽<span className="text-[0.7rem] font-normal text-muted-2"> /шт</span></div>
-                </div>
-                <div className="rounded-[16px] bg-secondary p-3.5">
-                  <div className="text-[0.72rem] text-muted-foreground">Сумма партии</div>
-                  <div className="text-[1.15rem] font-extrabold tabular-nums">{formatMoney(batchSum ?? 0)} ₽</div>
-                  <div className="text-[0.7rem] text-muted-2">по спецификации, {Math.round(Number(passport.plannedQuantity))} шт</div>
-                </div>
-              </div>
+            <p className="t-secondary">Заказ отменён — партия вышла из производственной шкалы.</p>
+          )}
+        </div>
+        <div className="mt-4">
+          <EmptyState
+            compact
+            title="Детальный ход кроя и пошива появится здесь"
+            description="Проценты готовности, комментарии и фото от цеха — разделы 19-20 «Баланса производственной партии», ждёт реализации."
+          />
+        </div>
+      </Card>
 
-              {costBreakdown.length > 0 && (
-                <div>
-                  <div className="flex h-2.5 overflow-hidden rounded-full">
-                    {costBreakdown.map((row) => (
-                      <span key={row.label} style={{ width: `${(row.value / costTotal) * 100}%`, background: row.color }} />
-                    ))}
-                  </div>
-                  <div className="mt-2.5 flex flex-wrap gap-x-4 gap-y-1.5 text-[0.78rem] text-muted-foreground">
-                    {costBreakdown.map((row) => (
-                      <span key={row.label} className="flex items-center gap-1.5">
-                        <span className="h-2 w-2 rounded-[2px]" style={{ background: row.color }} />
-                        {row.label} <b className="tabular-nums text-foreground">{formatMoney(row.value)} ₽</b>
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {snapshot.materialsWithoutPriceHistory.length > 0 && (
-                <p className="rounded-[12px] bg-warning-tint px-3 py-2 text-[0.78rem] font-semibold text-warning">
-                  Без истории закупочной цены на момент снимка: {snapshot.materialsWithoutPriceHistory.join(", ")} — не учтены в себестоимости.
-                </p>
-              )}
-
-              <div className="rounded-[16px] bg-secondary p-3.5 text-[0.8rem] leading-relaxed text-muted-foreground">
-                {snapshot.paymentTerms}
-              </div>
-
-              <div className="flex flex-col gap-1.5">
-                <div className="text-[0.78rem] font-bold uppercase tracking-wide text-muted-foreground">Счета по этой партии</div>
-                {passport.invoices.length === 0 ? (
-                  <p className="text-[0.82rem] text-muted-2">Пока не выставлены.</p>
-                ) : (
-                  passport.invoices.map((invoice) => (
-                    <div key={invoice.id} className="flex items-center justify-between rounded-2xl border border-border px-3 py-2">
-                      <span className="text-[0.85rem] font-semibold">{formatMoney(invoice.amount)} ₽</span>
-                      <span className="flex items-center gap-2 text-[0.78rem] text-muted-foreground">
-                        {invoice.dueDate && `до ${formatDate(invoice.dueDate)}`}
-                        <span className="status-badge">{INVOICE_STATUS_LABEL[invoice.status] ?? invoice.status}</span>
-                      </span>
-                    </div>
-                  ))
+      {/* 5. Детали — табы на десктопе */}
+      <div className="mt-4 hidden md:block">
+        <Card className="overflow-hidden">
+          <div className="flex flex-wrap gap-1 border-b border-border px-3 pt-2">
+            {TABS.map((t) => (
+              <button
+                key={t.key}
+                type="button"
+                onClick={() => setTab(t.key)}
+                className={cn(
+                  "btn-unset interactive relative -mb-px h-9 rounded-t-[6px] px-3 text-[13px]",
+                  tab === t.key
+                    ? "font-medium text-foreground"
+                    : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
                 )}
-              </div>
-            </>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* ---------- Производство ---------- */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Производство</CardTitle>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-4">
-          {passport.status === "cancelled" ? (
-            <p className="text-[0.85rem] text-muted-foreground">Заказ отменён.</p>
-          ) : (
-            <div className="flex items-start">
-              {STATUS_STEPS.map((step, index) => {
-                const done = currentStepIndex >= 0 && index < currentStepIndex;
-                const now = index === currentStepIndex || (passport.status === "received" && step.key === "received");
-                return (
-                  <div key={step.key} className="relative flex flex-1 flex-col items-center">
-                    {index > 0 && (
-                      <span
-                        className="absolute left-[-50%] top-[11px] h-0.5 w-full"
-                        style={{ background: done || now ? "var(--color-success)" : "var(--color-border)" }}
-                      />
-                    )}
-                    <span
-                      className="z-10 flex h-[22px] w-[22px] items-center justify-center rounded-full border-2 text-[0.66rem] font-extrabold"
-                      style={
-                        done
-                          ? { background: "var(--color-success)", borderColor: "var(--color-success)", color: "#fff" }
-                          : now
-                            ? { background: "var(--color-primary)", borderColor: "var(--color-primary)", color: "#fff" }
-                            : { background: "var(--color-secondary)", borderColor: "var(--color-border)", color: "var(--color-muted-2)" }
-                      }
-                    >
-                      {done ? "✓" : index + 1}
-                    </span>
-                    <span className={`mt-1.5 max-w-[100px] text-center text-[0.7rem] ${done || now ? "font-bold text-foreground" : "text-muted-foreground"}`}>
-                      {step.label}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-          <div className="flex flex-col items-center gap-1 rounded-[16px] bg-secondary py-6 text-center text-muted-foreground">
-            <p className="text-[0.82rem] font-bold text-foreground">Детальный ход кроя и пошива появится здесь</p>
-            <p className="max-w-[380px] text-[0.76rem] leading-relaxed">
-              Проценты готовности, комментарии и фото от цеха — раздел 19–20 «Баланса производственной партии», ждёт реализации.
-            </p>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* ---------- Материалы / ОТК / Логистика — честные заглушки ---------- */}
-      {[
-        { title: "Материалы", hint: "Что уже куплено, что заказано, чего не хватает для кроя — автоматически по BOM и остаткам склада (MRP-lite, раздел 16), ждёт реализации." },
-        { title: "ОТК и брак", hint: "Отправлено / принято / брак / устранение — появится после утверждения раздела 4 «Баланса производственной партии»." },
-        { title: "Логистика", hint: "Трек Red Express — раздел 22 архитектуры партии, интеграция с перевозчиком." },
-      ].map((section) => (
-        <Card key={section.title}>
-          <CardHeader>
-            <CardTitle>{section.title}</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="flex flex-col items-center gap-1 py-6 text-center text-muted-foreground">
-              <p className="max-w-[420px] text-[0.8rem] leading-relaxed">{section.hint}</p>
-            </div>
-          </CardContent>
-        </Card>
-      ))}
-
-      {/* ---------- Документы ---------- */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Документы</CardTitle>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-2">
-          {passport.documents.length === 0 && <p className="text-[0.82rem] text-muted-2">Спецификация ещё не сформирована.</p>}
-          {currentDoc && (
-            <div className="flex items-center justify-between gap-3 rounded-2xl border border-border px-3 py-2.5">
-              <div className="min-w-0">
-                <div className="truncate text-[0.85rem] font-bold text-foreground">{currentDoc.title ?? currentDoc.docType}</div>
-                <div className="text-[0.74rem] text-muted-foreground">
-                  Текущая версия · {formatDateTime(currentDoc.createdAt)}
-                  {previousDocs.length > 0 && ` · ${previousDocs.length} предыдущих`}
-                </div>
-              </div>
-              <Button type="button" size="sm" loading={downloadingId === currentDoc.id} onClick={() => void openDocument(currentDoc.id, currentDoc.title ?? "Спецификация")}>
-                Открыть
-              </Button>
-            </div>
-          )}
-          {previousDocs.map((doc) => (
-            <div key={doc.id} className="flex items-center justify-between gap-3 rounded-2xl border border-border px-3 py-2.5 opacity-70">
-              <div className="min-w-0">
-                <div className="truncate text-[0.82rem] font-semibold text-foreground">{doc.title ?? doc.docType}</div>
-                <div className="text-[0.74rem] text-muted-foreground">{formatDateTime(doc.createdAt)}</div>
-              </div>
-              <Button type="button" size="sm" variant="secondary" loading={downloadingId === doc.id} onClick={() => void openDocument(doc.id, doc.title ?? "Спецификация")}>
-                Открыть
-              </Button>
-            </div>
-          ))}
-          <div className="mt-1 flex items-center justify-between gap-3 rounded-2xl border border-dashed border-border px-3 py-2.5 opacity-50">
-            <span className="text-[0.8rem] text-muted-foreground">Счета, накладные, акты</span>
-            <span className="text-[0.74rem] text-muted-2">будет добавлено</span>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* ---------- Размеры и цвета ---------- */}
-      {colors.length > 0 && sizes.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Размеры и цвета</CardTitle>
-          </CardHeader>
-          <CardContent className="overflow-x-auto">
-            <table className="w-full min-w-[420px] border-collapse text-[0.82rem]">
-              <thead>
-                <tr>
-                  <th className="border-b border-border px-2 py-1.5 text-left font-semibold text-muted-foreground"></th>
-                  {sizes.map((size) => (
-                    <th key={size} className="border-b border-border px-2 py-1.5 text-center font-semibold text-muted-foreground">
-                      {size}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {colors.map((color) => (
-                  <tr key={color}>
-                    <td className="border-b border-border px-2 py-1.5 font-semibold text-foreground">{color}</td>
-                    {sizes.map((size) => (
-                      <td key={size} className="border-b border-border px-2 py-1.5 text-center tabular-nums text-muted-foreground">
-                        {quantityFor(color, size) ?? "—"}
-                      </td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* ---------- История ---------- */}
-      <Card>
-        <CardHeader>
-          <CardTitle>История</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="flex flex-col gap-3.5 border-l-2 border-border pl-4">
-            {passport.timeline.map((event, index) => (
-              <div key={index} className="relative">
-                <span className="absolute -left-[21px] top-1 h-2 w-2 rounded-full bg-primary" />
-                <div className="text-[0.84rem] font-semibold text-foreground">{event.label}</div>
-                <div className="text-[0.74rem] text-muted-foreground">{formatDateTime(event.occurredAt)}</div>
-              </div>
+              >
+                {t.label}
+                <span
+                  className={cn(
+                    "absolute inset-x-2 -bottom-px h-[2px] rounded-full bg-primary transition-[opacity,transform] duration-200",
+                    tab === t.key ? "scale-x-100 opacity-100" : "scale-x-0 opacity-0",
+                  )}
+                />
+              </button>
             ))}
           </div>
-        </CardContent>
-      </Card>
+          <div key={tab} className="anim-content p-5">
+            {renderTab(tab)}
+          </div>
+        </Card>
+      </div>
 
-      {isTerminalStatus && (
-        <Link to="/production-orders" className="text-center text-[0.82rem] font-semibold text-muted-foreground no-underline hover:text-foreground">
-          ← Ко всем заказам пошива
-        </Link>
-      )}
-    </section>
+      {/* 5. Детали — аккордеоны на мобильном */}
+      <div className="mt-4 space-y-2 md:hidden">
+        {TABS.map((t, i) => (
+          <Accordion key={t.key} title={t.label} defaultOpen={i === 0}>
+            {renderTab(t.key)}
+          </Accordion>
+        ))}
+      </div>
+
+      {/* Разделы без источника данных. В прототипе им соответствия нет —
+          показываем честные пустые состояния, а не выдуманные нули. */}
+      <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-3">
+        {[
+          {
+            title: "Материалы",
+            hint: "Что уже куплено, что заказано, чего не хватает для кроя — автоматически по BOM и остаткам склада (MRP-lite, раздел 16), ждёт реализации.",
+          },
+          {
+            title: "ОТК и брак",
+            hint: "Отправлено / принято / брак / устранение — появится после утверждения раздела 4 «Баланса производственной партии».",
+          },
+          {
+            title: "Логистика",
+            hint: "Трек Red Express — раздел 22 архитектуры партии, интеграция с перевозчиком.",
+          },
+        ].map((section) => (
+          <Card key={section.title} className="p-4 md:p-5">
+            <CardTitle className="text-[16px]">{section.title}</CardTitle>
+            <div className="mt-3">
+              <EmptyState compact title="Раздел ещё не подключён" description={section.hint} />
+            </div>
+          </Card>
+        ))}
+      </div>
+    </div>
   );
 }

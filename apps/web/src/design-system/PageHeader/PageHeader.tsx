@@ -25,7 +25,7 @@ export function Breadcrumbs({ items, className }: { items: Crumb[]; className?: 
             <button
               type="button"
               onClick={item.onClick}
-              className="focus-ring rounded-[4px] transition-colors hover:text-foreground"
+              className="btn-unset focus-ring rounded-[4px] transition-colors hover:text-foreground"
             >
               {item.label}
             </button>
@@ -56,7 +56,11 @@ export function PageHeader({
       {breadcrumbs}
       <div className="mt-1.5 flex flex-wrap items-end justify-between gap-3">
         <div className="min-w-0">
-          <h1 className="t-page">{title}</h1>
+          {/* Шкала заголовка — как в прототипе: t-page на мобильном,
+              крупный t-display 38px от md. На этапе 2 md-часть была
+              потеряна; вызовов у компонента ещё не было, правим до
+              первого применения (docs/UI_MIGRATION_PLAN.md §0). */}
+          <h1 className="t-page md:t-display md:text-[38px]">{title}</h1>
           {subtitle ? <p className="t-secondary mt-2 max-w-[68ch]">{subtitle}</p> : null}
         </div>
         {actions ? <div className="flex items-center gap-2">{actions}</div> : null}

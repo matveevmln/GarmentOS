@@ -17,7 +17,7 @@ import { cn } from "../utils";
 // sm/md); переименование потребовало бы переписать все страницы, что
 // выходит за рамки этапа 2 и создаёт риск для бизнес-логики.
 export const buttonVariants = cva(
-  "interactive focus-ring inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-[6px] font-medium tracking-[-0.005em] disabled:pointer-events-none disabled:opacity-45 disabled:shadow-none",
+  "btn-unset interactive focus-ring inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-[6px] font-medium tracking-[-0.005em] disabled:pointer-events-none disabled:opacity-45 disabled:shadow-none",
   {
     variants: {
       variant: {
