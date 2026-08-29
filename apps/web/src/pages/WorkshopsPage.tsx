@@ -3,7 +3,11 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { createWorkshopSchema, type CreateWorkshopDto, type WorkshopResponseDto } from "@garmentos/shared-types";
 import { useCrudResource } from "../api/useCrudResource";
-import { ListCard } from "../design-system/ListCard/ListCard";
+import { DataTable, Td, MobileListItem } from "../design-system/Blocks";
+import { Field } from "../design-system/Form/Field";
+import { PageHeader, Breadcrumbs } from "../design-system/PageHeader/PageHeader";
+import { EmptyState } from "../design-system/Feedback/EmptyState";
+import { formatDate, formatQuantity } from "../lib/format";
 import { FilterTabs, type FilterOption } from "../design-system/Tabs/FilterTabs";
 import { SearchBar } from "../design-system/Search/SearchBar";
 import { StatusBadge } from "../design-system/StatusBadge/StatusBadge";
@@ -72,37 +76,35 @@ export function WorkshopsPage() {
   );
 
   return (
-    <section className="flex flex-col gap-5">
-      <h1>Цеха</h1>
+    <div className="mx-auto max-w-[1400px]">
+      <PageHeader
+        title="Цеха"
+        subtitle={`${formatQuantity(items.length, "подрядных цехов")} в справочнике`}
+        breadcrumbs={<Breadcrumbs items={[{ label: "GarmentOS" }, { label: "Цеха" }]} />}
+      />
 
-      <Card>
+      <Card className="mb-4">
         <CardHeader>
           <CardTitle>Новый цех</CardTitle>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
           <form className="flex flex-col gap-4" onSubmit={(event) => void handleSubmit(onSubmit)(event)}>
-            <label className="flex flex-col gap-1.5 text-[0.9rem] font-semibold text-muted-foreground">
-              Название цеха
-              <Input {...register("name")} placeholder="Ак-Сарай Текстиль" />
-              {errors.name && <span className="text-[0.8rem] font-semibold text-destructive">{errors.name.message}</span>}
-            </label>
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+              <Field label="Название цеха" error={errors.name?.message}>
+                <Input {...register("name")} placeholder="Ак-Сарай Текстиль" />
+              </Field>
+              <Field label="ИНН">
+                <Input {...register("inn")} />
+              </Field>
+              <Field label="Специализация">
+                <Input {...register("specialization")} placeholder="трикотаж" />
+              </Field>
+              <Field label="Контакты">
+                <Input {...register("contactInfo")} placeholder="Телефон, Telegram" />
+              </Field>
+            </div>
 
-            <label className="flex flex-col gap-1.5 text-[0.9rem] font-semibold text-muted-foreground">
-              ИНН
-              <Input {...register("inn")} />
-            </label>
-
-            <label className="flex flex-col gap-1.5 text-[0.9rem] font-semibold text-muted-foreground">
-              Специализация
-              <Input {...register("specialization")} placeholder="трикотаж" />
-            </label>
-
-            <label className="flex flex-col gap-1.5 text-[0.9rem] font-semibold text-muted-foreground">
-              Контакты
-              <Input {...register("contactInfo")} placeholder="Телефон, Telegram" />
-            </label>
-
-            <Button type="submit" loading={isSubmitting}>
+            <Button type="submit" size="sm" loading={isSubmitting} className="md:self-start">
               {isSubmitting ? "Добавляем..." : "Добавить цех"}
             </Button>
           </form>
@@ -116,23 +118,85 @@ export function WorkshopsPage() {
 
       {!isLoading && !error && (
         <>
-          <SearchBar value={query} onChange={setQuery} placeholder="Поиск цеха" />
-          <FilterTabs options={STATUS_FILTERS} value={statusFilter} onChange={setStatusFilter} />
+          <div className="mb-3 flex flex-col gap-2.5 md:flex-row md:items-center md:justify-between">
+            <SearchBar value={query} onChange={setQuery} placeholder="Поиск цеха" className="md:w-[340px]" />
+            <FilterTabs options={STATUS_FILTERS} value={statusFilter} onChange={setStatusFilter} />
+          </div>
 
-          <ListCard
-            items={filtered}
-            getKey={(row) => row.id}
-            getIcon={() => "factory"}
-            getTitle={(row) => row.name}
-            getMeta={(row) => row.specialization || row.inn || "—"}
-            getTrailing={(row) => <StatusBadge status={row.status} />}
-            emptyTitle="Пока нет ни одного цеха"
-            emptyHint="Добавьте первый цех — займёт меньше минуты."
-            emptyActionLabel="Добавить цех"
-            onEmptyAction={() => setFocus("name")}
-          />
+          {filtered.length === 0 ? (
+            <EmptyState
+              compact
+              title={items.length === 0 ? "Пока нет ни одного цеха" : "Ничего не найдено"}
+              description={
+                items.length === 0
+                  ? "Добавьте первый цех — займёт меньше минуты."
+                  : "По заданным условиям поиска и фильтрам цехов нет."
+              }
+              action={
+                items.length === 0 ? (
+                  <Button type="button" size="sm" variant="secondary" onClick={() => setFocus("name")}>
+                    Добавить цех
+                  </Button>
+                ) : undefined
+              }
+            />
+          ) : (
+            <>
+              <div className="hidden md:block">
+                <DataTable
+                  columns={[
+                    { key: "name", label: "Название" },
+                    { key: "spec", label: "Специализация", width: "170px" },
+                    { key: "inn", label: "ИНН", width: "140px" },
+                    { key: "contract", label: "Договор", width: "180px" },
+                    { key: "status", label: "Статус", align: "right", width: "150px" },
+                  ]}
+                >
+                  {filtered.map((row) => (
+                    <tr key={row.id} className="cursor-default">
+                      <Td className="t-object">{row.name}</Td>
+                      <Td className="text-muted-foreground">{row.specialization ?? "—"}</Td>
+                      <Td className="num text-muted-foreground">{row.inn ?? "—"}</Td>
+                      <Td className="num text-muted-foreground">
+                        {row.contractNumber
+                          ? `${row.contractNumber}${row.contractDate ? ` от ${formatDate(row.contractDate)}` : ""}`
+                          : "—"}
+                      </Td>
+                      <Td align="right">
+                        <StatusBadge status={row.status} />
+                      </Td>
+                    </tr>
+                  ))}
+                </DataTable>
+              </div>
+
+              <div className="space-y-2 md:hidden">
+                {filtered.map((row) => (
+                  <MobileListItem key={row.id}>
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="text-[13px] font-medium">{row.name}</div>
+                        <div className="mt-1 text-[12px] text-muted-foreground">{row.specialization ?? "—"}</div>
+                      </div>
+                      <StatusBadge status={row.status} />
+                    </div>
+                    <dl className="num mt-2.5 grid grid-cols-2 gap-y-1.5 border-t border-border pt-2.5 text-[12px]">
+                      <dt className="text-muted-foreground">ИНН</dt>
+                      <dd className="text-right">{row.inn ?? "—"}</dd>
+                      <dt className="text-muted-foreground">Договор</dt>
+                      <dd className="text-right">
+                        {row.contractNumber
+                          ? `${row.contractNumber}${row.contractDate ? ` от ${formatDate(row.contractDate)}` : ""}`
+                          : "—"}
+                      </dd>
+                    </dl>
+                  </MobileListItem>
+                ))}
+              </div>
+            </>
+          )}
         </>
       )}
-    </section>
+    </div>
   );
 }

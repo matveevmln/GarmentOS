@@ -3,7 +3,11 @@ import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { createSupplierSchema, type CreateSupplierDto, type SupplierResponseDto } from "@garmentos/shared-types";
 import { useCrudResource } from "../api/useCrudResource";
-import { ListCard } from "../design-system/ListCard/ListCard";
+import { DataTable, Td, MobileListItem } from "../design-system/Blocks";
+import { Field } from "../design-system/Form/Field";
+import { PageHeader, Breadcrumbs } from "../design-system/PageHeader/PageHeader";
+import { EmptyState } from "../design-system/Feedback/EmptyState";
+import { formatQuantity } from "../lib/format";
 import { FilterTabs, type FilterOption } from "../design-system/Tabs/FilterTabs";
 import { SearchBar } from "../design-system/Search/SearchBar";
 import { StatusBadge } from "../design-system/StatusBadge/StatusBadge";
@@ -27,12 +31,9 @@ const SUPPLIER_TYPES = [
   { value: "logistics", label: "Перевозчик" },
 ] as const;
 
-const SUPPLIER_ICONS: Record<string, string> = {
-  fabric: "box",
-  trim: "scissors",
-  packaging: "layers",
-  logistics: "truck",
-};
+const TYPE_LABEL: Record<string, string> = Object.fromEntries(
+  SUPPLIER_TYPES.map((type) => [type.value, type.label]),
+);
 
 const TYPE_FILTERS: FilterOption<"all" | (typeof SUPPLIER_TYPES)[number]["value"]>[] = [
   { value: "all", label: "Все" },
@@ -54,6 +55,10 @@ export function SuppliersPage() {
     formState: { errors, isSubmitting },
   } = useForm<CreateSupplierDto>({ resolver: zodResolver(createSupplierSchema), defaultValues: { type: "fabric" } });
 
+  const visibleSuppliers = items
+    .filter((row) => typeFilter === "all" || row.type === typeFilter)
+    .filter((row) => row.name.toLowerCase().includes(query.trim().toLowerCase()));
+
   const onSubmit = async (data: CreateSupplierDto) => {
     try {
       await create(data);
@@ -65,23 +70,25 @@ export function SuppliersPage() {
   };
 
   return (
-    <section className="flex flex-col gap-5">
-      <h1>Поставщики</h1>
+    <div className="mx-auto max-w-[1400px]">
+      <PageHeader
+        title="Поставщики"
+        subtitle={`${formatQuantity(items.length, "поставщиков")} в справочнике`}
+        breadcrumbs={<Breadcrumbs items={[{ label: "GarmentOS" }, { label: "Поставщики" }]} />}
+      />
 
-      <Card>
+      <Card className="mb-4">
         <CardHeader>
           <CardTitle>Новый поставщик</CardTitle>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
           <form className="flex flex-col gap-4" onSubmit={(event) => void handleSubmit(onSubmit)(event)}>
-            <label className="flex flex-col gap-1.5 text-[0.9rem] font-semibold text-muted-foreground">
-              Название
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <Field label="Название" error={errors.name?.message}>
               <Input {...register("name")} placeholder="Оксфорд Текстиль" />
-              {errors.name && <span className="text-[0.8rem] font-semibold text-destructive">{errors.name.message}</span>}
-            </label>
+            </Field>
 
-            <label className="flex flex-col gap-1.5 text-[0.9rem] font-semibold text-muted-foreground">
-              Тип
+            <Field label="Тип">
               <Controller
                 name="type"
                 control={control}
@@ -100,19 +107,18 @@ export function SuppliersPage() {
                   </Select>
                 )}
               />
-            </label>
+            </Field>
 
-            <label className="flex flex-col gap-1.5 text-[0.9rem] font-semibold text-muted-foreground">
-              ИНН
+            <Field label="ИНН">
               <Input {...register("inn")} />
-            </label>
+            </Field>
 
-            <label className="flex flex-col gap-1.5 text-[0.9rem] font-semibold text-muted-foreground">
-              Контакты
+            <Field label="Контакты">
               <Input {...register("contactInfo")} />
-            </label>
+            </Field>
+            </div>
 
-            <Button type="submit" loading={isSubmitting}>
+            <Button type="submit" size="sm" loading={isSubmitting} className="md:self-start">
               {isSubmitting ? "Добавляем..." : "Добавить поставщика"}
             </Button>
           </form>
@@ -126,27 +132,75 @@ export function SuppliersPage() {
 
       {!isLoading && !error && (
         <>
-          <SearchBar value={query} onChange={setQuery} placeholder="Поиск поставщика" />
-          <FilterTabs options={TYPE_FILTERS} value={typeFilter} onChange={setTypeFilter} />
+          <div className="mb-3 flex flex-col gap-2.5 md:flex-row md:items-center md:justify-between">
+            <SearchBar value={query} onChange={setQuery} placeholder="Поиск поставщика" className="md:w-[340px]" />
+            <FilterTabs options={TYPE_FILTERS} value={typeFilter} onChange={setTypeFilter} />
+          </div>
 
-          <ListCard
-            items={items
-              .filter((row) => typeFilter === "all" || row.type === typeFilter)
-              .filter((row) => row.name.toLowerCase().includes(query.trim().toLowerCase()))}
-            getKey={(row) => row.id}
-            getIcon={(row) => SUPPLIER_ICONS[row.type] ?? "box"}
-            getTitle={(row) => row.name}
-            getMeta={(row) =>
-              `${SUPPLIER_TYPES.find((t) => t.value === row.type)?.label ?? row.type}${row.inn ? ` · ИНН ${row.inn}` : ""}`
-            }
-            getTrailing={(row) => <StatusBadge status={row.status} />}
-            emptyTitle="Пока нет ни одного поставщика"
-            emptyHint="Добавьте первого поставщика — займёт меньше минуты."
-            emptyActionLabel="Добавить поставщика"
-            onEmptyAction={() => setFocus("name")}
-          />
+          {visibleSuppliers.length === 0 ? (
+            <EmptyState
+              compact
+              title={items.length === 0 ? "Пока нет ни одного поставщика" : "Ничего не найдено"}
+              description={
+                items.length === 0
+                  ? "Добавьте первого поставщика — займёт меньше минуты."
+                  : "По заданным условиям поиска и фильтрам поставщиков нет."
+              }
+              action={
+                items.length === 0 ? (
+                  <Button type="button" size="sm" variant="secondary" onClick={() => setFocus("name")}>
+                    Добавить поставщика
+                  </Button>
+                ) : undefined
+              }
+            />
+          ) : (
+            <>
+              <div className="hidden md:block">
+                <DataTable
+                  columns={[
+                    { key: "name", label: "Название" },
+                    { key: "type", label: "Тип", width: "170px" },
+                    { key: "inn", label: "ИНН", width: "150px" },
+                    { key: "status", label: "Статус", align: "right", width: "150px" },
+                  ]}
+                >
+                  {visibleSuppliers.map((row) => (
+                    <tr key={row.id} className="cursor-default">
+                      <Td className="t-object">{row.name}</Td>
+                      <Td className="text-muted-foreground">{TYPE_LABEL[row.type] ?? row.type}</Td>
+                      <Td className="num text-muted-foreground">{row.inn ?? "—"}</Td>
+                      <Td align="right">
+                        <StatusBadge status={row.status} />
+                      </Td>
+                    </tr>
+                  ))}
+                </DataTable>
+              </div>
+
+              <div className="space-y-2 md:hidden">
+                {visibleSuppliers.map((row) => (
+                  <MobileListItem key={row.id}>
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="text-[13px] font-medium">{row.name}</div>
+                        <div className="mt-1 text-[12px] text-muted-foreground">
+                          {TYPE_LABEL[row.type] ?? row.type}
+                        </div>
+                      </div>
+                      <StatusBadge status={row.status} />
+                    </div>
+                    <div className="num mt-2.5 flex items-center justify-between border-t border-border pt-2 text-[12px]">
+                      <span className="text-muted-foreground">ИНН</span>
+                      <span>{row.inn ?? "—"}</span>
+                    </div>
+                  </MobileListItem>
+                ))}
+              </div>
+            </>
+          )}
         </>
       )}
-    </section>
+    </div>
   );
 }

@@ -18,6 +18,7 @@ import {
   IconWarehouse,
   IconWorkshop,
   IconCheck,
+  IconDocument,
   IconUser,
 } from "../design-system/Icons/icons";
 
@@ -43,9 +44,9 @@ interface NavItem {
   match?: string;
 }
 
-// Группы взяты из прототипа. Пункты «Документы» и «Финансы» из его группы
-// «Учёт» сюда НЕ переносятся: маршрута /documents ещё нет (создаётся на
-// этапе 8), а у Финансов нет и API — пункт меню, ведущий в никуда, это
+// Группы взяты из прототипа. «Документы» появились на этапе 8 вместе с
+// реальным экраном. «Финансы» из группы «Учёт» по-прежнему не переносятся:
+// у раздела нет ни маршрута, ни API — пункт меню, ведущий в никуда, это
 // выдуманная функциональность, а не перенос оформления.
 const NAV_PRODUCTION: NavItem[] = [
   { to: "/dashboard", label: "Главная", icon: IconHome },
@@ -61,6 +62,8 @@ const NAV_SUPPLY: NavItem[] = [
   { to: "/suppliers", label: "Поставщики", icon: IconSupplier },
 ];
 
+const NAV_OFFICE: NavItem[] = [{ to: "/documents", label: "Документы", icon: IconDocument }];
+
 // Pilot v1 (владелец проекта, 2026-08-04, docs/MASTER_BACKLOG.md, раздел
 // 0.5) — временный пункт, убрать после завершения пилота.
 const NAV_SERVICE: NavItem[] = [{ to: "/pilot", label: "Pilot v1", icon: IconCheck }];
@@ -73,7 +76,7 @@ const MOBILE_NAV: NavItem[] = [
   { to: "/materials", label: "Материалы", icon: IconMaterial },
 ];
 
-const ALL_NAV = [...NAV_PRODUCTION, ...NAV_SUPPLY, ...NAV_SERVICE];
+const ALL_NAV = [...NAV_PRODUCTION, ...NAV_SUPPLY, ...NAV_OFFICE, ...NAV_SERVICE];
 
 /** Подсветка родительского пункта на вложенном маршруте. Хук вызывается
  *  безусловно — правило Rules of Hooks; при отсутствии `match` он просто
@@ -223,6 +226,7 @@ function SidebarBody({
       <nav className="flex-1 overflow-y-auto pb-4">
         <NavGroup label="Производство" items={NAV_PRODUCTION} collapsed={collapsed} mobile={mobile} onNavigate={onNavigate} />
         <NavGroup label="Снабжение" items={NAV_SUPPLY} collapsed={collapsed} mobile={mobile} onNavigate={onNavigate} />
+        <NavGroup label="Учёт" items={NAV_OFFICE} collapsed={collapsed} mobile={mobile} onNavigate={onNavigate} />
         <NavGroup label="Служебное" items={NAV_SERVICE} collapsed={collapsed} mobile={mobile} onNavigate={onNavigate} />
       </nav>
 
