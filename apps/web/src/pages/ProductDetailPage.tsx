@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import {
@@ -15,6 +15,8 @@ import { apiRequest, ApiError } from "../api/client";
 import { useCrudResource } from "../api/useCrudResource";
 import { ListCard } from "../design-system/ListCard/ListCard";
 import { StatusBadge } from "../design-system/StatusBadge/StatusBadge";
+import { Field } from "../design-system/Form/Field";
+import { PageHeader, Breadcrumbs } from "../design-system/PageHeader/PageHeader";
 import { Card, CardContent, CardHeader, CardTitle } from "../design-system/Card/Card";
 import { Input } from "../design-system/Input/Input";
 import { Combobox } from "../design-system/Select/Combobox";
@@ -39,6 +41,7 @@ import { toast } from "../design-system/Toast/Toast";
 // .catch() — при сбое сети экран навсегда оставался в состоянии
 // "Загрузка…", неотличимом от нормальной загрузки (UX_PRINCIPLES.md §5).
 export function ProductDetailPage() {
+  const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
   const [product, setProduct] = useState<ProductResponseDto | null>(null);
   const [productError, setProductError] = useState(false);
@@ -140,13 +143,25 @@ export function ProductDetailPage() {
   if (!product) return <SkeletonList />;
 
   return (
-    <section className="flex flex-col gap-5">
-      <div>
-        <h1>{product.name}</h1>
-        <p className="flex items-center gap-2 text-muted-foreground">
-          Артикул {product.code} <StatusBadge status={product.status} />
-        </p>
-      </div>
+    <div className="mx-auto max-w-[1400px]">
+      <PageHeader
+        title={product.name}
+        subtitle={
+          <span className="flex items-center gap-2">
+            <span className="num">Артикул {product.code}</span>
+            <StatusBadge status={product.status} />
+          </span>
+        }
+        breadcrumbs={
+          <Breadcrumbs
+            items={[
+              { label: "GarmentOS" },
+              { label: "Модели", onClick: () => void navigate("/products") },
+              { label: product.name },
+            ]}
+          />
+        }
+      />
 
       <Card>
         <CardHeader>
@@ -154,21 +169,18 @@ export function ProductDetailPage() {
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
           <form
-            className="flex flex-col gap-3 rounded-[16px] bg-secondary p-3.5 sm:flex-row sm:items-end sm:flex-wrap"
+            className="flex flex-col gap-3 rounded-[10px] border border-border bg-muted/40 p-3.5 sm:flex-row sm:flex-wrap sm:items-end"
             onSubmit={(event) => void handleSubmit(onSubmitVariant)(event)}
           >
-            <label className="flex flex-1 min-w-[100px] flex-col gap-1.5 text-[0.9rem] font-semibold text-muted-foreground">
-              Размер
+            <Field label="Размер" className="min-w-[100px] flex-1">
               <Input {...register("size")} placeholder="M" />
-            </label>
-            <label className="flex flex-1 min-w-[120px] flex-col gap-1.5 text-[0.9rem] font-semibold text-muted-foreground">
-              Цвет
+            </Field>
+            <Field label="Цвет" className="min-w-[120px] flex-1">
               <Input {...register("color")} placeholder="Петроль" />
-            </label>
-            <label className="flex flex-1 min-w-[160px] flex-col gap-1.5 text-[0.9rem] font-semibold text-muted-foreground">
-              Код SKU
+            </Field>
+            <Field label="Код SKU" className="min-w-[160px] flex-1">
               <Input {...register("skuCode")} placeholder={`${product.code}-M-PETROL`} />
-            </label>
+            </Field>
             <Button type="submit" size="sm" loading={isSubmitting} className="sm:w-auto">
               Добавить SKU
             </Button>
@@ -198,9 +210,8 @@ export function ProductDetailPage() {
           <CardTitle>Спецификация (BOM)</CardTitle>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
-          <div className="flex flex-col gap-3 rounded-[16px] bg-secondary p-3.5 sm:flex-row sm:items-end sm:flex-wrap">
-            <label className="flex flex-1 min-w-[160px] flex-col gap-1.5 text-[0.9rem] font-semibold text-muted-foreground">
-              Материал
+          <div className="flex flex-col gap-3 rounded-[10px] border border-border bg-muted/40 p-3.5 sm:flex-row sm:flex-wrap sm:items-end">
+            <Field label="Материал" className="min-w-[160px] flex-1">
               <Combobox
                 value={pendingMaterialId}
                 onChange={setPendingMaterialId}
@@ -208,15 +219,13 @@ export function ProductDetailPage() {
                 searchPlaceholder="Поиск материала..."
                 options={materials.map((material) => ({ value: material.id, label: material.name }))}
               />
-            </label>
-            <label className="flex flex-1 min-w-[120px] flex-col gap-1.5 text-[0.9rem] font-semibold text-muted-foreground">
-              Расход на единицу
+            </Field>
+            <Field label="Расход на единицу" className="min-w-[120px] flex-1">
               <NumberInput value={pendingQuantity} onChange={setPendingQuantity} min={0} decimals={3} />
-            </label>
-            <label className="flex flex-1 min-w-[100px] flex-col gap-1.5 text-[0.9rem] font-semibold text-muted-foreground">
-              Отходы
+            </Field>
+            <Field label="Отходы" className="min-w-[100px] flex-1">
               <NumberInput value={pendingWaste} onChange={setPendingWaste} min={0} max={100} decimals={1} suffix="%" />
-            </label>
+            </Field>
             <Button type="button" variant="secondary" size="sm" onClick={addBomItem} className="sm:w-auto">
               Добавить строку
             </Button>
@@ -261,6 +270,6 @@ export function ProductDetailPage() {
           />
         </CardContent>
       </Card>
-    </section>
+    </div>
   );
 }

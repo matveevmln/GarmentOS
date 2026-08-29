@@ -43,7 +43,7 @@ export const NumberInput = forwardRef<HTMLInputElement, NumberInputProps>(
           ref={ref}
           inputMode="decimal"
           className={cn(
-            "h-11 min-h-11 w-full rounded-[11px] border border-border bg-card px-3 py-2 text-[0.95rem] tabular-nums",
+            "field-unset field h-10 min-h-10 rounded-[10px] border border-border bg-card px-3 text-[13px] md:h-9 md:min-h-9 w-full tabular-nums",
             "placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 focus-visible:border-primary",
             "disabled:cursor-not-allowed disabled:opacity-50",
             suffix && "pr-10",

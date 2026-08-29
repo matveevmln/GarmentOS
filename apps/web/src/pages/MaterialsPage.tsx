@@ -3,7 +3,11 @@ import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { createMaterialSchema, type CreateMaterialDto, type MaterialResponseDto } from "@garmentos/shared-types";
 import { useCrudResource } from "../api/useCrudResource";
-import { ListCard } from "../design-system/ListCard/ListCard";
+import { DataTable, Td, MobileListItem } from "../design-system/Blocks";
+import { Field } from "../design-system/Form/Field";
+import { PageHeader, Breadcrumbs } from "../design-system/PageHeader/PageHeader";
+import { EmptyState } from "../design-system/Feedback/EmptyState";
+import { formatQuantity } from "../lib/format";
 import { FilterTabs, type FilterOption } from "../design-system/Tabs/FilterTabs";
 import { SearchBar } from "../design-system/Search/SearchBar";
 import { Card, CardContent, CardHeader, CardTitle } from "../design-system/Card/Card";
@@ -32,12 +36,14 @@ const MATERIAL_UNITS = [
   { value: "kg", label: "кг (килограммы)" },
   { value: "pcs", label: "шт (штуки)" },
 ] as const;
-const MATERIAL_ICONS: Record<string, string> = {
-  fabric: "box",
-  trim: "scissors",
-  packaging: "layers",
-  accessory: "tag",
-};
+const TYPE_LABEL: Record<string, string> = Object.fromEntries(
+  MATERIAL_TYPES.map((type) => [type.value, type.label]),
+);
+
+// Единица измерения приходит из API кодом (m/kg/pcs). Показываем её
+// по-русски — так же, как на Главной; само значение не меняется.
+const UNIT_LABEL: Record<string, string> = { m: "м", kg: "кг", pcs: "шт" };
+const unitLabel = (unit: string) => UNIT_LABEL[unit] ?? unit;
 
 const TYPE_FILTERS: FilterOption<"all" | (typeof MATERIAL_TYPES)[number]["value"]>[] = [
   { value: "all", label: "Все" },
@@ -64,6 +70,11 @@ export function MaterialsPage() {
   });
   const selectedUnit = watch("unit");
 
+  // Фильтрация по уже загруженному списку — без обращений к API.
+  const visibleMaterials = items
+    .filter((row) => typeFilter === "all" || row.type === typeFilter)
+    .filter((row) => row.name.toLowerCase().includes(query.trim().toLowerCase()));
+
   const onSubmit = async (data: CreateMaterialDto) => {
     try {
       await create(data);
@@ -75,23 +86,25 @@ export function MaterialsPage() {
   };
 
   return (
-    <section className="flex flex-col gap-5">
-      <h1>Материалы</h1>
+    <div className="mx-auto max-w-[1400px]">
+      <PageHeader
+        title="Материалы"
+        subtitle={`${formatQuantity(items.length, "позиций")} в справочнике`}
+        breadcrumbs={<Breadcrumbs items={[{ label: "GarmentOS" }, { label: "Материалы" }]} />}
+      />
 
-      <Card>
+      <Card className="mb-4">
         <CardHeader>
           <CardTitle>Новый материал</CardTitle>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
           <form className="flex flex-col gap-4" onSubmit={(event) => void handleSubmit(onSubmit)(event)}>
-            <label className="flex flex-col gap-1.5 text-[0.9rem] font-semibold text-muted-foreground">
-              Название
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <Field label="Название" error={errors.name?.message}>
               <Input {...register("name")} placeholder="Трикотаж «Петроль»" />
-              {errors.name && <span className="text-[0.8rem] font-semibold text-destructive">{errors.name.message}</span>}
-            </label>
+            </Field>
 
-            <label className="flex flex-col gap-1.5 text-[0.9rem] font-semibold text-muted-foreground">
-              Тип
+            <Field label="Тип">
               <Controller
                 name="type"
                 control={control}
@@ -110,10 +123,9 @@ export function MaterialsPage() {
                   </Select>
                 )}
               />
-            </label>
+            </Field>
 
-            <label className="flex flex-col gap-1.5 text-[0.9rem] font-semibold text-muted-foreground">
-              Единица измерения
+            <Field label="Единица измерения">
               <Controller
                 name="unit"
                 control={control}
@@ -132,10 +144,9 @@ export function MaterialsPage() {
                   </Select>
                 )}
               />
-            </label>
+            </Field>
 
-            <label className="flex flex-col gap-1.5 text-[0.9rem] font-semibold text-muted-foreground">
-              Точка перезаказа
+            <Field label="Точка перезаказа">
               <Controller
                 name="reorderPoint"
                 control={control}
@@ -143,9 +154,10 @@ export function MaterialsPage() {
                   <NumberInput value={field.value} onChange={field.onChange} min={0} decimals={3} suffix={selectedUnit} />
                 )}
               />
-            </label>
+            </Field>
+            </div>
 
-            <Button type="submit" loading={isSubmitting}>
+            <Button type="submit" size="sm" loading={isSubmitting} className="md:self-start">
               {isSubmitting ? "Добавляем..." : "Добавить материал"}
             </Button>
           </form>
@@ -159,24 +171,73 @@ export function MaterialsPage() {
 
       {!isLoading && !error && (
         <>
-          <SearchBar value={query} onChange={setQuery} placeholder="Поиск материала" />
-          <FilterTabs options={TYPE_FILTERS} value={typeFilter} onChange={setTypeFilter} />
+          <div className="mb-3 flex flex-col gap-2.5 md:flex-row md:items-center md:justify-between">
+            <SearchBar value={query} onChange={setQuery} placeholder="Поиск материала" className="md:w-[340px]" />
+            <FilterTabs options={TYPE_FILTERS} value={typeFilter} onChange={setTypeFilter} />
+          </div>
 
-          <ListCard
-            items={items
-              .filter((row) => typeFilter === "all" || row.type === typeFilter)
-              .filter((row) => row.name.toLowerCase().includes(query.trim().toLowerCase()))}
-            getKey={(row) => row.id}
-            getIcon={(row) => MATERIAL_ICONS[row.type] ?? "box"}
-            getTitle={(row) => row.name}
-            getMeta={(row) => (row.reorderPoint ? `Точка перезаказа: ${row.reorderPoint} ${row.unit}` : row.unit)}
-            emptyTitle="Пока нет ни одного материала"
-            emptyHint="Добавьте первый материал — займёт меньше минуты."
-            emptyActionLabel="Добавить материал"
-            onEmptyAction={() => setFocus("name")}
-          />
+          {visibleMaterials.length === 0 ? (
+            <EmptyState
+              compact
+              title={items.length === 0 ? "Пока нет ни одного материала" : "Ничего не найдено"}
+              description={
+                items.length === 0
+                  ? "Добавьте первый материал — займёт меньше минуты."
+                  : "По заданным условиям поиска и фильтрам материалов нет."
+              }
+              action={
+                items.length === 0 ? (
+                  <Button type="button" size="sm" variant="secondary" onClick={() => setFocus("name")}>
+                    Добавить материал
+                  </Button>
+                ) : undefined
+              }
+            />
+          ) : (
+            <>
+              {/* Таблица — планшет и десктоп, как в MaterialsScreen прототипа */}
+              <div className="hidden md:block">
+                <DataTable
+                  columns={[
+                    { key: "name", label: "Наименование" },
+                    { key: "kind", label: "Тип", width: "150px" },
+                    { key: "unit", label: "Ед.", width: "80px" },
+                    { key: "reorder", label: "Точка перезаказа", align: "right", width: "170px" },
+                  ]}
+                >
+                  {visibleMaterials.map((row) => (
+                    <tr key={row.id} className="cursor-default">
+                      <Td className="t-object">{row.name}</Td>
+                      <Td className="text-muted-foreground">{TYPE_LABEL[row.type] ?? row.type}</Td>
+                      <Td className="num text-muted-foreground">{unitLabel(row.unit)}</Td>
+                      <Td align="right" className="num text-muted-foreground">
+                        {row.reorderPoint ? formatQuantity(Number(row.reorderPoint), unitLabel(row.unit), 3) : "—"}
+                      </Td>
+                    </tr>
+                  ))}
+                </DataTable>
+              </div>
+
+              {/* Карточки — мобильная композиция прототипа */}
+              <div className="space-y-2 md:hidden">
+                {visibleMaterials.map((row) => (
+                  <MobileListItem key={row.id}>
+                    <div className="text-[13px] font-medium">{row.name}</div>
+                    <div className="mt-2 flex items-center justify-between border-t border-border pt-2 text-[12px] text-muted-foreground">
+                      <span>
+                        {TYPE_LABEL[row.type] ?? row.type} · {unitLabel(row.unit)}
+                      </span>
+                      <span className="num">
+                        {row.reorderPoint ? formatQuantity(Number(row.reorderPoint), unitLabel(row.unit), 3) : "—"}
+                      </span>
+                    </div>
+                  </MobileListItem>
+                ))}
+              </div>
+            </>
+          )}
         </>
       )}
-    </section>
+    </div>
   );
 }

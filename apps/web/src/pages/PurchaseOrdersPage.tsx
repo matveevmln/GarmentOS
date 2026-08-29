@@ -15,10 +15,13 @@ import { Combobox } from "../design-system/Select/Combobox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../design-system/Select/Select";
 import { NumberInput, MoneyInput } from "../design-system/Input/NumberInput";
 import { Button } from "../design-system/Button/Button";
-import { Avatar } from "../design-system/Avatar/Avatar";
 import { SkeletonList } from "../design-system/Feedback/Skeleton";
 import { ErrorState } from "../design-system/Feedback/ErrorState";
-import { EmptyIllustration } from "../design-system/Feedback/EmptyIllustration";
+import { EmptyState } from "../design-system/Feedback/EmptyState";
+import { Field } from "../design-system/Form/Field";
+import { PageHeader, Breadcrumbs } from "../design-system/PageHeader/PageHeader";
+import { DataTable, Td, MobileListItem } from "../design-system/Blocks";
+import { formatMoney, formatQuantity } from "../lib/format";
 import { toast } from "../design-system/Toast/Toast";
 
 // Последний, седьмой из перенесённых экранов (docs/DESIGN_SYSTEM_MAP.md,
@@ -119,9 +122,20 @@ export function PurchaseOrdersPage() {
     }
   };
 
+  // Сумма закупки — по её же позициям (количество × цена), теми же
+  // данными, что уже пришли в списке. Новой метрики не вводится.
+  const orderAmount = (row: PurchaseOrderResponseDto): number =>
+    row.items.reduce((sum, item) => sum + Number(item.quantity) * Number(item.unitPrice), 0);
+
+  const visibleOrders = orders.filter((row) => statusFilter === "all" || row.status === statusFilter);
+
   return (
-    <section className="flex flex-col gap-5">
-      <h1>Закупки материалов</h1>
+    <div className="mx-auto max-w-[1400px]">
+      <PageHeader
+        title="Закупки"
+        subtitle={`${formatQuantity(orders.length, "заказов")} поставщикам`}
+        breadcrumbs={<Breadcrumbs items={[{ label: "GarmentOS" }, { label: "Закупки" }]} />}
+      />
 
       {referenceError ? (
         <ErrorState
@@ -130,13 +144,12 @@ export function PurchaseOrdersPage() {
           onRetry={loadReferences}
         />
       ) : (
-        <Card>
+        <Card className="mb-4">
           <CardHeader>
             <CardTitle>Новая закупка</CardTitle>
           </CardHeader>
           <CardContent className="flex flex-col gap-4">
-            <label className="flex flex-col gap-1.5 text-[0.9rem] font-semibold text-muted-foreground">
-              Поставщик
+            <Field label="Поставщик" className="md:max-w-[420px]">
               <Combobox
                 value={supplierId}
                 onChange={setSupplierId}
@@ -144,11 +157,10 @@ export function PurchaseOrdersPage() {
                 searchPlaceholder="Поиск поставщика..."
                 options={suppliers.map((supplier) => ({ value: supplier.id, label: supplier.name }))}
               />
-            </label>
+            </Field>
 
-            <div className="flex flex-col gap-3 rounded-[16px] bg-secondary p-3.5 sm:flex-row sm:items-end sm:flex-wrap">
-              <label className="flex flex-1 min-w-[160px] flex-col gap-1.5 text-[0.9rem] font-semibold text-muted-foreground">
-                Материал
+            <div className="flex flex-col gap-3 rounded-[10px] border border-border bg-muted/40 p-3.5 sm:flex-row sm:flex-wrap sm:items-end">
+              <Field label="Материал" className="min-w-[160px] flex-1">
                 <Combobox
                   value={pendingMaterialId}
                   onChange={setPendingMaterialId}
@@ -156,15 +168,13 @@ export function PurchaseOrdersPage() {
                   searchPlaceholder="Поиск материала..."
                   options={materials.map((material) => ({ value: material.id, label: material.name }))}
                 />
-              </label>
-              <label className="flex flex-1 min-w-[100px] flex-col gap-1.5 text-[0.9rem] font-semibold text-muted-foreground">
-                Количество
+              </Field>
+              <Field label="Количество" className="min-w-[100px] flex-1">
                 <NumberInput value={pendingQuantity} onChange={setPendingQuantity} min={0} decimals={3} />
-              </label>
-              <label className="flex flex-1 min-w-[120px] flex-col gap-1.5 text-[0.9rem] font-semibold text-muted-foreground">
-                Цена за единицу
+              </Field>
+              <Field label="Цена за единицу" className="min-w-[120px] flex-1">
                 <MoneyInput value={pendingPrice} onChange={setPendingPrice} currency="сом" />
-              </label>
+              </Field>
               <Button type="button" variant="secondary" size="sm" onClick={addLineItem} className="sm:w-auto">
                 Добавить строку
               </Button>
@@ -185,6 +195,8 @@ export function PurchaseOrdersPage() {
 
             <Button
               type="button"
+              size="sm"
+              className="md:self-start"
               loading={isSubmitting}
               disabled={!supplierId || lineItems.length === 0}
               onClick={() => void submitOrder()}
@@ -197,58 +209,151 @@ export function PurchaseOrdersPage() {
 
       {isLoading && <SkeletonList />}
 
-      <FilterTabs options={STATUS_FILTERS} value={statusFilter} onChange={setStatusFilter} />
-
-      <div>
-        {orders
-          .filter((row) => statusFilter === "all" || row.status === statusFilter)
-          .map((row) => (
-            <Card key={row.id} interactive className="mb-2.5 flex flex-wrap items-center gap-3 p-3.5">
-              <Avatar tone="info">{supplierName(row.supplierId).slice(0, 2).toUpperCase()}</Avatar>
-              <div className="min-w-0 flex-1">
-                <div className="truncate text-[14px] font-bold text-foreground">{supplierName(row.supplierId)}</div>
-                <div className="truncate text-[11.5px] text-muted-foreground">{row.items.length} позиций</div>
-              </div>
-              <div className="flex flex-none items-center gap-2">
-                {row.status === "draft" && (
-                  <Button type="button" size="sm" loading={pendingOrderAction === row.id} onClick={() => void confirmOrder(row.id)}>
-                    Подтвердить
-                  </Button>
-                )}
-                {row.status === "sent" && (
-                  <div className="flex items-center gap-2">
-                    <Select
-                      value={receiveWarehouse[row.id] ?? ""}
-                      onValueChange={(value) => setReceiveWarehouse((prev) => ({ ...prev, [row.id]: value }))}
-                    >
-                      <SelectTrigger className="w-32">
-                        <SelectValue placeholder="Склад" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {warehouses.map((warehouse) => (
-                          <SelectItem key={warehouse.id} value={warehouse.id}>
-                            {warehouse.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <Button type="button" size="sm" loading={pendingOrderAction === row.id} onClick={() => void receiveOrder(row.id)}>
-                      Принять
-                    </Button>
-                  </div>
-                )}
-                {row.status === "received" && <StatusBadge status={row.status} />}
-              </div>
-            </Card>
-          ))}
-        {!isLoading && orders.length === 0 && (
-          <div className="card empty flex flex-col items-center gap-1">
-            <EmptyIllustration className="mb-1 h-16 w-auto" />
-            <div className="t">Пока нет ни одной закупки</div>
-            <div className="s">Создайте первую закупку в форме выше.</div>
-          </div>
-        )}
+      <div className="mb-3 mt-5">
+        <FilterTabs options={STATUS_FILTERS} value={statusFilter} onChange={setStatusFilter} />
       </div>
-    </section>
+
+      {!isLoading && orders.length === 0 ? (
+        <EmptyState
+          compact
+          title="Пока нет ни одной закупки"
+          description="Создайте первую закупку в форме выше."
+        />
+      ) : !isLoading && visibleOrders.length === 0 ? (
+        <EmptyState compact title="Ничего не найдено" description="Закупок с выбранным статусом нет." />
+      ) : (
+        <>
+          {/* Таблица — планшет и десктоп, как в PurchasesScreen прототипа */}
+          <div className="hidden md:block">
+            <DataTable
+              columns={[
+                { key: "supplier", label: "Поставщик" },
+                { key: "pos", label: "Позиции", width: "120px" },
+                { key: "amount", label: "Сумма", align: "right", width: "150px" },
+                { key: "status", label: "Статус", width: "230px" },
+              ]}
+            >
+              {visibleOrders.map((row) => (
+                <tr key={row.id} className="cursor-default">
+                  <Td className="t-object">{supplierName(row.supplierId)}</Td>
+                  <Td className="num text-muted-foreground">{formatQuantity(row.items.length)}</Td>
+                  <Td align="right" className="t-amount">
+                    {formatMoney(orderAmount(row))}
+                  </Td>
+                  {/* Действия в колонке статуса — как на экране заказов пошива */}
+                  <Td>
+                    <div className="flex items-center gap-2">
+                      {row.status === "draft" ? (
+                        <Button
+                          type="button"
+                          size="sm"
+                          loading={pendingOrderAction === row.id}
+                          onClick={() => void confirmOrder(row.id)}
+                        >
+                          Подтвердить
+                        </Button>
+                      ) : row.status === "sent" ? (
+                        <>
+                          <Select
+                            value={receiveWarehouse[row.id] ?? ""}
+                            onValueChange={(value) => setReceiveWarehouse((prev) => ({ ...prev, [row.id]: value }))}
+                          >
+                            <SelectTrigger className="h-8 w-[104px]">
+                              <SelectValue placeholder="Склад" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {warehouses.map((warehouse) => (
+                                <SelectItem key={warehouse.id} value={warehouse.id}>
+                                  {warehouse.name}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          <Button
+                            type="button"
+                            size="sm"
+                            loading={pendingOrderAction === row.id}
+                            onClick={() => void receiveOrder(row.id)}
+                          >
+                            Принять
+                          </Button>
+                        </>
+                      ) : (
+                        <StatusBadge status={row.status} />
+                      )}
+                    </div>
+                  </Td>
+                </tr>
+              ))}
+            </DataTable>
+          </div>
+
+          {/* Карточки — мобильная композиция прототипа */}
+          <div className="space-y-2 md:hidden">
+            {visibleOrders.map((row) => (
+              <MobileListItem
+                key={row.id}
+                footer={
+                  row.status === "draft" || row.status === "sent" ? (
+                    <div className="mt-3 flex items-center gap-2 border-t border-border pt-3">
+                      {row.status === "draft" ? (
+                        <Button
+                          type="button"
+                          size="sm"
+                          loading={pendingOrderAction === row.id}
+                          onClick={() => void confirmOrder(row.id)}
+                        >
+                          Подтвердить
+                        </Button>
+                      ) : (
+                        <>
+                          <Select
+                            value={receiveWarehouse[row.id] ?? ""}
+                            onValueChange={(value) => setReceiveWarehouse((prev) => ({ ...prev, [row.id]: value }))}
+                          >
+                            <SelectTrigger className="h-9 w-[120px]">
+                              <SelectValue placeholder="Склад" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {warehouses.map((warehouse) => (
+                                <SelectItem key={warehouse.id} value={warehouse.id}>
+                                  {warehouse.name}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          <Button
+                            type="button"
+                            size="sm"
+                            loading={pendingOrderAction === row.id}
+                            onClick={() => void receiveOrder(row.id)}
+                          >
+                            Принять
+                          </Button>
+                        </>
+                      )}
+                    </div>
+                  ) : undefined
+                }
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="text-[13px] font-medium">{supplierName(row.supplierId)}</div>
+                    <div className="mt-1 text-[12px] text-muted-foreground">
+                      {formatQuantity(row.items.length, "позиций")}
+                    </div>
+                  </div>
+                  <StatusBadge status={row.status} />
+                </div>
+                <div className="num mt-2.5 flex items-center justify-between border-t border-border pt-2 text-[12px]">
+                  <span className="text-muted-foreground">Сумма</span>
+                  <span className="t-amount">{formatMoney(orderAmount(row))}</span>
+                </div>
+              </MobileListItem>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
   );
 }

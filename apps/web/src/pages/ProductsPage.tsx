@@ -9,6 +9,9 @@ import { SearchBar } from "../design-system/Search/SearchBar";
 import { Card, CardContent, CardHeader, CardTitle } from "../design-system/Card/Card";
 import { Input } from "../design-system/Input/Input";
 import { Button } from "../design-system/Button/Button";
+import { Field } from "../design-system/Form/Field";
+import { PageHeader, Breadcrumbs } from "../design-system/PageHeader/PageHeader";
+import { formatQuantity } from "../lib/format";
 import { SkeletonList } from "../design-system/Feedback/Skeleton";
 import { ErrorState } from "../design-system/Feedback/ErrorState";
 import { toast } from "../design-system/Toast/Toast";
@@ -40,33 +43,32 @@ export function ProductsPage() {
   };
 
   return (
-    <section className="flex flex-col gap-5">
-      <h1>Модели</h1>
+    <div className="mx-auto max-w-[1400px]">
+      <PageHeader
+        title="Модели"
+        subtitle={`${formatQuantity(items.length, "моделей")} в системе`}
+        breadcrumbs={<Breadcrumbs items={[{ label: "GarmentOS" }, { label: "Модели" }]} />}
+      />
 
-      <Card>
+      <Card className="mb-4">
         <CardHeader>
           <CardTitle>Новая модель</CardTitle>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
           <form className="flex flex-col gap-4" onSubmit={(event) => void handleSubmit(onSubmit)(event)}>
-            <label className="flex flex-col gap-1.5 text-[0.9rem] font-semibold text-muted-foreground">
-              Название модели
-              <Input {...register("name")} placeholder="Двойка" />
-              {errors.name && <span className="text-[0.8rem] font-semibold text-destructive">{errors.name.message}</span>}
-            </label>
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+              <Field label="Название модели" error={errors.name?.message}>
+                <Input {...register("name")} placeholder="Двойка" />
+              </Field>
+              <Field label="Артикул" error={errors.code?.message}>
+                <Input {...register("code")} placeholder="DVOIKA-001" />
+              </Field>
+              <Field label="Категория">
+                <Input {...register("category")} placeholder="Худи" />
+              </Field>
+            </div>
 
-            <label className="flex flex-col gap-1.5 text-[0.9rem] font-semibold text-muted-foreground">
-              Артикул
-              <Input {...register("code")} placeholder="DVOIKA-001" />
-              {errors.code && <span className="text-[0.8rem] font-semibold text-destructive">{errors.code.message}</span>}
-            </label>
-
-            <label className="flex flex-col gap-1.5 text-[0.9rem] font-semibold text-muted-foreground">
-              Категория
-              <Input {...register("category")} placeholder="Худи" />
-            </label>
-
-            <Button type="submit" loading={isSubmitting}>
+            <Button type="submit" size="sm" loading={isSubmitting} className="md:self-start">
               {isSubmitting ? "Добавляем..." : "Добавить модель"}
             </Button>
           </form>
@@ -80,13 +82,16 @@ export function ProductsPage() {
 
       {!isLoading && !error && (
         <>
-          <SearchBar value={query} onChange={setQuery} placeholder="Поиск модели" />
+          <SearchBar value={query} onChange={setQuery} placeholder="Поиск модели" className="mb-3 md:w-[340px]" />
 
           <ModelGrid
             items={items.filter((row) => row.name.toLowerCase().includes(query.trim().toLowerCase()))}
             getKey={(row) => row.id}
             getTitle={(row) => row.name}
             getSubtitle={(row) => row.code}
+            getCode={(row) => row.code}
+            getStatus={(row) => row.status}
+            getMeta={(row) => row.category ?? null}
             onItemClick={(row) => void navigate(`/products/${row.id}`)}
             emptyTitle="Пока нет ни одной модели"
             emptyHint="Добавьте первую модель — займёт меньше минуты."
@@ -95,6 +100,6 @@ export function ProductsPage() {
           />
         </>
       )}
-    </section>
+    </div>
   );
 }

@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react";
 import type { PilotDashboardResponseDto } from "@garmentos/shared-types";
 import { apiRequest, ApiError } from "../api/client";
-import { KpiCard } from "../design-system/Card/KpiCard";
+import { MetricStrip } from "../design-system/Blocks";
+import { PageHeader, Breadcrumbs } from "../design-system/PageHeader/PageHeader";
 import { Card, CardContent, CardHeader, CardTitle } from "../design-system/Card/Card";
 import { SkeletonList } from "../design-system/Feedback/Skeleton";
 import { ErrorState } from "../design-system/Feedback/ErrorState";
-import { Icon } from "../design-system/Icons/Icon";
 
 // Pilot Dashboard (владелец проекта, 2026-08-04): «Именно этот экран
 // позволит быстро понять, что система вообще работает штатно» — отдельная
@@ -45,29 +45,35 @@ export function PilotDashboardPage() {
   }
 
   return (
-    <section className="flex flex-col gap-5">
-      <div>
-        <h1>Pilot v1</h1>
-        <p className="text-[0.85rem] text-muted-foreground">Сегодня</p>
-      </div>
+    <div className="mx-auto max-w-[1400px]">
+      <PageHeader
+        title="Pilot v1"
+        subtitle="Сегодня"
+        breadcrumbs={<Breadcrumbs items={[{ label: "GarmentOS" }, { label: "Pilot v1" }]} />}
+      />
 
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <KpiCard label="Партий сегодня" value={data.productionOrdersToday} icon={<Icon name="scissors" />} />
-        <KpiCard label="В работе" value={data.inProgressCount} icon={<Icon name="factory" />} />
-        <KpiCard
-          label="Просрочено"
-          value={data.overdueCount}
-          icon={<Icon name="tag" />}
-          className={data.overdueCount > 0 ? "border-destructive/40" : undefined}
-        />
-        <KpiCard
-          label="Ошибок"
-          value={data.errorsToday ?? "—"}
-          hint={data.errorsToday === null ? "мониторинг не подключён, см. логи Railway" : undefined}
-          icon={<Icon name="check" />}
-        />
-      </div>
+      {/* Те же четыре показателя, что были в KpiCard, без изменений
+          смысла. errorsToday приходит null, когда мониторинг сознательно
+          не подключён на пилоте — CountUp показывает прочерк, а не 0
+          (infra/PRODUCTION_CHECKLIST.md, п.5). */}
+      <MetricStrip
+        items={[
+          { label: "Партий сегодня", value: data.productionOrdersToday },
+          { label: "В работе", value: data.inProgressCount },
+          {
+            label: "Просрочено",
+            value: data.overdueCount,
+            ...(data.overdueCount > 0 ? { tone: "danger" as const } : {}),
+          },
+          { label: "Ошибок", value: data.errorsToday ?? Number.NaN },
+        ]}
+      />
 
+      {data.errorsToday === null && (
+        <p className="t-meta mt-2">Мониторинг ошибок не подключён — смотрите логи Railway.</p>
+      )}
+
+      <div className="mt-5 space-y-4">
       <Card>
         <CardHeader>
           <CardTitle>Состояние системы</CardTitle>
@@ -98,6 +104,7 @@ export function PilotDashboardPage() {
           </div>
         </CardContent>
       </Card>
-    </section>
+      </div>
+    </div>
   );
 }

@@ -17,9 +17,9 @@ export const SelectTrigger = forwardRef<
   <SelectPrimitive.Trigger
     ref={ref}
     className={cn(
-      "flex h-11 min-h-11 w-full items-center justify-between rounded-[11px] border border-border bg-card px-3 py-2 text-[0.95rem] text-foreground",
-      "focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary",
-      "disabled:cursor-not-allowed disabled:opacity-50 [&>span]:line-clamp-1",
+      // Та же геометрия поля, что у Input — из прототипа.
+      "btn-unset field-unset field h-10 min-h-10 rounded-[10px] border border-border bg-card px-3 text-[13px] md:h-9 md:min-h-9 flex w-full items-center justify-between text-foreground",
+      "disabled:cursor-not-allowed disabled:opacity-45 [&>span]:line-clamp-1",
       className,
     )}
     {...props}
@@ -41,7 +41,7 @@ export const SelectContent = forwardRef<
       ref={ref}
       position={position}
       className={cn(
-        "relative z-50 max-h-96 min-w-[8rem] overflow-hidden rounded-[16px] border border-border bg-popover text-popover-foreground shadow-card",
+        "relative z-50 max-h-96 min-w-[8rem] overflow-hidden rounded-[10px] border border-border bg-popover text-popover-foreground elev-3",
         "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
         position === "popper" &&
           "data-[side=bottom]:translate-y-1 data-[side=top]:-translate-y-1",

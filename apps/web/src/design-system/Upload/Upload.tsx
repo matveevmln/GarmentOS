@@ -98,7 +98,7 @@ function FilePreviewChip({ file, onRemove, onPreview }: { file: File; onRemove: 
   const isImage = file.type.startsWith("image/");
   return (
     <div className="group relative h-16 w-16 overflow-hidden rounded-[12px] border border-border bg-secondary">
-      <button type="button" onClick={onPreview} className="h-full w-full">
+      <button type="button" onClick={onPreview} className="btn-unset h-full w-full">
         {isImage ? (
           <img src={URL.createObjectURL(file)} alt={file.name} className="h-full w-full object-cover" />
         ) : (
@@ -111,7 +111,7 @@ function FilePreviewChip({ file, onRemove, onPreview }: { file: File; onRemove: 
         type="button"
         onClick={onRemove}
         aria-label="Удалить файл"
-        className="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full bg-foreground/70 text-background opacity-0 transition-opacity group-hover:opacity-100"
+        className="btn-unset absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full bg-foreground/70 text-background opacity-0 transition-opacity group-hover:opacity-100"
       >
         <X className="h-3 w-3" />
       </button>

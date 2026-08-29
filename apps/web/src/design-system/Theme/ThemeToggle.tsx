@@ -39,7 +39,7 @@ export function ThemeToggle({ className }: { className?: string }) {
       type="button"
       onClick={() => setPref(ORDER[(ORDER.indexOf(pref) + 1) % ORDER.length])}
       className={cn(
-        "inline-flex h-9 items-center gap-2 rounded-full border border-border bg-card px-3 text-[0.8rem] font-semibold text-foreground",
+        "btn-unset inline-flex h-9 items-center gap-2 rounded-full border border-border bg-card px-3 text-[12px] font-medium text-foreground",
         "transition-colors hover:bg-secondary",
         className,
       )}

@@ -940,6 +940,52 @@
     padding: 0;
     border: none;
   }
+
+  /* То же самое для полей ввода — временная изоляция, уходит на этапе 9.
+
+     В styles.css есть безусловные селекторы по элементам:
+       input, select { padding:10px 12px; min-height:44px;
+                       border:1px solid var(--lg-border);
+                       background:var(--lg-surface); border-radius:...; }
+       input:focus, select:focus { outline:2px solid var(--lg-accent-ring); }
+     Первый навязывает новым полям прежнюю геометрию (44px и радиус старой
+     системы) там, где компонент задаёт не все свойства; второй рисует
+     оранжевую системную обводку вместо ореола фокуса дизайн-системы.
+
+     Селектор по элементу с псевдоклассом (0,1,1) слабее класса с
+     псевдоклассом (0,2,0), а @layer components сильнее @layer base — так
+     что и утилиты Tailwind поверх этого класса продолжают выигрывать. */
+  .field-unset {
+    min-height: 0;
+    padding: 0;
+    border-radius: 0;
+    border: none;
+    background: transparent;
+    color: inherit;
+  }
+
+  .field-unset:focus,
+  .field-unset:focus-visible {
+    outline: none;
+  }
+
+  /* Легаси-правило `label { display:flex; flex-direction:column; gap:4px;
+     font-size:.9rem; color:var(--lg-muted); font-weight:650 }` навязывает
+     каждой подписи прежнюю типографику. Класс возвращает подпись к
+     обычному потоку, а размер/цвет задаются утилитами на месте. */
+  .label-unset {
+    display: block;
+    /* flex-direction обязателен: легаси задаёт column, и если компонент
+       поверх включает `flex items-center`, то items-center начинает
+       центрировать текст ПО ГОРИЗОНТАЛИ (в колонке это поперечная ось) —
+       подпись уезжала в середину поля. Поймано измерением позиции
+       текстового узла, а не глазами по классам. */
+    flex-direction: row;
+    gap: 0;
+    font-size: inherit;
+    font-weight: inherit;
+    color: inherit;
+  }
 }
 
 /* Фикс, перенесённый из прежних токенов (найден при инженерной ревизии
