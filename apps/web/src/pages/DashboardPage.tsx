@@ -52,7 +52,11 @@ export function DashboardPage() {
     <section className="flex flex-col gap-5">
       <h1>Внимание сегодня</h1>
 
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      {/* lg, а не sm: с появлением рельса 260px (этап 4) четыре колонки на
+          768px перестали помещаться и уводили страницу вбок. Тот же
+          брейкпоинт, что у MetricStrip в прототипе. Разметка дашборда
+          целиком переоформляется на этапе 6. */}
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <KpiCard label="Просрочено пошива" value={data.overdueProductionOrders.length} icon={<Icon name="scissors" />} />
         <KpiCard label="Просрочено закупок" value={data.overduePurchaseOrders.length} icon={<Icon name="cash" />} />
         <KpiCard label="Материалы заканчиваются" value={data.lowStockMaterials.length} icon={<Icon name="layers" />} />

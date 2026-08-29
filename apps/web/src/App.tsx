@@ -2,7 +2,7 @@ import { Navigate, Route, Routes } from "react-router-dom";
 import { AuthProvider } from "./auth/AuthContext";
 import { LoginPage } from "./auth/LoginPage";
 import { RequireAuth } from "./auth/RequireAuth";
-import { AppLayout } from "./layout/AppLayout";
+import { AppShell } from "./layout/AppShell";
 import { IconSpriteDefs } from "./design-system/Icons/Icon";
 import { Toaster } from "./design-system/Toast/Toast";
 import { TooltipProvider } from "./design-system/Tooltip/Tooltip";
@@ -31,7 +31,7 @@ export function App() {
           <Route path="/login" element={<LoginPage />} />
           <Route path="/design-system" element={<DesignSystemPage />} />
           <Route element={<RequireAuth />}>
-            <Route element={<AppLayout />}>
+            <Route element={<AppShell />}>
               <Route index element={<Navigate to="/dashboard" replace />} />
               <Route path="/dashboard" element={<DashboardPage />} />
               <Route path="/workshops" element={<WorkshopsPage />} />

@@ -22,6 +22,17 @@ const ACTIONS = [
   { to: "/production-orders", label: "Заказы пошива", icon: "scissors" },
 ];
 
+// Открыть палитру снаружи — кнопкой «Быстрый переход» в верхней панели
+// AppShell (docs/UI_MIGRATION_PLAN.md, этап 4). Через событие, а не через
+// props: <CommandPalette /> висит в App.tsx выше Routes, а кнопка — внутри
+// оболочки; поднимать состояние в App.tsx означало бы трогать роутинг.
+// Контракт компонента (вызов без props) не меняется.
+const OPEN_EVENT = "garmentos:command-palette-open";
+
+export function openCommandPalette() {
+  window.dispatchEvent(new CustomEvent(OPEN_EVENT));
+}
+
 export function CommandPalette() {
   const [open, setOpen] = useState(false);
   const navigate = useNavigate();
@@ -33,8 +44,13 @@ export function CommandPalette() {
         setOpen((v) => !v);
       }
     }
+    const onOpenRequest = () => setOpen(true);
     document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
+    window.addEventListener(OPEN_EVENT, onOpenRequest);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener(OPEN_EVENT, onOpenRequest);
+    };
   }, []);
 
   return (
