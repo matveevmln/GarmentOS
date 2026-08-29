@@ -15,14 +15,18 @@ import { FilterTabs, type FilterOption } from "../design-system/Tabs/FilterTabs"
 import { StatusBadge } from "../design-system/StatusBadge/StatusBadge";
 import { Card, CardContent, CardHeader, CardTitle } from "../design-system/Card/Card";
 import { Button } from "../design-system/Button/Button";
+import { PageHeader, Breadcrumbs } from "../design-system/PageHeader/PageHeader";
+import { SearchBar } from "../design-system/Search/SearchBar";
+import { EmptyState } from "../design-system/Feedback/EmptyState";
+import { DataTable, Td, MobileListItem } from "../design-system/Blocks";
+import { formatDate, formatMoney, formatQuantity } from "../lib/format";
+import { cn } from "../design-system/utils";
 import { Combobox } from "../design-system/Select/Combobox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../design-system/Select/Select";
 import { MoneyInput, NumberInput } from "../design-system/Input/NumberInput";
 import { DatePicker } from "../design-system/Form/DatePicker";
-import { Avatar } from "../design-system/Avatar/Avatar";
 import { SkeletonList } from "../design-system/Feedback/Skeleton";
 import { ErrorState } from "../design-system/Feedback/ErrorState";
-import { EmptyIllustration } from "../design-system/Feedback/EmptyIllustration";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../design-system/Tooltip/Tooltip";
 import { toast } from "../design-system/Toast/Toast";
 
@@ -57,6 +61,7 @@ export function ProductionOrdersPage() {
   const [pendingQuantity, setPendingQuantity] = useState<number | undefined>(undefined);
   const [receiveWarehouse, setReceiveWarehouse] = useState<Record<string, string>>({});
   const [statusFilter, setStatusFilter] = useState<(typeof STATUS_FILTERS)[number]["value"]>("all");
+  const [query, setQuery] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [pendingOrderAction, setPendingOrderAction] = useState<string | null>(null);
   const [referenceError, setReferenceError] = useState(false);
@@ -163,9 +168,43 @@ export function ProductionOrdersPage() {
     }
   };
 
+  // Поиск и суммы считаются по уже загруженному списку — дополнительных
+  // запросов к API нет.
+  const q = query.trim().toLowerCase();
+  const visibleOrders = orders.filter((row) => {
+    if (statusFilter !== "all" && row.status !== statusFilter) return false;
+    if (!q) return true;
+    return (
+      productName(row.productId).toLowerCase().includes(q) ||
+      workshopName(row.workshopId).toLowerCase().includes(q)
+    );
+  });
+
+  // «Сумма партии» — та же величина и по той же формуле, что показывает
+  // паспорт партии: цена спецификации из снимка × плановое количество.
+  // Ничего нового не вводится; без снимка сумма честно не определена.
+  const batchAmount = (row: ProductionOrderResponseDto): number | null =>
+    row.costSnapshot ? row.costSnapshot.specificationPricePerUnit * Number(row.plannedQuantity) : null;
+
+  // Просрочка считается на клиенте из dueDate по тому же правилу, что и в
+  // apps/api/src/reporting/attention.service.ts: срок в прошлом и заказ не
+  // в терминальном статусе. Отдельного поля в списке API не отдаёт.
+  const overdueDays = (row: ProductionOrderResponseDto): number | null => {
+    if (!row.dueDate || row.status === "received" || row.status === "cancelled") return null;
+    const due = new Date(row.dueDate);
+    if (Number.isNaN(due.getTime())) return null;
+    const today = new Date();
+    const diff = Math.floor((today.setHours(0, 0, 0, 0) - due.setHours(0, 0, 0, 0)) / 86_400_000);
+    return diff > 0 ? diff : null;
+  };
+
   return (
-    <section className="flex flex-col gap-5">
-      <h1>Заказы пошива</h1>
+    <div className="mx-auto max-w-[1400px]">
+      <PageHeader
+        title="Заказы пошива"
+        subtitle={`${formatQuantity(orders.length, "заказов")} в системе`}
+        breadcrumbs={<Breadcrumbs items={[{ label: "GarmentOS" }, { label: "Заказы пошива" }]} />}
+      />
 
       {referenceError ? (
         <ErrorState
@@ -284,77 +323,212 @@ export function ProductionOrdersPage() {
 
       {isLoading && <SkeletonList />}
 
-      <FilterTabs options={STATUS_FILTERS} value={statusFilter} onChange={setStatusFilter} />
-
-      <div>
-        {orders
-          .filter((row) => statusFilter === "all" || row.status === statusFilter)
-          .map((row) => (
-            <Card
-              key={row.id}
-              interactive
-              className="mb-2.5 flex flex-wrap items-center gap-3 p-3.5 cursor-pointer"
-              onClick={() => void navigate(`/production-orders/${row.id}`)}
-            >
-              <Avatar tone="warning">{productName(row.productId).slice(0, 2).toUpperCase()}</Avatar>
-              <div className="min-w-0 flex-1">
-                <div className="truncate text-[14px] font-bold text-foreground">{productName(row.productId)}</div>
-                <div className="truncate text-[11.5px] text-muted-foreground">
-                  {workshopName(row.workshopId)} · {row.plannedQuantity} шт
-                </div>
-              </div>
-              <div className="flex flex-none items-center gap-2" onClick={(event) => event.stopPropagation()}>
-                {row.status === "draft" && (
-                  <Button
-                    type="button"
-                    size="sm"
-                    loading={pendingOrderAction === row.id}
-                    onClick={() => void confirmOrder(row.id)}
-                  >
-                    Подтвердить
-                  </Button>
-                )}
-                {row.status === "ready_for_pickup" && (
-                  <div className="flex items-center gap-2">
-                    <Select
-                      value={receiveWarehouse[row.id] ?? ""}
-                      onValueChange={(value) => setReceiveWarehouse((prev) => ({ ...prev, [row.id]: value }))}
-                    >
-                      <SelectTrigger className="w-32">
-                        <SelectValue placeholder="Склад" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {warehouses.map((warehouse) => (
-                          <SelectItem key={warehouse.id} value={warehouse.id}>
-                            {warehouse.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <Button
-                      type="button"
-                      size="sm"
-                      loading={pendingOrderAction === row.id}
-                      onClick={() => void receiveOrder(row.id)}
-                    >
-                      Принять партию
-                    </Button>
-                  </div>
-                )}
-                {(row.status === "placed" || row.status === "in_progress" || row.status === "received") && (
-                  <StatusBadge status={row.status} />
-                )}
-              </div>
-            </Card>
-          ))}
-        {!isLoading && orders.length === 0 && (
-          <div className="card empty flex flex-col items-center gap-1">
-            <EmptyIllustration className="mb-1 h-16 w-auto" />
-            <div className="t">Пока нет ни одного заказа пошива</div>
-            <div className="s">Создайте первый заказ в форме выше.</div>
-          </div>
-        )}
+      {/* Поиск и фильтры — как в BatchesScreen прототипа: поле слева,
+          чипы справа, на мобильном друг под другом. */}
+      <div className="mb-3 mt-5 flex flex-col gap-2.5 md:flex-row md:items-center md:justify-between">
+        <SearchBar
+          value={query}
+          onChange={setQuery}
+          placeholder="Поиск по модели или цеху"
+          className="md:w-[340px]"
+        />
+        <FilterTabs options={STATUS_FILTERS} value={statusFilter} onChange={setStatusFilter} />
       </div>
-    </section>
+
+      {!isLoading && orders.length === 0 ? (
+        <EmptyState
+          compact
+          title="Пока нет ни одного заказа пошива"
+          description="Создайте первый заказ в форме выше."
+        />
+      ) : !isLoading && visibleOrders.length === 0 ? (
+        <EmptyState
+          compact
+          title="Ничего не найдено"
+          description="По заданным условиям поиска и фильтрам заказов нет. Измените запрос или сбросьте фильтр."
+          action={
+            <Button
+              size="sm"
+              onClick={() => {
+                setQuery("");
+                setStatusFilter("all");
+              }}
+            >
+              Сбросить фильтры
+            </Button>
+          }
+        />
+      ) : (
+        <>
+          {/* Таблица — планшет и десктоп */}
+          <div className="hidden md:block">
+            <DataTable
+              columns={[
+                { key: "model", label: "Модель" },
+                { key: "workshop", label: "Цех", width: "190px" },
+                { key: "qty", label: "Кол-во", align: "right", width: "100px" },
+                { key: "status", label: "Статус", width: "210px" },
+                { key: "amount", label: "Сумма", align: "right", width: "150px" },
+                { key: "due", label: "Срок", align: "right", width: "172px" },
+              ]}
+            >
+              {visibleOrders.map((row) => {
+                const amount = batchAmount(row);
+                const late = overdueDays(row);
+                return (
+                  <tr key={row.id} onClick={() => void navigate(`/production-orders/${row.id}`)}>
+                    <Td className="t-object">{productName(row.productId)}</Td>
+                    <Td className="text-muted-foreground">{workshopName(row.workshopId)}</Td>
+                    <Td align="right" className="num">
+                      {formatQuantity(Number(row.plannedQuantity))}
+                    </Td>
+                    {/* Действия живут в колонке статуса: у черновика —
+                        «Подтвердить», у готового к отгрузке — выбор склада
+                        и «Принять партию». Клик по ним не открывает
+                        паспорт (stopPropagation), как и раньше. */}
+                    <Td>
+                      <div className="flex items-center justify-start gap-2" onClick={(event) => event.stopPropagation()}>
+                        {row.status === "draft" ? (
+                          <Button
+                            type="button"
+                            size="sm"
+                            loading={pendingOrderAction === row.id}
+                            onClick={() => void confirmOrder(row.id)}
+                          >
+                            Подтвердить
+                          </Button>
+                        ) : row.status === "ready_for_pickup" ? (
+                          <>
+                            <Select
+                              value={receiveWarehouse[row.id] ?? ""}
+                              onValueChange={(value) => setReceiveWarehouse((prev) => ({ ...prev, [row.id]: value }))}
+                            >
+                              <SelectTrigger className="h-8 w-[104px]">
+                                <SelectValue placeholder="Склад" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {warehouses.map((warehouse) => (
+                                  <SelectItem key={warehouse.id} value={warehouse.id}>
+                                    {warehouse.name}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                            <Button
+                              type="button"
+                              size="sm"
+                              loading={pendingOrderAction === row.id}
+                              onClick={() => void receiveOrder(row.id)}
+                            >
+                              Принять
+                            </Button>
+                          </>
+                        ) : (
+                          <StatusBadge status={row.status} />
+                        )}
+                      </div>
+                    </Td>
+                    <Td align="right" className={cn("t-amount", amount === null && "font-normal text-muted-foreground")}>
+                      {amount === null ? "не определена" : formatMoney(amount)}
+                    </Td>
+                    <Td align="right">
+                      {row.dueDate ? (
+                        <span className="num">
+                          {formatDate(row.dueDate)}
+                          {late ? (
+                            <span className="mt-0.5 block whitespace-nowrap text-[11px] text-danger">
+                              просрочено на {late} дн.
+                            </span>
+                          ) : null}
+                        </span>
+                      ) : (
+                        <span className="text-muted-foreground">срока нет</span>
+                      )}
+                    </Td>
+                  </tr>
+                );
+              })}
+            </DataTable>
+          </div>
+
+          {/* Карточки — мобильная композиция прототипа */}
+          <div className="space-y-2 md:hidden">
+            {visibleOrders.map((row) => {
+              const amount = batchAmount(row);
+              const late = overdueDays(row);
+              return (
+                <MobileListItem
+                  key={row.id}
+                  onClick={() => void navigate(`/production-orders/${row.id}`)}
+                  footer={
+                    row.status === "draft" || row.status === "ready_for_pickup" ? (
+                      <div className="mt-3 flex items-center gap-2 border-t border-border pt-3">
+                        {row.status === "draft" ? (
+                          <Button
+                            type="button"
+                            size="sm"
+                            loading={pendingOrderAction === row.id}
+                            onClick={() => void confirmOrder(row.id)}
+                          >
+                            Подтвердить
+                          </Button>
+                        ) : (
+                          <>
+                            <Select
+                              value={receiveWarehouse[row.id] ?? ""}
+                              onValueChange={(value) => setReceiveWarehouse((prev) => ({ ...prev, [row.id]: value }))}
+                            >
+                              <SelectTrigger className="h-9 w-[120px]">
+                                <SelectValue placeholder="Склад" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {warehouses.map((warehouse) => (
+                                  <SelectItem key={warehouse.id} value={warehouse.id}>
+                                    {warehouse.name}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                            <Button
+                              type="button"
+                              size="sm"
+                              loading={pendingOrderAction === row.id}
+                              onClick={() => void receiveOrder(row.id)}
+                            >
+                              Принять партию
+                            </Button>
+                          </>
+                        )}
+                      </div>
+                    ) : undefined
+                  }
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="text-[13px] font-medium">{productName(row.productId)}</div>
+                      <div className="mt-1 text-[12px] text-muted-foreground">{workshopName(row.workshopId)}</div>
+                    </div>
+                    <StatusBadge status={row.status} />
+                  </div>
+                  <dl className="num mt-2.5 grid grid-cols-2 gap-y-1.5 border-t border-border pt-2.5 text-[12px]">
+                    <dt className="text-muted-foreground">Количество</dt>
+                    <dd className="text-right">{formatQuantity(Number(row.plannedQuantity), "шт")}</dd>
+                    <dt className="text-muted-foreground">Сумма</dt>
+                    <dd className={cn("text-right", amount === null ? "t-secondary" : "t-amount")}>
+                      {amount === null ? "не определена" : formatMoney(amount)}
+                    </dd>
+                    <dt className="text-muted-foreground">Срок</dt>
+                    <dd className={cn("text-right", late && "text-danger")}>
+                      {row.dueDate ? formatDate(row.dueDate) : "срока нет"}
+                      {late ? ` · просрочено на ${late} дн.` : ""}
+                    </dd>
+                  </dl>
+                </MobileListItem>
+              );
+            })}
+          </div>
+        </>
+      )}
+    </div>
   );
 }

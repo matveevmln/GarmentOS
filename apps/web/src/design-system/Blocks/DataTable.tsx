@@ -82,25 +82,54 @@ export function Td({
 
 // MobileListItem — та же сущность на узком экране: карточка-кнопка вместо
 // строки таблицы. Перенесён из прототипа дословно.
+//
+// `footer` — единственное дополнение к прототипу. В прототипе у мобильных
+// карточек нет действий, а в apps/web они есть (подтвердить заказ, принять
+// партию на склад). Вкладывать <button> внутрь <button> нельзя — браузер
+// такую разметку не принимает, и клавиатурная навигация ломается. Поэтому
+// при наличии footer карточка становится <div> с кнопкой-областью внутри:
+// визуально это по-прежнему одна карточка, но разметка корректна.
 export function MobileListItem({
   onClick,
   children,
+  footer,
   className,
 }: {
   onClick?: () => void;
   children: ReactNode;
+  /** Панель действий под содержимым — вне кликабельной области. */
+  footer?: ReactNode;
   className?: string;
 }) {
+  const surface =
+    "elev-1 min-h-[56px] w-full rounded-[10px] border border-border bg-card p-3.5 text-left";
+
+  if (!footer) {
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        className={cn(
+          "btn-unset interactive focus-ring hover:border-primary/30 hover:elev-2 active:bg-muted/50",
+          surface,
+          className,
+        )}
+      >
+        {children}
+      </button>
+    );
+  }
+
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        "btn-unset interactive focus-ring elev-1 min-h-[56px] w-full rounded-[10px] border border-border bg-card p-3.5 text-left hover:border-primary/30 hover:elev-2 active:bg-muted/50",
-        className,
-      )}
-    >
-      {children}
-    </button>
+    <div className={cn("transition-[box-shadow,border-color] duration-200 hover:border-primary/30", surface, className)}>
+      <button
+        type="button"
+        onClick={onClick}
+        className="btn-unset focus-ring block w-full text-left active:opacity-80"
+      >
+        {children}
+      </button>
+      {footer}
+    </div>
   );
 }
