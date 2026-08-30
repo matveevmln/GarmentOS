@@ -74,6 +74,7 @@ function toPurchaseOrder(row: PurchaseOrderRow, items: PurchaseOrderItemRow[]): 
     status: row.status,
     orderedAt: row.orderedAt,
     expectedDate: row.expectedDate,
+    currency: row.currency,
     createdBy: row.createdBy,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
@@ -142,6 +143,7 @@ export class DrizzlePurchaseOrderRepository implements PurchaseOrderRepository {
           status: input.status,
           orderedAt: input.orderedAt,
           expectedDate: input.expectedDate,
+          currency: input.currency,
           createdBy: input.createdBy,
         })
         .returning();

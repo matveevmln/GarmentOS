@@ -430,8 +430,17 @@ export class ProductionOrderOrchestrationService {
     // бросает 404, если у модели нет утверждённого BOM — тоже до перевода
     // статуса, по той же причине.
     const pricing = await this.costingService.computeSpecificationPricing(companyId, draft.productId);
+    // Нормы расхода замораживаются вместе с ценами (Pilot v1, этап 4).
+    // Требование исторической памяти: партия хранит ту норму, по которой
+    // была запущена, и изменение карточки модели её не меняет.
+    const [materialNorms, materialNormsVersion] = await Promise.all([
+      this.costingService.captureMaterialNorms(companyId, draft.productId),
+      this.costingService.findApprovedBomVersion(companyId, draft.productId),
+    ]);
     const snapshot: ProductionOrderCostSnapshot = {
       capturedAt: new Date().toISOString(),
+      materialNorms,
+      ...(materialNormsVersion !== null ? { materialNormsVersion } : {}),
       fabricCostPerUnit: pricing.fabricCostPerUnit,
       trimCostPerUnit: pricing.trimCostPerUnit,
       packagingCostPerUnit: pricing.packagingCostPerUnit,

@@ -7,7 +7,7 @@ import { DataTable, Td, MobileListItem } from "../design-system/Blocks";
 import { Field } from "../design-system/Form/Field";
 import { PageHeader, Breadcrumbs } from "../design-system/PageHeader/PageHeader";
 import { EmptyState } from "../design-system/Feedback/EmptyState";
-import { formatQuantity } from "../lib/format";
+import { formatQuantity, unitLabel } from "../lib/format";
 import { FilterTabs, type FilterOption } from "../design-system/Tabs/FilterTabs";
 import { SearchBar } from "../design-system/Search/SearchBar";
 import { Card, CardContent, CardHeader, CardTitle } from "../design-system/Card/Card";
@@ -39,11 +39,6 @@ const MATERIAL_UNITS = [
 const TYPE_LABEL: Record<string, string> = Object.fromEntries(
   MATERIAL_TYPES.map((type) => [type.value, type.label]),
 );
-
-// Единица измерения приходит из API кодом (m/kg/pcs). Показываем её
-// по-русски — так же, как на Главной; само значение не меняется.
-const UNIT_LABEL: Record<string, string> = { m: "м", kg: "кг", pcs: "шт" };
-const unitLabel = (unit: string) => UNIT_LABEL[unit] ?? unit;
 
 const TYPE_FILTERS: FilterOption<"all" | (typeof MATERIAL_TYPES)[number]["value"]>[] = [
   { value: "all", label: "Все" },

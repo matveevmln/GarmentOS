@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import {
   type MaterialResponseDto,
   type PurchaseOrderItemDraft,
+  type PurchaseCurrency,
   type PurchaseOrderResponseDto,
   type SupplierResponseDto,
   type WarehouseResponseDto,
@@ -35,12 +36,23 @@ const STATUS_FILTERS: FilterOption<"all" | "draft" | "sent" | "received">[] = [
   { value: "received", label: "Получено" },
 ];
 
+// Валюта закупки. Ткань обычно покупается за доллары, фурнитура — за сомы,
+// но правило это не жёсткое, поэтому валюта выбирается руками и не выводится
+// из типа материала (docs/PRINCIPLES.md, принцип 21).
+const CURRENCIES: { value: PurchaseCurrency; label: string; hint: string }[] = [
+  { value: "USD", label: "Доллары (USD)", hint: "обычно ткань" },
+  { value: "KGS", label: "Сомы (KGS)", hint: "обычно фурнитура и упаковка" },
+  { value: "RUB", label: "Рубли (RUB)", hint: "" },
+];
+const CURRENCY_SIGN: Record<PurchaseCurrency, string> = { USD: "$", KGS: "сом", RUB: "₽" };
+
 export function PurchaseOrdersPage() {
   const { items: orders, isLoading, reload } = useCrudResource<PurchaseOrderResponseDto, never>("/purchase-orders");
   const [suppliers, setSuppliers] = useState<SupplierResponseDto[]>([]);
   const [materials, setMaterials] = useState<MaterialResponseDto[]>([]);
   const [warehouses, setWarehouses] = useState<WarehouseResponseDto[]>([]);
   const [supplierId, setSupplierId] = useState("");
+  const [currency, setCurrency] = useState<PurchaseCurrency>("USD");
   const [lineItems, setLineItems] = useState<PurchaseOrderItemDraft[]>([]);
   const [pendingMaterialId, setPendingMaterialId] = useState("");
   const [pendingQuantity, setPendingQuantity] = useState<number | undefined>(undefined);
@@ -79,7 +91,7 @@ export function PurchaseOrdersPage() {
     if (!supplierId || lineItems.length === 0) return;
     setIsSubmitting(true);
     try {
-      await apiRequest("/purchase-orders", { method: "POST", body: { supplierId, items: lineItems } });
+      await apiRequest("/purchase-orders", { method: "POST", body: { supplierId, currency, items: lineItems } });
       setSupplierId("");
       setLineItems([]);
       await reload();
@@ -127,6 +139,12 @@ export function PurchaseOrdersPage() {
   const orderAmount = (row: PurchaseOrderResponseDto): number =>
     row.items.reduce((sum, item) => sum + Number(item.quantity) * Number(item.unitPrice), 0);
 
+  // Сумма подписывается валютой самой закупки. У закупок, созданных до
+  // появления поля, валюта неизвестна — тогда сумма показывается без подписи,
+  // а не подписывается наугад сомами.
+  const orderAmountLabel = (row: PurchaseOrderResponseDto): string =>
+    formatMoney(orderAmount(row), row.currency ?? "", 2);
+
   const visibleOrders = orders.filter((row) => statusFilter === "all" || row.status === statusFilter);
 
   return (
@@ -149,15 +167,38 @@ export function PurchaseOrdersPage() {
             <CardTitle>Новая закупка</CardTitle>
           </CardHeader>
           <CardContent className="flex flex-col gap-4">
-            <Field label="Поставщик" className="md:max-w-[420px]">
-              <Combobox
-                value={supplierId}
-                onChange={setSupplierId}
-                placeholder="Выберите поставщика"
-                searchPlaceholder="Поиск поставщика..."
-                options={suppliers.map((supplier) => ({ value: supplier.id, label: supplier.name }))}
-              />
-            </Field>
+            <div className="flex flex-col gap-4 md:flex-row md:items-start">
+              <Field label="Поставщик" className="flex-1 md:max-w-[420px]">
+                <Combobox
+                  value={supplierId}
+                  onChange={setSupplierId}
+                  placeholder="Выберите поставщика"
+                  searchPlaceholder="Поиск поставщика..."
+                  options={suppliers.map((supplier) => ({ value: supplier.id, label: supplier.name }))}
+                />
+              </Field>
+              {/* Валюта указывается на закупку целиком: одна поставка — один
+                  счёт в одной валюте. Именно она потом подписывает стоимость
+                  материалов в партии, поэтому её нельзя угадывать. */}
+              <Field
+                label="Валюта закупки"
+                className="md:w-[240px]"
+                hint={<span className="t-meta">{CURRENCIES.find((row) => row.value === currency)?.hint}</span>}
+              >
+                <Select value={currency} onValueChange={(value) => setCurrency(value as PurchaseCurrency)}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {CURRENCIES.map((row) => (
+                      <SelectItem key={row.value} value={row.value}>
+                        {row.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Field>
+            </div>
 
             <div className="flex flex-col gap-3 rounded-[10px] border border-border bg-muted/40 p-3.5 sm:flex-row sm:flex-wrap sm:items-end">
               <Field label="Материал" className="min-w-[160px] flex-1">
@@ -173,7 +214,7 @@ export function PurchaseOrdersPage() {
                 <NumberInput value={pendingQuantity} onChange={setPendingQuantity} min={0} decimals={3} />
               </Field>
               <Field label="Цена за единицу" className="min-w-[120px] flex-1">
-                <MoneyInput value={pendingPrice} onChange={setPendingPrice} currency="сом" />
+                <MoneyInput value={pendingPrice} onChange={setPendingPrice} currency={CURRENCY_SIGN[currency]} />
               </Field>
               <Button type="button" variant="secondary" size="sm" onClick={addLineItem} className="sm:w-auto">
                 Добавить строку
@@ -238,7 +279,7 @@ export function PurchaseOrdersPage() {
                   <Td className="t-object">{supplierName(row.supplierId)}</Td>
                   <Td className="num text-muted-foreground">{formatQuantity(row.items.length)}</Td>
                   <Td align="right" className="t-amount">
-                    {formatMoney(orderAmount(row))}
+                    {orderAmountLabel(row)}
                   </Td>
                   {/* Действия в колонке статуса — как на экране заказов пошива */}
                   <Td>
@@ -347,7 +388,7 @@ export function PurchaseOrdersPage() {
                 </div>
                 <div className="num mt-2.5 flex items-center justify-between border-t border-border pt-2 text-[12px]">
                   <span className="text-muted-foreground">Сумма</span>
-                  <span className="t-amount">{formatMoney(orderAmount(row))}</span>
+                  <span className="t-amount">{orderAmountLabel(row)}</span>
                 </div>
               </MobileListItem>
             ))}

@@ -9,7 +9,7 @@ import { SkeletonList } from "../design-system/Feedback/Skeleton";
 import { ErrorState } from "../design-system/Feedback/ErrorState";
 import { EmptyState } from "../design-system/Feedback/EmptyState";
 import { AttentionList, MetricStrip, MobileListItem, type AttentionItem } from "../design-system/Blocks";
-import { formatDate, formatMoney, formatQuantity } from "../lib/format";
+import { formatDate, formatMoney, formatQuantity, unitLabel } from "../lib/format";
 
 // Главная (docs/PRINCIPLES.md, принцип 22: «Главная → Что происходит
 // сейчас?»). Владелец бренда открывает GarmentOS утром и должен сразу
@@ -25,7 +25,6 @@ import { formatDate, formatMoney, formatQuantity } from "../lib/format";
 // метрики не заведено: в MetricStrip те же четыре числа, что были в
 // KpiCard, а в списках — те же строки, что показывались и раньше.
 
-const UNIT_LABEL: Record<string, string> = { m: "м", kg: "кг", pcs: "шт" };
 
 export function DashboardPage() {
   const navigate = useNavigate();
@@ -199,7 +198,7 @@ export function DashboardPage() {
                       <span className="t-object min-w-0 truncate">{row.materialName}</span>
                       <span className="num shrink-0 text-[12px] text-muted-foreground">
                         {formatQuantity(row.quantityOnHand)} из{" "}
-                        {formatQuantity(row.reorderPoint, UNIT_LABEL[row.unit] ?? row.unit)}
+                        {formatQuantity(row.reorderPoint, unitLabel(row.unit))}
                       </span>
                     </li>
                   ))}

@@ -68,11 +68,19 @@ export const purchaseOrderItemDraftSchema = z.object({
 });
 export type PurchaseOrderItemDraft = z.infer<typeof purchaseOrderItemDraftSchema>;
 
+// Валюта закупки. Список — валюты, в которых компания реально закупает
+// (docs/PRINCIPLES.md, принцип 21: ткань — USD, фурнитура и доплаты — KGS,
+// пошив и спецификация — RUB). Значение задаётся явно и не выводится из типа
+// материала: одна и та же ткань может быть куплена и за доллары, и за сомы.
+export const purchaseCurrencySchema = z.enum(["USD", "KGS", "RUB"]);
+export type PurchaseCurrency = z.infer<typeof purchaseCurrencySchema>;
+
 export const createPurchaseOrderSchema = z.object({
   supplierId: z.string().uuid(),
   items: z.array(purchaseOrderItemDraftSchema).min(1, "Закупка должна содержать хотя бы одну позицию материала"),
   orderedAt: z.string().optional(),
   expectedDate: z.string().optional(),
+  currency: purchaseCurrencySchema.optional(),
   createdBy: z.string().uuid().optional(),
 });
 export type CreatePurchaseOrderDto = z.infer<typeof createPurchaseOrderSchema>;
@@ -94,6 +102,9 @@ export const purchaseOrderResponseSchema = z.object({
   status: purchaseOrderStatusSchema,
   orderedAt: z.string(),
   expectedDate: z.string().nullable(),
+  // null — закупки, созданные до появления поля: валюта неизвестна, и это
+  // показывается честно, а не подменяется значением по умолчанию.
+  currency: z.string().nullable(),
   createdBy: z.string().uuid().nullable(),
   createdAt: z.date(),
   updatedAt: z.date(),

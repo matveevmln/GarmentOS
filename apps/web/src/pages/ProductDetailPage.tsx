@@ -26,6 +26,7 @@ import { Button } from "../design-system/Button/Button";
 import { SkeletonList } from "../design-system/Feedback/Skeleton";
 import { ErrorState } from "../design-system/Feedback/ErrorState";
 import { toast } from "../design-system/Toast/Toast";
+import { unitLabel } from "../lib/format";
 
 // Шестой из 7 перенесённых экранов (docs/DESIGN_SYSTEM_MAP.md, задача #72).
 // Честная находка при переносе: этот экран технически отвечает на 3 разных
@@ -109,14 +110,49 @@ export function ProductDetailPage() {
     setPendingWaste(undefined);
   };
 
+  // Актуальная версия — старшая среди утверждённых. Ровно то же правило, по
+  // которому сервер выбирает нормы для нового заказа, поэтому интерфейс не
+  // может разойтись с расчётом.
+  const currentBomId =
+    boms
+      .filter((bom) => bom.status === "approved")
+      .sort((a, b) => b.version - a.version)[0]?.id ?? null;
+
+  const describeNorms = (bom: BomResponseDto): string => {
+    if (bom.items.length === 0) return "—";
+    return bom.items
+      .map((item) => {
+        const material = materials.find((m) => m.id === item.materialId);
+        const unit = material ? unitLabel(material.unit) : "";
+        const waste = Number(item.wastePercent) > 0 ? ` (+${Number(item.wastePercent)}% отходы)` : "";
+        return `${material?.name ?? item.materialId} — ${Number(item.quantityPerUnit)} ${unit}/шт${waste}`;
+      })
+      .join("; ");
+  };
+
+  // Сохранение норм — одно действие вместо двух шагов (владелец проекта,
+  // решение Д): создаётся новая версия и сразу становится актуальной для
+  // новых заказов. Промежуточный черновик пользователю ничего не давал —
+  // уже созданные партии защищены собственными зафиксированными нормами и
+  // от новой версии не меняются.
+  //
+  // Механизм версий используется существующий, второй не заводится: номер
+  // версии проставляет сервер (следующий по счёту для этой модели),
+  // предыдущие версии не переписываются и остаются в истории.
   const submitBom = async () => {
     if (!id || bomItems.length === 0) return;
     setIsSubmittingBom(true);
     try {
-      await apiRequest(`/boms`, { method: "POST", body: { productId: id, items: bomItems } });
+      const created = await apiRequest<BomResponseDto>(`/boms`, {
+        method: "POST",
+        body: { productId: id, items: bomItems },
+      });
+      await apiRequest(`/boms/${created.id}/approve`, { method: "POST" });
       setBomItems([]);
       await reloadBoms();
-      toast.success("Спецификация сохранена черновиком");
+      toast.success(`Нормы сохранены — версия ${created.version}`, {
+        description: "Новые заказы получат эту версию. Созданные ранее партии не изменятся.",
+      });
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "Не удалось сохранить нормы расхода");
     } finally {
@@ -129,9 +165,9 @@ export function ProductDetailPage() {
     try {
       await apiRequest(`/boms/${bomId}/approve`, { method: "POST" });
       await reloadBoms();
-      toast.success("Спецификация утверждена");
+      toast.success("Версия норм сделана актуальной");
     } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "Не удалось утвердить спецификацию");
+      toast.error(err instanceof ApiError ? err.message : "Не удалось сделать версию актуальной");
     } finally {
       setApprovingBomId(null);
     }
@@ -278,28 +314,35 @@ export function ProductDetailPage() {
           )}
           {bomItems.length > 0 && (
             <Button type="button" loading={isSubmittingBom} onClick={() => void submitBom()}>
-              Сохранить спецификацию черновиком
+              Сохранить нормы новой версией
             </Button>
           )}
 
           {boms.length === 0 ? (
-            <EmptyState compact title="Спецификация ещё не создана" description="Добавьте материалы в форме выше." />
+            <EmptyState compact title="Нормы расхода ещё не заданы" description="Добавьте материалы в форме выше." />
           ) : (
             <>
-              {/* Действие «Утвердить» сохранено без изменений — POST на
-                  /boms/:id/approve, как и раньше. */}
+              {/* История версий: старые не переписываются и остаются
+                  видимыми. Актуальная — та, по которой пойдут НОВЫЕ заказы;
+                  уже созданные партии хранят собственные зафиксированные
+                  нормы и от смены версии не меняются. */}
               <div className="hidden md:block">
                 <DataTable
                   columns={[
-                    { key: "version", label: "Версия", width: "140px" },
-                    { key: "items", label: "Материалов", width: "160px" },
+                    { key: "version", label: "Версия", width: "150px" },
+                    { key: "items", label: "Материалы и нормы" },
                     { key: "status", label: "Статус", align: "right", width: "180px" },
                   ]}
                 >
                   {boms.map((row) => (
                     <tr key={row.id} className="cursor-default">
-                      <Td className="t-object">Версия {row.version}</Td>
-                      <Td className="num text-muted-foreground">{row.items.length}</Td>
+                      <Td className="t-object">
+                        Версия {row.version}
+                        {row.id === currentBomId ? (
+                          <span className="mt-0.5 block text-[11px] font-medium text-success">Актуальная</span>
+                        ) : null}
+                      </Td>
+                      <Td className="text-muted-foreground">{describeNorms(row)}</Td>
                       <Td align="right">
                         <div className="flex items-center justify-end gap-2">
                           {row.status === "draft" ? (
@@ -309,7 +352,7 @@ export function ProductDetailPage() {
                               loading={approvingBomId === row.id}
                               onClick={() => void approveBom(row.id)}
                             >
-                              Утвердить
+                              Сделать актуальной
                             </Button>
                           ) : (
                             <StatusBadge status={row.status} />

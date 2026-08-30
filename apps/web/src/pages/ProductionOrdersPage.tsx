@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   type BomResponseDto,
+  type MaterialResponseDto,
   type ProductResponseDto,
   type ProductVariantResponseDto,
   type ProductionOrderResponseDto,
@@ -19,7 +20,7 @@ import { PageHeader, Breadcrumbs } from "../design-system/PageHeader/PageHeader"
 import { SearchBar } from "../design-system/Search/SearchBar";
 import { EmptyState } from "../design-system/Feedback/EmptyState";
 import { DataTable, Td, MobileListItem } from "../design-system/Blocks";
-import { formatDate, formatMoney, formatQuantity } from "../lib/format";
+import { formatDate, formatMoney, formatQuantity, unitLabel } from "../lib/format";
 import { cn } from "../design-system/utils";
 import { Combobox } from "../design-system/Select/Combobox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../design-system/Select/Select";
@@ -49,6 +50,7 @@ export function ProductionOrdersPage() {
   const [products, setProducts] = useState<ProductResponseDto[]>([]);
   const [workshops, setWorkshops] = useState<WorkshopResponseDto[]>([]);
   const [warehouses, setWarehouses] = useState<WarehouseResponseDto[]>([]);
+  const [materials, setMaterials] = useState<MaterialResponseDto[]>([]);
   const [variants, setVariants] = useState<ProductVariantResponseDto[]>([]);
   const [approvedBom, setApprovedBom] = useState<BomResponseDto | null>(null);
 
@@ -72,6 +74,9 @@ export function ProductionOrdersPage() {
       apiRequest<ProductResponseDto[]>("/products").then(setProducts),
       apiRequest<WorkshopResponseDto[]>("/workshops").then(setWorkshops),
       apiRequest<WarehouseResponseDto[]>("/warehouses").then(setWarehouses),
+      // Материалы нужны, чтобы показать потребность по нормам понятными
+      // словами («ткань, 1 365 м»), а не идентификаторами.
+      apiRequest<MaterialResponseDto[]>("/materials").then(setMaterials),
     ]).catch(() => setReferenceError(true));
   };
 
@@ -106,6 +111,35 @@ export function ProductionOrdersPage() {
   };
 
   const totalQuantity = lines.reduce((sum, line) => sum + line.quantity, 0);
+
+  // Предварительный расчёт потребности в материалах: сколько ткани и
+  // фурнитуры уйдёт на набранное количество. Показывается до создания
+  // заказа — чтобы решение «делать партию 500 или 300» принималось со
+  // знанием, хватит ли материала, а не постфактум.
+  //
+  // Формула та же, что применяет сервер к зафиксированным нормам партии
+  // (apps/api/src/reporting/batch-passport.service.ts, computeMaterialRequirement):
+  // расход на изделие = норма × (1 + отходы%), потребность = расход × количество.
+  // Это именно предварительный расчёт по сегодняшним нормам модели —
+  // окончательные числа партии определяются нормами, которые зафиксируются
+  // при подтверждении заказа.
+  const previewRequirement =
+    approvedBom && totalQuantity > 0
+      ? approvedBom.items.flatMap((item) => {
+          const material = materials.find((row) => row.id === item.materialId);
+          if (!material) return [];
+          const consumptionPerUnit = Number(item.quantityPerUnit) * (1 + Number(item.wastePercent) / 100);
+          return [
+            {
+              materialId: item.materialId,
+              name: material.name,
+              unit: material.unit,
+              consumptionPerUnit,
+              totalRequired: consumptionPerUnit * totalQuantity,
+            },
+          ];
+        })
+      : [];
 
   const submitOrder = async () => {
     if (!productId || !workshopId || !approvedBom || !unitPrice || lines.length === 0) return;
@@ -181,10 +215,11 @@ export function ProductionOrdersPage() {
   });
 
   // «Сумма партии» — та же величина и по той же формуле, что показывает
-  // паспорт партии: цена спецификации из снимка × плановое количество.
-  // Ничего нового не вводится; без снимка сумма честно не определена.
-  const batchAmount = (row: ProductionOrderResponseDto): number | null =>
-    row.costSnapshot ? row.costSnapshot.specificationPricePerUnit * Number(row.plannedQuantity) : null;
+  // паспорт партии: согласованная с цехом цена за изделие × количество, в
+  // рублях. Раньше здесь была цена из снимка за вычетом 175 — смысл этого
+  // вычета владельцем проекта не подтверждён, показатели на нём не строятся.
+  const batchAmount = (row: ProductionOrderResponseDto): number =>
+    Number(row.agreedUnitPrice) * Number(row.plannedQuantity);
 
   // Просрочка считается на клиенте из dueDate по тому же правилу, что и в
   // apps/api/src/reporting/attention.service.ts: срок в прошлом и заказ не
@@ -309,6 +344,28 @@ export function ProductionOrdersPage() {
               </ul>
             )}
 
+            {previewRequirement.length > 0 && (
+              <div className="rounded-[16px] border border-border bg-secondary/50 p-3.5">
+                <div className="text-[0.9rem] font-semibold">
+                  Потребуется материалов на {formatQuantity(totalQuantity, "изделий")}
+                </div>
+                <ul className="m-0 mt-2 list-none p-0 text-[0.9rem] text-muted-foreground">
+                  {previewRequirement.map((row) => (
+                    <li key={row.materialId} className="flex justify-between gap-3 border-b border-border py-1.5 last:border-none">
+                      <span>{row.name}</span>
+                      <span className="tabular-nums">
+                        {formatQuantity(row.totalRequired, unitLabel(row.unit), 2)}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+                <p className="mt-2 text-[0.8rem] text-muted-foreground">
+                  Предварительно, по нормам расхода из карточки модели. Нормы этой партии зафиксируются при
+                  подтверждении заказа и дальше меняться не будут.
+                </p>
+              </div>
+            )}
+
             <Button
               type="button"
               loading={isSubmitting}
@@ -428,8 +485,8 @@ export function ProductionOrdersPage() {
                         )}
                       </div>
                     </Td>
-                    <Td align="right" className={cn("t-amount", amount === null && "font-normal text-muted-foreground")}>
-                      {amount === null ? "не определена" : formatMoney(amount)}
+                    <Td align="right" className="t-amount">
+                      {formatMoney(amount, "руб")}
                     </Td>
                     <Td align="right">
                       {row.dueDate ? (
@@ -514,8 +571,8 @@ export function ProductionOrdersPage() {
                     <dt className="text-muted-foreground">Количество</dt>
                     <dd className="text-right">{formatQuantity(Number(row.plannedQuantity), "шт")}</dd>
                     <dt className="text-muted-foreground">Сумма</dt>
-                    <dd className={cn("text-right", amount === null ? "t-secondary" : "t-amount")}>
-                      {amount === null ? "не определена" : formatMoney(amount)}
+                    <dd className="t-amount text-right">
+                      {formatMoney(amount, "руб")}
                     </dd>
                     <dt className="text-muted-foreground">Срок</dt>
                     <dd className={cn("text-right", late && "text-danger")}>

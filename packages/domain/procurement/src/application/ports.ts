@@ -39,6 +39,7 @@ export interface NewPurchaseOrderInput {
   status: PurchaseOrderStatus;
   orderedAt: string;
   expectedDate: string | null;
+  currency: string | null;
   createdBy: string | null;
   items: PurchaseOrderItemDraft[];
 }

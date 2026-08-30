@@ -133,6 +133,33 @@ export const pilotDashboardResponseSchema = z.object({
 });
 export type PilotDashboardResponseDto = z.infer<typeof pilotDashboardResponseSchema>;
 
+// Потребность в материалах на партию (Pilot v1, этап 4). Считается из
+// замороженных норм партии и её планового количества:
+//   требуется = количество × расход на единицу × (1 + отходы%)
+//
+// Именно эта строка — вход для следующего этапа (раскрой): «сколько ткани
+// нужно» уже посчитано и привязано к партии, раскрою останется добавить
+// «сколько выделено» и «сколько фактически ушло».
+export const batchMaterialRequirementSchema = z.object({
+  materialId: z.string().uuid(),
+  materialName: z.string(),
+  materialType: z.string(),
+  unit: z.string(),
+  quantityPerUnit: z.number(),
+  wastePercent: z.number(),
+  /** Расход на единицу с учётом отходов. */
+  consumptionPerUnit: z.number(),
+  /** Сколько нужно на всю партию. */
+  totalRequired: z.number(),
+  // Стоимость показывается только когда известна и цена, и её валюта:
+  // суммы разных контуров (ткань в USD, фурнитура в KGS) не складываются в
+  // одно число (принцип 21).
+  unitPrice: z.number().nullable(),
+  currency: z.string().nullable(),
+  totalCost: z.number().nullable(),
+});
+export type BatchMaterialRequirementDto = z.infer<typeof batchMaterialRequirementSchema>;
+
 export const batchPassportResponseSchema = z.object({
   id: z.string().uuid(),
   status: z.string(),
@@ -157,5 +184,9 @@ export const batchPassportResponseSchema = z.object({
   documents: z.array(documentResponseSchema),
   invoices: z.array(batchPassportInvoiceSchema),
   timeline: z.array(batchPassportTimelineEventSchema),
+  // Потребность в материалах по этой партии (Pilot v1, этап 4) — вычисляется
+  // из замороженных норм и планового количества, не хранится: производная
+  // величина, которая рассинхронизировалась бы с источником.
+  materialRequirement: z.array(batchMaterialRequirementSchema),
 });
 export type BatchPassportResponseDto = z.infer<typeof batchPassportResponseSchema>;

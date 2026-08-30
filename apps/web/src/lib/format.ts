@@ -48,6 +48,30 @@ export function formatDate(value: string | Date | null | undefined): string {
   }).format(date);
 }
 
+/** Единица измерения материала: ключ из справочника → русская подпись.
+ *  Жила копиями на двух экранах; при появлении третьего места вынесена
+ *  сюда, чтобы подписи не разъезжались. */
+const UNIT_LABELS: Record<string, string> = { m: "м", kg: "кг", pcs: "шт" };
+
+export function unitLabel(unit: string): string {
+  return UNIT_LABELS[unit] ?? unit;
+}
+
+/** Тип материала: код из API → русская подпись в единственном числе
+ *  («Ткань», а не «Ткани»): так подписывают одну строку материала. Списки
+ *  фильтров держат свои подписи во множественном числе — это другая задача,
+ *  туда эта функция не подходит. */
+const MATERIAL_TYPE_LABELS: Record<string, string> = {
+  fabric: "Ткань",
+  trim: "Фурнитура",
+  packaging: "Упаковка",
+  accessory: "Прочее",
+};
+
+export function materialTypeLabel(type: string): string {
+  return MATERIAL_TYPE_LABELS[type] ?? type;
+}
+
 /** Доля в процентах для полос в CostBreakdown. */
 export function formatPercent(share: number, decimals = 0): string {
   return `${new Intl.NumberFormat("ru-RU", {

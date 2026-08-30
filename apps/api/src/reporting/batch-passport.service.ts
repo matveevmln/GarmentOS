@@ -103,6 +103,42 @@ export class BatchPassportService {
       documents,
       invoices: invoiceRows.map((row) => ({ id: row.id, status: row.status, amount: Number(row.amount), dueDate: row.dueDate })),
       timeline,
+      materialRequirement: computeMaterialRequirement(snapshot, Number(order.plannedQuantity)),
     };
   }
+}
+
+// Потребность в материалах на партию — из норм, замороженных в момент
+// подтверждения, и планового количества. Не хранится: величина полностью
+// производная, а хранимое производное рассинхронизируется с источником.
+//
+// Партии, подтверждённые до появления норм в снимке, дают пустой список —
+// подставлять текущие нормы модели нельзя, это ровно то, от чего защищает
+// весь механизм: старая партия не должна пересчитываться задним числом.
+export function computeMaterialRequirement(
+  snapshot: ProductionOrderCostSnapshot | null,
+  plannedQuantity: number,
+): BatchPassportResponseDto["materialRequirement"] {
+  const norms = snapshot?.materialNorms ?? [];
+  return norms.map((norm) => {
+    const consumptionPerUnit = norm.quantityPerUnit * (1 + norm.wastePercent / 100);
+    const totalRequired = consumptionPerUnit * plannedQuantity;
+    // Стоимость считается только когда известны и цена, и валюта: иначе
+    // получилось бы число без единицы измерения, которое кто-нибудь сложит
+    // с суммой другого контура.
+    const hasPrice = norm.lastPurchasePrice !== null && norm.priceCurrency !== null;
+    return {
+      materialId: norm.materialId,
+      materialName: norm.materialName,
+      materialType: norm.materialType,
+      unit: norm.unit,
+      quantityPerUnit: norm.quantityPerUnit,
+      wastePercent: norm.wastePercent,
+      consumptionPerUnit,
+      totalRequired,
+      unitPrice: hasPrice ? norm.lastPurchasePrice : null,
+      currency: hasPrice ? norm.priceCurrency : null,
+      totalCost: hasPrice ? totalRequired * (norm.lastPurchasePrice as number) : null,
+    };
+  });
 }

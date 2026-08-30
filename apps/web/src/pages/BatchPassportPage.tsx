@@ -34,7 +34,7 @@ import { Input } from "../design-system/Input/Input";
 import { DatePicker } from "../design-system/Form/DatePicker";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../design-system/Select/Select";
 import { statusMeta } from "../lib/status";
-import { formatDate, formatMoney, formatQuantity } from "../lib/format";
+import { formatDate, formatMoney, formatQuantity, materialTypeLabel, unitLabel } from "../lib/format";
 import { cn } from "../design-system/utils";
 import { toast } from "../design-system/Toast/Toast";
 
@@ -57,7 +57,7 @@ import { toast } from "../design-system/Toast/Toast";
 // соответствия нет, поэтому они показаны отдельными карточками через
 // перенесённый EmptyState, а не выдуманной вкладкой с нулями.
 
-type TabKey = "cost" | "docs" | "colors" | "contract" | "history";
+type TabKey = "cost" | "materials" | "docs" | "colors" | "contract" | "history";
 
 // Тип документа хранится в базе строкой (`documents.doc_type`) и намеренно не
 // ограничен списком: у каждой компании свой словарь документов. В интерфейсе
@@ -93,6 +93,7 @@ const UPLOADABLE_DOC_TYPES = [
 
 const TABS: { key: TabKey; label: string }[] = [
   { key: "cost", label: "Себестоимость" },
+  { key: "materials", label: "Нормы расхода материалов" },
   { key: "docs", label: "Документы" },
   { key: "colors", label: "Размеры и цвета" },
   { key: "contract", label: "Договор" },
@@ -239,7 +240,25 @@ export function BatchPassportPage() {
     return variant ? Math.round(Number(variant.quantity)) : null;
   };
 
-  const batchSum = snapshot ? snapshot.specificationPricePerUnit * plannedQuantity : null;
+  // Сумма партии — по согласованной с цехом цене за единицу: ровно то число,
+  // которое печатается в спецификации и по которому цех выставляет счёт.
+  // Раньше здесь была specificationPricePerUnit (цена за вычетом 175);
+  // владелец проекта не подтвердил смысл этого вычета, поэтому построенные на
+  // нём показатели из интерфейса убраны, а не показаны «примерно верными».
+  const agreedUnitPrice = Number(passport.agreedUnitPrice);
+  const batchSum = agreedUnitPrice * plannedQuantity;
+
+  // Потребность в материалах по этой партии — из норм, замороженных при
+  // подтверждении заказа. Стоимости разных валютных контуров (ткань в USD,
+  // фурнитура в сомах) не складываются в одно число: итог считается отдельно
+  // по каждой валюте (docs/PRINCIPLES.md, принцип 21).
+  const requirement = passport.materialRequirement;
+  const requirementTotals = new Map<string, number>();
+  for (const row of requirement) {
+    if (row.totalCost === null || row.currency === null) continue;
+    requirementTotals.set(row.currency, (requirementTotals.get(row.currency) ?? 0) + row.totalCost);
+  }
+  const requirementWithoutPrice = requirement.filter((row) => row.totalCost === null);
 
   // Строки себестоимости — те же пять статей, что показывались и раньше;
   // доля считается от их суммы, а не вводится как новая величина.
@@ -379,6 +398,100 @@ export function BatchPassportPage() {
               </ul>
             )}
           </div>
+        </div>
+      );
+    }
+
+    if (key === "materials") {
+      if (requirement.length === 0) {
+        return (
+          <EmptyState
+            compact
+            title={
+              passport.status === "draft"
+                ? "Нормы зафиксируются при подтверждении"
+                : "Нормы расхода для этой партии не зафиксированы"
+            }
+            description={
+              passport.status === "draft"
+                ? "При подтверждении заказа GarmentOS запомнит нормы расхода из карточки модели. Дальше их можно менять в карточке — на этой партии это уже не отразится."
+                : "Заказ подтверждён до того, как система начала запоминать нормы расхода. Подставить сегодняшние нормы нельзя: они могли измениться, и партия перестала бы совпадать с тем, по чему её шили."
+            }
+          />
+        );
+      }
+      return (
+        <div>
+          <div className="num mb-3 text-[11px] text-muted-foreground">
+            {snapshot ? `Зафиксированы ${formatDate(snapshot.capturedAt)}` : "Зафиксированы при подтверждении"}
+            {snapshot?.materialNormsVersion ? ` · нормы модели, редакция №${snapshot.materialNormsVersion}` : ""} · на{" "}
+            {formatQuantity(plannedQuantity, "изделий")}
+          </div>
+
+          <div className="divide-y divide-border rounded-[10px] border border-border">
+            {requirement.map((row) => (
+              <div key={row.materialId} className="px-3.5 py-3">
+                <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+                  <span className="text-[13px] font-medium">{row.materialName}</span>
+                  <span className="t-meta shrink-0">{materialTypeLabel(row.materialType)}</span>
+                </div>
+                <div className="num mt-1.5 text-[11px] text-muted-foreground">
+                  норма {formatQuantity(row.quantityPerUnit, unitLabel(row.unit), 3)} на изделие
+                  {row.wastePercent > 0
+                    ? ` + ${formatQuantity(row.wastePercent, "% отходов", 2)} = ${formatQuantity(row.consumptionPerUnit, unitLabel(row.unit), 3)}`
+                    : ""}
+                </div>
+                <div className="mt-2 flex flex-wrap items-baseline gap-x-6 gap-y-1">
+                  <span>
+                    <span className="eyebrow text-[10px]">Требуется на партию</span>
+                    <span className="num ml-2 text-[15px] font-semibold">
+                      {formatQuantity(row.totalRequired, unitLabel(row.unit), 2)}
+                    </span>
+                  </span>
+                  {row.unitPrice !== null && row.currency !== null ? (
+                    <span className="num text-[12px] text-muted-foreground">
+                      {formatMoney(row.unitPrice, row.currency, 2)} за {unitLabel(row.unit)} ·{" "}
+                      <span className="font-medium text-foreground">
+                        {formatMoney(row.totalCost ?? 0, row.currency, 2)}
+                      </span>
+                    </span>
+                  ) : (
+                    <span className="t-meta">закупочной цены нет — стоимость не считается</span>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {requirementTotals.size > 0 ? (
+            <div className="mt-4">
+              <SectionLabel>Стоимость материалов на партию</SectionLabel>
+              {/* Валюты показываются отдельными строками и намеренно не
+                  суммируются: курс на дату закупки система не хранит, а
+                  сложение USD и сомов дало бы число, которым нельзя
+                  пользоваться (docs/PRINCIPLES.md, принцип 21). */}
+              <ul className="mt-2 divide-y divide-border rounded-[10px] border border-border px-3">
+                {[...requirementTotals.entries()].map(([currency, total]) => (
+                  <li key={currency} className="flex items-center justify-between gap-3 py-2.5">
+                    <span className="t-secondary">Итого в валюте {currency}</span>
+                    <span className="num text-[13px] font-medium">{formatMoney(total, currency, 2)}</span>
+                  </li>
+                ))}
+              </ul>
+              {requirementTotals.size > 1 ? (
+                <p className="t-meta mt-2">
+                  Суммы в разных валютах не складываются: курс на дату закупки система не хранит.
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+
+          {requirementWithoutPrice.length > 0 ? (
+            <p className="mt-4 rounded-[10px] border border-warning/30 bg-warning/[0.06] px-3 py-2 text-[12px] font-medium text-warning">
+              Без закупочной цены на момент подтверждения:{" "}
+              {requirementWithoutPrice.map((row) => row.materialName).join(", ")} — потребность посчитана, стоимость нет.
+            </p>
+          ) : null}
         </div>
       );
     }
@@ -612,20 +725,23 @@ export function BatchPassportPage() {
             </div>
           </div>
           {snapshot ? (
-            <div className="mt-2 grid grid-cols-1 gap-px bg-border sm:grid-cols-2 xl:grid-cols-4">
+            <div className="mt-2 grid grid-cols-1 gap-px bg-border sm:grid-cols-2 xl:grid-cols-3">
               <div className="bg-card">
                 <MoneyBlock
                   label="Сумма партии"
-                  value={batchSum ?? 0}
-                  sub={`по спецификации, ${formatQuantity(plannedQuantity, "шт")}`}
+                  value={batchSum}
+                  currency="руб"
+                  decimals={2}
+                  sub={`по спецификации, ${formatQuantity(plannedQuantity, "изделий")}`}
                 />
               </div>
               <div className="bg-card">
                 <MoneyBlock
-                  label="Цена в спецификации"
-                  value={snapshot.specificationPricePerUnit}
+                  label="Цена за изделие"
+                  value={agreedUnitPrice}
+                  currency="руб"
                   decimals={2}
-                  sub="за единицу"
+                  sub="согласована с цехом"
                 />
               </div>
               <div className="bg-card">
@@ -633,16 +749,7 @@ export function BatchPassportPage() {
                   label="Себестоимость факт"
                   value={snapshot.actualCostPerUnit}
                   decimals={2}
-                  sub="за единицу"
-                />
-              </div>
-              <div className="bg-card">
-                <MoneyBlock
-                  label="Разница (нал.)"
-                  value={snapshot.deductionPerUnit}
-                  decimals={2}
-                  sub="за единицу"
-                  tone="warning"
+                  sub="за изделие, на момент подтверждения"
                 />
               </div>
             </div>
@@ -765,11 +872,11 @@ export function BatchPassportPage() {
 
       {/* Разделы без источника данных. В прототипе им соответствия нет —
           показываем честные пустые состояния, а не выдуманные нули. */}
-      <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-3">
+      <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
         {[
           {
-            title: "Материалы",
-            hint: "Что уже куплено, что заказано, чего не хватает для кроя — автоматически по нормам расхода модели и остаткам склада. Ждёт реализации.",
+            title: "Раскрой",
+            hint: "Сколько ткани выделено на партию и сколько фактически ушло. Потребность уже посчитана — в разделе «Нормы расхода материалов»; сам раскрой ждёт следующего этапа.",
           },
           {
             title: "ОТК и брак",

@@ -127,6 +127,13 @@
       "when": 1785796101032,
       "tag": "0017_loose_taskmaster",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1788092732256,
+      "tag": "0018_sloppy_sharon_carter",
+      "breakpoints": true
     }
   ]
 }

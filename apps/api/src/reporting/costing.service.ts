@@ -1,6 +1,6 @@
 import { Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { materials, purchaseOrderItems, purchaseOrders, type Database } from "@garmentos/db-schema";
-import type { SpecificationPricingResponseDto } from "@garmentos/shared-types";
+import type { ProductionOrderMaterialNorm, SpecificationPricingResponseDto } from "@garmentos/shared-types";
 import { and, desc, eq } from "drizzle-orm";
 import { BomService } from "../bom/bom.service";
 import { CatalogService } from "../catalog/catalog.service";
@@ -82,15 +82,72 @@ export class CostingService {
     };
   }
 
+  // Снимает нормы расхода модели вместе с ценой и валютой каждого материала
+  // на текущий момент (Pilot v1, этап 4). Вызывается один раз — при
+  // подтверждении заказа, результат замораживается в снимке партии и больше
+  // не пересчитывается: изменение карточки модели не должно менять уже
+  // созданную партию.
+  //
+  // Отдельный метод, а не расширение computeSpecificationPricing: тот считает
+  // деньги и суммирует статьи, здесь же нужны сами нормы построчно, включая
+  // материалы без истории закупок — их нельзя пропустить, потребность в
+  // ткани по ним всё равно считается.
+  async captureMaterialNorms(companyId: string, productId: string): Promise<ProductionOrderMaterialNorm[]> {
+    const bom = await this.bomService.getApproved(companyId, { productId });
+    if (!bom) return [];
+
+    const norms: ProductionOrderMaterialNorm[] = [];
+    for (const item of bom.items) {
+      const material = await this.findMaterial(item.materialId);
+      const price = await this.findLastPurchase(companyId, item.materialId);
+      norms.push({
+        materialId: item.materialId,
+        materialName: material?.name ?? item.materialId,
+        materialType: material?.type ?? "trim",
+        unit: material?.unit ?? "",
+        quantityPerUnit: Number(item.quantityPerUnit),
+        wastePercent: Number(item.wastePercent),
+        lastPurchasePrice: price?.unitPrice ?? null,
+        priceCurrency: price?.currency ?? null,
+      });
+    }
+    return norms;
+  }
+
+  async findApprovedBomVersion(companyId: string, productId: string): Promise<number | null> {
+    const bom = await this.bomService.getApproved(companyId, { productId });
+    return bom ? bom.version : null;
+  }
+
   private async findLastPurchasePrice(companyId: string, materialId: string): Promise<number | null> {
+    const row = await this.findLastPurchase(companyId, materialId);
+    return row ? row.unitPrice : null;
+  }
+
+  // Последняя закупочная цена вместе с валютой закупки. Валюта берётся из
+  // самой закупки, а не выводится из типа материала: вывод был бы скрытым
+  // правилом, которое молча сломается на первой упаковке за доллары.
+  private async findLastPurchase(
+    companyId: string,
+    materialId: string,
+  ): Promise<{ unitPrice: number; currency: string | null } | null> {
     const [row] = await this.db
-      .select({ unitPrice: purchaseOrderItems.unitPrice })
+      .select({ unitPrice: purchaseOrderItems.unitPrice, currency: purchaseOrders.currency })
       .from(purchaseOrderItems)
       .innerJoin(purchaseOrders, eq(purchaseOrders.id, purchaseOrderItems.purchaseOrderId))
       .where(and(eq(purchaseOrders.companyId, companyId), eq(purchaseOrderItems.materialId, materialId)))
       .orderBy(desc(purchaseOrders.orderedAt))
       .limit(1);
-    return row ? Number(row.unitPrice) : null;
+    return row ? { unitPrice: Number(row.unitPrice), currency: row.currency } : null;
+  }
+
+  private async findMaterial(materialId: string): Promise<{ name: string; type: string; unit: string } | null> {
+    const [row] = await this.db
+      .select({ name: materials.name, type: materials.type, unit: materials.unit })
+      .from(materials)
+      .where(eq(materials.id, materialId))
+      .limit(1);
+    return row ?? null;
   }
 
   private async findMaterialType(materialId: string): Promise<string> {

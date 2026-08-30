@@ -156,6 +156,29 @@ export const productionOrderVariantResponseSchema = z.object({
 // именно этот снимок, а не текущие карточки, служит источником данных для
 // каждой спецификации, сгенерированной по этому заказу (в т.ч. повторно
 // через месяц).
+// Норма расхода одного материала, зафиксированная в момент подтверждения
+// заказа (Pilot v1, этап 4). Владелец проекта, требование исторической
+// памяти: «Стеганка 2,6 м → партия хранит 2,6; позже норма стала 2,4 →
+// новая партия получает 2,4, старая остаётся 2,6».
+//
+// До этого этапа снимок замораживал только деньги, а сама норма читалась из
+// живой карточки модели — то есть у старой партии она менялась задним
+// числом. Теперь норма лежит в снимке рядом с ценой.
+export const productionOrderMaterialNormSchema = z.object({
+  materialId: z.string().uuid(),
+  materialName: z.string(),
+  materialType: z.string(),
+  unit: z.string(),
+  quantityPerUnit: z.number(),
+  wastePercent: z.number(),
+  // Цена материала на момент снимка и её валюта. null, когда закупок этого
+  // материала ещё не было или валюта в закупке не указана — подставлять
+  // ноль или угадывать валюту нельзя (принцип 21: не смешивать контуры).
+  lastPurchasePrice: z.number().nullable(),
+  priceCurrency: z.string().nullable(),
+});
+export type ProductionOrderMaterialNorm = z.infer<typeof productionOrderMaterialNormSchema>;
+
 export const productionOrderCostSnapshotSchema = z.object({
   capturedAt: z.string(),
   fabricCostPerUnit: z.number(),
@@ -176,6 +199,11 @@ export const productionOrderCostSnapshotSchema = z.object({
   contractorSignerRole: z.string(),
   contractorSignerName: z.string(),
   customerSignerName: z.string(),
+  // Нормы расхода и версия, по которой они взяты (Pilot v1, этап 4).
+  // Необязательны: у партий, подтверждённых раньше, этих полей нет, и
+  // интерфейс честно показывает, что нормы для них не сохранялись.
+  materialNormsVersion: z.number().optional(),
+  materialNorms: z.array(productionOrderMaterialNormSchema).optional(),
 });
 export type ProductionOrderCostSnapshot = z.infer<typeof productionOrderCostSnapshotSchema>;
 
