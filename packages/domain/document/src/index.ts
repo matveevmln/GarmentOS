@@ -23,6 +23,7 @@ export type {
   NewDocumentInput,
   NewDocumentLinkInput,
   StorageAdapter,
+  StoredFile,
 } from "./application/ports";
 export {
   attachDocument,
@@ -36,6 +37,12 @@ export {
   type GenerateSpecificationDocumentDeps,
   type GenerateSpecificationDocumentInput,
 } from "./application/generate-specification-document";
+export {
+  uploadDocument,
+  resolveContentType,
+  type UploadDocumentDeps,
+  type UploadDocumentInput,
+} from "./application/upload-document";
 export {
   regenerateSpecificationDocument,
   type RegenerateSpecificationDocumentInput,

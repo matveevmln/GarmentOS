@@ -38,10 +38,17 @@ async function runInRolledBackTransaction(fn: (tx: DbOrTx) => Promise<void>): Pr
 // паттерн, что plainTextVerifier в packages/domain/identity/src/rbac-auth.spec.ts).
 class FakeStorageAdapter implements StorageAdapter {
   public readonly uploaded: Array<{ key: string; contentType: string }> = [];
+  private readonly files = new Map<string, { data: Uint8Array; contentType: string }>();
 
-  upload(key: string, _data: Uint8Array, contentType: string): Promise<{ url: string }> {
+  upload(key: string, data: Uint8Array, contentType: string): Promise<{ url: string }> {
     this.uploaded.push({ key, contentType });
-    return Promise.resolve({ url: `https://fake-storage.local/${key}` });
+    const url = `https://fake-storage.local/${key}`;
+    this.files.set(url, { data, contentType });
+    return Promise.resolve({ url });
+  }
+
+  download(fileUrl: string): Promise<{ data: Uint8Array; contentType: string } | null> {
+    return Promise.resolve(this.files.get(fileUrl) ?? null);
   }
 }
 

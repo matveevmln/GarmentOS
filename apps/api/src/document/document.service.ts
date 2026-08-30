@@ -2,7 +2,10 @@ import { Inject, Injectable } from "@nestjs/common";
 import {
   generateSpecificationDocument,
   listDocumentsForEntity,
+  uploadDocument,
   type AttachDocumentResult,
+  type StoredFile,
+  type UploadDocumentInput,
   type DocumentDerivativeRepository,
   type DocumentEntity,
   type DocumentLinkRepository,
@@ -69,5 +72,24 @@ export class DocumentService {
 
   async findById(companyId: string, id: string): Promise<DocumentEntity | null> {
     return this.documents.findById(companyId, id);
+  }
+
+  // Загрузка документа, пришедшего извне. Тот же Document Engine, что и у
+  // сформированных системой документов: те же таблицы, та же версионность,
+  // то же хранилище. Отличие одно — источник связи `manual` вместо `ai`.
+  async upload(input: UploadDocumentInput): Promise<AttachDocumentResult> {
+    return uploadDocument(
+      { documents: this.documents, documentLinks: this.documentLinks, storage: this.storage },
+      input,
+    );
+  }
+
+  // Байты документа отдаются через API, а не редиректом на адрес хранилища:
+  // бакет приватный, и права проверяются до выдачи файла.
+  async readFile(companyId: string, id: string): Promise<{ document: DocumentEntity; file: StoredFile } | null> {
+    const document = await this.documents.findById(companyId, id);
+    if (!document) return null;
+    const file = await this.storage.download(document.fileUrl);
+    return file ? { document, file } : null;
   }
 }

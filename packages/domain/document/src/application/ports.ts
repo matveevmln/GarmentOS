@@ -68,8 +68,20 @@ export interface DocumentDerivativeRepository {
 // За интерфейсом (docs/INFRASTRUCTURE.md, раздел 2.3; docs/DOCUMENT_ENGINE_ARCHITECTURE.md,
 // раздел 1) — конкретная реализация (S3-совместимое хранилище/MinIO в проде,
 // локальная файловая система для тестов) не зашита в домен.
+export interface StoredFile {
+  data: Uint8Array;
+  contentType: string;
+}
+
 export interface StorageAdapter {
   upload(key: string, data: Uint8Array, contentType: string): Promise<{ url: string }>;
+  // Чтение по тому же адресу, который вернул upload. Раньше файл отдавался
+  // редиректом на этот адрес, но приватный бакет по прямой ссылке недоступен
+  // — а публичный бакет означал бы, что договоры и спецификации компании
+  // читает любой, кто знает адрес. Поэтому байты проходят через API, где уже
+  // проверены вход и права; формат адреса знает сам адаптер, документ хранит
+  // только строку.
+  download(fileUrl: string): Promise<StoredFile | null>;
 }
 
 // DocumentRenderAdapter (docs/DOCUMENT_ENGINE_ARCHITECTURE.md, раздел 2) —

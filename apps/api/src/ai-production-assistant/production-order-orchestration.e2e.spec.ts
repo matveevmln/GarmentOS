@@ -432,5 +432,76 @@ describe("Вертикальный сценарий Итерации 7 (e2e): т
       .set(...authHeader(accessToken))
       .send({})
       .expect(400);
+
+    // Pilot v1, этап 3 — документ, пришедший извне, ложится в ту же партию
+    // тем же Document Engine. Проверяется здесь, а не отдельным файлом,
+    // потому что нужна уже подтверждённая партия из этого же сценария.
+    const pdfBytes = Buffer.from("%PDF-1.7\n% подписанный скан\n%%EOF\n", "utf8");
+
+    const uploaded = (
+      await request(httpServer)
+        .post("/v1/documents")
+        .set(...authHeader(accessToken))
+        .field("docType", "specification_signed")
+        .field("entityType", "production_order")
+        .field("entityId", order.id)
+        .field("title", "Спецификация №1 (подписана)")
+        .field("issuedAt", "2026-08-20")
+        .attach("file", pdfBytes, "signed.pdf")
+        .expect(201)
+    ).body as DocumentResponseDto;
+    expect(uploaded.docType).toBe("specification_signed");
+    expect(uploaded.uploadedBy).not.toBeNull();
+    expect(uploaded.isCurrentVersion).toBe(true);
+
+    // Скачивается ровно то, что загружено — байт в байт.
+    const downloaded = await request(httpServer)
+      .get(`/v1/documents/${uploaded.id}/file`)
+      .set(...authHeader(accessToken))
+      .expect(200);
+    expect(Buffer.from(downloaded.body as Buffer).equals(pdfBytes)).toBe(true);
+
+    // Новая редакция не удаляет прежнюю: обе остаются в истории партии.
+    const secondVersion = (
+      await request(httpServer)
+        .post("/v1/documents")
+        .set(...authHeader(accessToken))
+        .field("docType", "specification_signed")
+        .field("entityType", "production_order")
+        .field("entityId", order.id)
+        .field("supersedesDocumentId", uploaded.id)
+        .attach("file", pdfBytes, "signed-v2.pdf")
+        .expect(201)
+    ).body as DocumentResponseDto;
+    expect(secondVersion.supersedesDocumentId).toBe(uploaded.id);
+
+    const documentsOfOrder = (
+      await request(httpServer)
+        .get(`/v1/documents?entityType=production_order&entityId=${order.id}`)
+        .set(...authHeader(accessToken))
+        .expect(200)
+    ).body as DocumentResponseDto[];
+    const signedVersions = documentsOfOrder.filter((doc) => doc.docType === "specification_signed");
+    expect(signedVersions).toHaveLength(2);
+    expect(signedVersions.filter((doc) => doc.isCurrentVersion)).toHaveLength(1);
+
+    // Файл обязателен, расширение проверяется — в хранилище не попадает
+    // произвольный файл, который потом нечем открыть.
+    await request(httpServer)
+      .post("/v1/documents")
+      .set(...authHeader(accessToken))
+      .field("docType", "invoice")
+      .field("entityType", "production_order")
+      .field("entityId", order.id)
+      .expect(400);
+
+    await request(httpServer)
+      .post("/v1/documents")
+      .set(...authHeader(accessToken))
+      .field("docType", "invoice")
+      .field("entityType", "production_order")
+      .field("entityId", order.id)
+      .attach("file", Buffer.from("не документ", "utf8"), "note.txt")
+      .expect(400);
   });
 });

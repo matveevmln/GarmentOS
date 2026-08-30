@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import type { BatchPassportResponseDto, DocumentResponseDto } from "@garmentos/shared-types";
-import { apiDownload, apiRequest, ApiError } from "../api/client";
+import { apiDownload, apiRequest, apiUpload, ApiError } from "../api/client";
 import { Card, CardTitle, SectionLabel } from "../design-system/Card/Card";
 import { StatusBadge } from "../design-system/StatusBadge/StatusBadge";
 import { Button } from "../design-system/Button/Button";
@@ -28,6 +28,11 @@ import {
   DialogHeader,
   DialogTitle,
 } from "../design-system/Modal/Dialog";
+import { Upload } from "../design-system/Upload/Upload";
+import { Field } from "../design-system/Form/Field";
+import { Input } from "../design-system/Input/Input";
+import { DatePicker } from "../design-system/Form/DatePicker";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../design-system/Select/Select";
 import { statusMeta } from "../lib/status";
 import { formatDate, formatMoney, formatQuantity } from "../lib/format";
 import { cn } from "../design-system/utils";
@@ -64,11 +69,27 @@ const DOC_TYPE_LABELS: Record<string, string> = {
   invoice: "Счёт",
   contract: "Договор",
   act: "Акт",
+  waybill: "Накладная",
+  photo: "Фото",
+  other: "Другое",
 };
 
 function documentTypeLabel(docType: string): string {
   return DOC_TYPE_LABELS[docType] ?? docType;
 }
+
+// Типы, которые предлагаются при загрузке. Список — подсказка, а не
+// ограничение: в базе тип остаётся свободной строкой, потому что словарь
+// документов у каждой компании свой.
+const UPLOADABLE_DOC_TYPES = [
+  "specification_signed",
+  "invoice",
+  "contract",
+  "act",
+  "waybill",
+  "photo",
+  "other",
+] as const;
 
 const TABS: { key: TabKey; label: string }[] = [
   { key: "cost", label: "Себестоимость" },
@@ -88,6 +109,11 @@ export function BatchPassportPage() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [confirmRegenerate, setConfirmRegenerate] = useState(false);
   const [tab, setTab] = useState<TabKey>("cost");
+  const [uploadFiles, setUploadFiles] = useState<File[]>([]);
+  const [uploadDocType, setUploadDocType] = useState<string>("specification_signed");
+  const [uploadTitle, setUploadTitle] = useState("");
+  const [uploadIssuedAt, setUploadIssuedAt] = useState<Date | undefined>(undefined);
+  const [isUploading, setIsUploading] = useState(false);
 
   const load = () => {
     if (!id) return;
@@ -123,6 +149,39 @@ export function BatchPassportPage() {
     } finally {
       setIsGenerating(false);
       setConfirmRegenerate(false);
+    }
+  };
+
+  // Загрузка документа, пришедшего извне: подписанная спецификация, счёт,
+  // накладная. Файл уходит в хранилище, запись — в базу, связь — с этой
+  // партией. Содержимое файла данные партии не меняет: документ ложится
+  // рядом с ними, а не поверх.
+  const uploadDocument = async () => {
+    if (!id) return;
+    const file = uploadFiles[0];
+    if (!file) {
+      toast.error("Выберите файл");
+      return;
+    }
+    setIsUploading(true);
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      form.append("docType", uploadDocType);
+      form.append("entityType", "production_order");
+      form.append("entityId", id);
+      if (uploadTitle.trim()) form.append("title", uploadTitle.trim());
+      if (uploadIssuedAt) form.append("issuedAt", uploadIssuedAt.toISOString().slice(0, 10));
+      await apiUpload<DocumentResponseDto>("/documents", form);
+      setUploadFiles([]);
+      setUploadTitle("");
+      setUploadIssuedAt(undefined);
+      load();
+      toast.success("Документ загружен", { description: documentTypeLabel(uploadDocType) });
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Не удалось загрузить документ");
+    } finally {
+      setIsUploading(false);
     }
   };
 
@@ -201,6 +260,63 @@ export function BatchPassportPage() {
     share: costUnitTotal > 0 ? Math.round((row.unitCost / costUnitTotal) * 100) : 0,
   }));
 
+  // Форма загрузки показывается и при пустом списке документов, и под
+  // существующим: документ приходит от контрагента в любой момент жизни
+  // партии, а не только «после спецификации».
+  const uploadForm = (
+    <div className="mt-4 rounded-[10px] border border-border bg-secondary/50 p-3.5">
+      <SectionLabel>Загрузить документ</SectionLabel>
+      <p className="t-meta mt-1.5 mb-3">
+        Подписанная спецификация, счёт, накладная. Файл сохраняется в партии и не меняет её данные.
+      </p>
+      <div className="flex flex-col gap-3">
+        <Upload
+          files={uploadFiles}
+          onChange={setUploadFiles}
+          accept="application/pdf,image/jpeg,image/png"
+          multiple={false}
+          label="Перетащите файл сюда или нажмите"
+          hint="PDF, JPG или PNG до 20 МБ"
+        />
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+          <Field label="Тип документа">
+            <Select value={uploadDocType} onValueChange={setUploadDocType}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {UPLOADABLE_DOC_TYPES.map((type) => (
+                  <SelectItem key={type} value={type}>
+                    {documentTypeLabel(type)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </Field>
+          <Field label="Название" hint={<span className="t-meta">необязательно</span>}>
+            <Input
+              value={uploadTitle}
+              onChange={(event) => setUploadTitle(event.target.value)}
+              placeholder="Имя файла, если не указано"
+            />
+          </Field>
+          <Field label="Дата документа" hint={<span className="t-meta">необязательно</span>}>
+            <DatePicker value={uploadIssuedAt} onChange={setUploadIssuedAt} />
+          </Field>
+        </div>
+        <Button
+          size="sm"
+          className="md:self-start"
+          loading={isUploading}
+          disabled={uploadFiles.length === 0}
+          onClick={() => void uploadDocument()}
+        >
+          Загрузить документ
+        </Button>
+      </div>
+    </div>
+  );
+
   const renderTab = (key: TabKey) => {
     if (key === "cost") {
       if (!snapshot) {
@@ -270,22 +386,25 @@ export function BatchPassportPage() {
     if (key === "docs") {
       if (passport.documents.length === 0) {
         return (
-          <EmptyState
-            compact
-            title="Спецификация ещё не сформирована"
-            description={
-              canGenerate
-                ? "Сформируйте спецификацию — она появится здесь и будет доступна для скачивания."
-                : "Спецификация формируется по подтверждённому заказу. Сначала подтвердите заказ в списке заказов пошива."
-            }
-            action={
-              canGenerate ? (
-                <Button size="sm" loading={isGenerating} onClick={() => void generateSpecification()}>
-                  Сформировать спецификацию
-                </Button>
-              ) : undefined
-            }
-          />
+          <div>
+            <EmptyState
+              compact
+              title="Документов пока нет"
+              description={
+                canGenerate
+                  ? "Сформируйте спецификацию или загрузите документ, полученный от цеха."
+                  : "Спецификация формируется по подтверждённому заказу. Сначала подтвердите заказ в списке заказов пошива."
+              }
+              action={
+                canGenerate ? (
+                  <Button size="sm" loading={isGenerating} onClick={() => void generateSpecification()}>
+                    Сформировать спецификацию
+                  </Button>
+                ) : undefined
+              }
+            />
+            {uploadForm}
+          </div>
         );
       }
       return (
@@ -316,6 +435,7 @@ export function BatchPassportPage() {
               </Button>
             </div>
           ) : null}
+          {uploadForm}
         </div>
       );
     }

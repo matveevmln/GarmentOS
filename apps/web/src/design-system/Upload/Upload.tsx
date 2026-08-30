@@ -15,9 +15,20 @@ interface UploadProps {
   accept?: string;
   multiple?: boolean;
   hint?: string;
+  /** Подпись зоны. По умолчанию — про фото: первым сценарием была съёмка
+   *  ткани и брака. Для документов передаётся своя, иначе зона предлагает
+   *  перетащить фото туда, куда кладут PDF. */
+  label?: string;
 }
 
-export function Upload({ files, onChange, accept = "image/*", multiple = true, hint }: UploadProps) {
+export function Upload({
+  files,
+  onChange,
+  accept = "image/*",
+  multiple = true,
+  hint,
+  label = "Перетащите фото сюда или нажмите",
+}: UploadProps) {
   const [dragOver, setDragOver] = useState(false);
   const [previewFile, setPreviewFile] = useState<File | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -54,7 +65,7 @@ export function Upload({ files, onChange, accept = "image/*", multiple = true, h
         <span className="flex h-10 w-10 items-center justify-center rounded-full bg-accent text-accent-foreground">
           <UploadIcon className="h-4 w-4" />
         </span>
-        <span className="text-[0.85rem] font-bold text-foreground">Перетащите фото сюда или нажмите</span>
+        <span className="text-[0.85rem] font-bold text-foreground">{label}</span>
         {hint && <span className="text-[0.75rem] text-muted-foreground">{hint}</span>}
         <input
           ref={inputRef}

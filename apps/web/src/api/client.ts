@@ -123,6 +123,42 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
   return (await response.json()) as T;
 }
 
+// Отдельно от apiRequest — та же схема авторизации и обновления токена, но
+// тело запроса не JSON, а multipart (файл + поля формы). Content-Type здесь
+// НЕ выставляется вручную: браузер сам добавит его вместе с boundary, без
+// которого сервер не разберёт составной запрос.
+export async function apiUpload<T>(path: string, form: FormData): Promise<T> {
+  const headers: Record<string, string> = {};
+  const token = getAccessToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
+
+  const doFetch = () => fetch(`${API_BASE_URL}${path}`, { method: "POST", headers, body: form });
+
+  let response = await doFetch();
+  if (response.status === 401) {
+    const newToken = await refreshAccessToken();
+    if (newToken) {
+      headers.Authorization = `Bearer ${newToken}`;
+      response = await doFetch();
+    }
+  }
+
+  if (!response.ok) {
+    let code: string | undefined;
+    let message = `Ошибка загрузки (${response.status})`;
+    try {
+      const errorBody = (await response.json()) as { code?: string; message?: string };
+      code = errorBody.code;
+      message = errorBody.message ?? message;
+    } catch {
+      // тело ответа не JSON — оставляем сообщение по умолчанию
+    }
+    throw new ApiError(response.status, code, message);
+  }
+
+  return (await response.json()) as T;
+}
+
 // Отдельно от apiRequest — та же схема авторизации/refresh, но ответ не
 // JSON (PDF), а бинарные данные (Паспорт партии, раздел «Документы»:
 // «Открыть» должен реально открыть файл, не просто показать его имя).
