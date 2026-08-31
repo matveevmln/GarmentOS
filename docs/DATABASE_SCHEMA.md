@@ -237,7 +237,8 @@ flowchart TD
 |---|---|---|
 | `collections` | `id`, `company_id`, `name` (например, «Осень 2026»), `season` (`spring/summer/autumn/winter` NULL), `year`, `status` (`planning/active/archived`) | **Новая сущность.** Сезонная коллекция — единица планирования ассортимента, группирует модели |
 | `products` | `id`, `company_id`, `collection_id NULL`, `name`, `code` (артикул модели), `category`, `season`, `status` (`draft/active/discontinued`), `tech_pack_url` | Модель одежды на уровне абстракции, без размера/цвета. `collection_id` — nullable: не каждая модель обязана входить в формальную коллекцию. `tech_pack_url` — ссылка на текущий файл спецификации (через `StorageAdapter`); архив версий/доп. соглашений — через `documents` (см. п.16) |
-| `product_variants` | `id`, `product_id`, `size`, `color`, `sku_code` (уникальный внутри компании), `barcode` (EAN/GTIN) | Конкретный SKU — единица учёта остатков и продаж |
+| `product_variants` | `id`, `product_id`, `size`, `color`, `sku_code` (уникальный внутри компании), `barcode` (EAN/GTIN) | Конкретный SKU — единица учёта остатков и продаж. Уникальный индекс `(product_id, size, color)` — добавлен этапом 5 (2026-08-31, миграция `0020`), с предварительной проверкой на дубли перед созданием (падает и перечисляет конкретные строки, если дубли уже есть, ничего не чинит автоматически) |
+| `product_sizes` | `id`, `product_id`, `size`, `sort_order`, `ratio_weight` | **Новая таблица, этап 5.** Размерный ряд модели: `sort_order` — единственный источник порядка размеров (48-50 раньше 52-54), `ratio_weight` — вес размера в пропорции для раскладки количества (например, 185/381/381/381/186 — веса, не проценты, масштабируются на любой объём заказа). Уникальный индекс `(product_id, size)`. Версий не имеет: раскладка фиксируется не здесь, а в строках уже созданного заказа (`production_order_variants`) |
 
 ## 6. Materials & Procurement
 
@@ -268,6 +269,27 @@ flowchart TD
 | `production_order_variants` | `production_order_id`, `product_variant_id`, `quantity` | Разбивка заказа по размеру/цвету (SKU). Фактически принятое количество по SKU — не отдельная колонка, а read-model: сумма `stock_movements` типа `receipt` со ссылкой на этот заказ (`reference_type='production_order'`), сгруппированная по `product_variant_id` — см. `USER_JOURNEY_AUDIT.md`, шаг 7 |
 
 **Не в MVP, возможно в Future**: `production_batches` — если появится потребность дробить один заказ на несколько независимо отслеживаемых партий поставки.
+
+### 8а. Раскрой (этап 5, 2026-08-31)
+
+Следующий шаг производства после размещения заказа. Строится автоматически из данных
+заказа (матрица размер × цвет — из `production_order_variants`, потребность в материалах —
+из замороженных норм в `production_orders.cost_snapshot`), собственного статуса заказа не
+меняет — у раскроя своё состояние. Один заказ может получить несколько раскройных заданий
+подряд (докрой).
+
+| Таблица | Ключевые поля | Комментарий |
+|---|---|---|
+| `cutting_orders` | `id`, `company_id`, `production_order_id`, `number` (порядковый внутри заказа — докрой получает следующий), `status` (`draft/issued/completed/cancelled`), `executor_type` (`in_house/workshop`), `executor_workshop_id NULL` (обязателен при `workshop`, запрещён при `in_house` — тот же инвариант, что у `warehouses.workshop_id`), `issued_at NULL`, `completed_at NULL`, `comment NULL`, `created_by` | Раскройное задание. Уникальность `(production_order_id, number)`, а не `(production_order_id)` — докрой разрешён |
+| `cutting_order_materials` | `id`, `cutting_order_id`, `material_id`, `unit`, `required_quantity`, `allocated_quantity NULL`, `consumed_quantity NULL`, `roll_note NULL` | План / выделено / факт по каждому материалу задания. `required_quantity` фиксируется при выдаче в крой и не пересчитывается фактом. Рулоны — только текстовый комментарий, отдельной сущности нет (решение владельца: не заставлять систему моделировать каждый рулон) |
+| `cutting_order_results` | `id`, `cutting_order_id`, `product_variant_id`, `planned_quantity`, `actual_quantity NULL` | Результат кроя по одной ячейке размер × цвет. Измеряется в готовых комплектах — расхождение «4542 верха и 4300 подкладов» структурно невозможно, так как количество по каждому материалу отдельно не хранится |
+
+Склад: создание и выдача задания склад не трогают. Единственная точка расхода —
+внесение факта (`consumeMaterialStock` с `referenceType='cutting_order'`, для этого пути
+разрешён допустимый перерасход — остаток может уйти в минус, расхождение показывается
+предупреждением, а не блокирует факт). Исправление факта после завершения — движение
+`stock_movements.type='adjustment'` на разницу, история — в существующем `audit_log`,
+второй системы учёта не заводилось.
 
 **Не проектируется вовсе**: детальная стадийность («крой», «пошив», «ОТК») с привязкой к ответственному сотруднику — операционная модель штатного цеха, которого нет. Вместо неё — Inbox (раздел 15): цех сообщает о готовности в Telegram, AI предлагает обновить статус, эскалация при отсутствии обновлений (`USER_JOURNEY_AUDIT.md`, шаг 6).
 
