@@ -9,6 +9,7 @@ import {
   type CreateProductVariantDto,
   type MaterialResponseDto,
   type ProductResponseDto,
+  type ProductSizeResponseDto,
   type ProductVariantResponseDto,
 } from "@garmentos/shared-types";
 import { apiRequest, ApiError } from "../api/client";
@@ -18,7 +19,7 @@ import { EmptyState } from "../design-system/Feedback/EmptyState";
 import { StatusBadge } from "../design-system/StatusBadge/StatusBadge";
 import { Field } from "../design-system/Form/Field";
 import { PageHeader, Breadcrumbs } from "../design-system/PageHeader/PageHeader";
-import { Card, CardContent, CardHeader, CardTitle } from "../design-system/Card/Card";
+import { Card, CardContent, CardHeader, CardTitle, SectionLabel } from "../design-system/Card/Card";
 import { Input } from "../design-system/Input/Input";
 import { Combobox } from "../design-system/Select/Combobox";
 import { NumberInput } from "../design-system/Input/NumberInput";
@@ -56,10 +57,89 @@ export function ProductDetailPage() {
   const [pendingQuantity, setPendingQuantity] = useState<number | undefined>(undefined);
   const [pendingWaste, setPendingWaste] = useState<number | undefined>(undefined);
 
+  // Размерный ряд: порядок размеров и веса раскладки (владелец проекта,
+  // 2026-08-30). Живёт отдельным состоянием, потому что редактируется целиком
+  // и сохраняется одной кнопкой — порядок и веса меняются вместе.
+  const [sizeRows, setSizeRows] = useState<ProductSizeResponseDto[]>([]);
+  const [isSavingSizes, setIsSavingSizes] = useState(false);
+  const [previewQuantity, setPreviewQuantity] = useState<number | undefined>(500);
+  const [newColor, setNewColor] = useState("");
+  const [newColorCode, setNewColorCode] = useState("");
+  const [isAddingColor, setIsAddingColor] = useState(false);
+
+  const loadSizes = () => {
+    if (!id) return;
+    void apiRequest<ProductSizeResponseDto[]>(`/products/${id}/sizes`).then(setSizeRows).catch(() => setSizeRows([]));
+  };
+  useEffect(loadSizes, [id]);
+
+  // Живой предпросмотр: «на 500 изделий получится 61 / 126 / 126 / 126 / 61».
+  // Считается тем же методом наибольших остатков, что и на сервере, — числа
+  // сходятся, а пользователь видит результат до сохранения.
+  const previewSizes = (): number[] => {
+    const total = previewQuantity ?? 0;
+    const weights = sizeRows.map((row) => row.ratioWeight);
+    const sum = weights.reduce((acc, w) => acc + w, 0);
+    if (total <= 0 || sum <= 0) return sizeRows.map(() => 0);
+    const raw = weights.map((w) => (w / sum) * total);
+    const base = raw.map((value) => Math.floor(value));
+    let remainder = total - base.reduce((acc, value) => acc + value, 0);
+    const order = raw
+      .map((value, index) => ({ index, fraction: value - Math.floor(value) }))
+      .sort((a, b) => b.fraction - a.fraction || a.index - b.index);
+    for (const { index } of order) {
+      if (remainder <= 0) break;
+      base[index] = (base[index] ?? 0) + 1;
+      remainder -= 1;
+    }
+    return base;
+  };
+
+  const saveSizes = async () => {
+    if (!id) return;
+    setIsSavingSizes(true);
+    try {
+      const saved = await apiRequest<ProductSizeResponseDto[]>(`/products/${id}/sizes`, {
+        method: "PUT",
+        body: { sizes: sizeRows.map((row) => ({ size: row.size, ratioWeight: row.ratioWeight })) },
+      });
+      setSizeRows(saved);
+      toast.success("Размерный ряд сохранён", {
+        description: "Новые заказы получат эту раскладку. Созданные ранее заказы не изменятся.",
+      });
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Не удалось сохранить размерный ряд");
+    } finally {
+      setIsSavingSizes(false);
+    }
+  };
+
+  const addColor = async () => {
+    if (!id || !newColor.trim() || !newColorCode.trim()) return;
+    setIsAddingColor(true);
+    try {
+      const res = await apiRequest<{ created: number; skipped: number }>(`/products/${id}/colors`, {
+        method: "POST",
+        body: { color: newColor.trim(), colorCode: newColorCode.trim() },
+      });
+      setNewColor("");
+      setNewColorCode("");
+      await reloadVariants();
+      toast.success(`Цвет добавлен на все размеры`, {
+        description: `Создано вариантов: ${res.created}${res.skipped ? `, уже было: ${res.skipped}` : ""}`,
+      });
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Не удалось добавить цвет");
+    } finally {
+      setIsAddingColor(false);
+    }
+  };
+
   const {
     items: variants,
     isLoading: variantsLoading,
     create: createVariant,
+    reload: reloadVariants,
   } = useCrudResource<ProductVariantResponseDto, CreateProductVariantDto>(`/product-variants?productId=${id}`);
 
   const {
@@ -199,6 +279,173 @@ export function ProductDetailPage() {
           />
         }
       />
+
+      {/* Размерный ряд — источник порядка размеров и пропорции раскладки для
+          НОВЫХ заказов. Уже созданные заказы правка не затрагивает: их
+          матрица хранится собственными строками. */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Размерный ряд</CardTitle>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-4">
+          <p className="t-secondary">
+            Задайте размеры по порядку и их соотношение своими рабочими числами — например 185 / 381 / 381 / 381 / 186.
+            Это пропорция, а не готовое количество: система разложит по ней любой объём заказа.
+          </p>
+
+          <div className="flex flex-col gap-2">
+            {sizeRows.map((row, index) => (
+              <div key={index} className="flex flex-wrap items-end gap-2 rounded-[10px] border border-border bg-muted/40 p-2.5">
+                <Field label="Размер" className="min-w-[110px] flex-1">
+                  <Input
+                    value={row.size}
+                    onChange={(event) =>
+                      setSizeRows((prev) => prev.map((r, i) => (i === index ? { ...r, size: event.target.value } : r)))
+                    }
+                    placeholder="48-50"
+                  />
+                </Field>
+                <Field label="Доля" className="min-w-[100px] flex-1">
+                  <NumberInput
+                    value={row.ratioWeight}
+                    onChange={(value) =>
+                      setSizeRows((prev) => prev.map((r, i) => (i === index ? { ...r, ratioWeight: value ?? 0 } : r)))
+                    }
+                    min={0}
+                    decimals={2}
+                  />
+                </Field>
+                <div className="flex gap-1">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    disabled={index === 0}
+                    onClick={() =>
+                      setSizeRows((prev) => {
+                        const next = [...prev];
+                        const item = next[index];
+                        const above = next[index - 1];
+                        if (!item || !above) return prev;
+                        next[index - 1] = item;
+                        next[index] = above;
+                        return next;
+                      })
+                    }
+                    aria-label="Выше"
+                  >
+                    ↑
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    disabled={index === sizeRows.length - 1}
+                    onClick={() =>
+                      setSizeRows((prev) => {
+                        const next = [...prev];
+                        const item = next[index];
+                        const below = next[index + 1];
+                        if (!item || !below) return prev;
+                        next[index + 1] = item;
+                        next[index] = below;
+                        return next;
+                      })
+                    }
+                    aria-label="Ниже"
+                  >
+                    ↓
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => setSizeRows((prev) => prev.filter((_, i) => i !== index))}
+                    aria-label="Убрать размер"
+                  >
+                    Убрать
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={() =>
+                setSizeRows((prev) => [...prev, { size: "", sortOrder: prev.length, ratioWeight: 1 }])
+              }
+            >
+              Добавить размер
+            </Button>
+            {sizeRows.length === 0 && variants.length > 0 && (
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={() => {
+                  // Порядок берётся из порядка создания вариантов, доли —
+                  // равные. Это заготовка «чтобы было с чего начать», её
+                  // нужно поправить руками: угадывать пропорцию нельзя.
+                  const unique: string[] = [];
+                  for (const variant of variants) if (!unique.includes(variant.size)) unique.push(variant.size);
+                  setSizeRows(unique.map((size, index) => ({ size, sortOrder: index, ratioWeight: 1 })));
+                }}
+              >
+                Заполнить из существующих размеров
+              </Button>
+            )}
+            <Button type="button" size="sm" loading={isSavingSizes} disabled={sizeRows.length === 0} onClick={() => void saveSizes()}>
+              Сохранить размерный ряд
+            </Button>
+          </div>
+
+          {sizeRows.length > 0 && (
+            <div className="rounded-[10px] border border-border bg-secondary/50 p-3.5">
+              <div className="flex flex-wrap items-end gap-3">
+                <Field label="Проверить на количестве" className="min-w-[160px]">
+                  <NumberInput value={previewQuantity} onChange={setPreviewQuantity} min={0} />
+                </Field>
+                <p className="t-secondary pb-2">
+                  {sizeRows.map((row, index) => `${row.size || "?"} — ${previewSizes()[index] ?? 0}`).join(" · ")}
+                </p>
+              </div>
+              <p className="t-meta mt-1">
+                Сумма всегда точно равна количеству заказа. Правка ряда действует только на новые заказы.
+              </p>
+            </div>
+          )}
+
+          {/* Цвет добавляется сразу на все размеры ряда — иначе сетка
+              5 размеров × 3 цвета требует пятнадцати ручных операций. */}
+          <div className="rounded-[10px] border border-border bg-muted/40 p-3.5">
+            <SectionLabel>Добавить цвет на все размеры</SectionLabel>
+            <div className="mt-2 flex flex-wrap items-end gap-2">
+              <Field label="Цвет" className="min-w-[140px] flex-1">
+                <Input value={newColor} onChange={(event) => setNewColor(event.target.value)} placeholder="Петроль" />
+              </Field>
+              <Field label="Код цвета для артикула" className="min-w-[160px] flex-1">
+                <Input value={newColorCode} onChange={(event) => setNewColorCode(event.target.value)} placeholder="PETROL" />
+              </Field>
+              <Button
+                type="button"
+                size="sm"
+                loading={isAddingColor}
+                disabled={sizeRows.length === 0 || !newColor.trim() || !newColorCode.trim()}
+                onClick={() => void addColor()}
+              >
+                Добавить цвет
+              </Button>
+            </div>
+            {sizeRows.length === 0 && (
+              <p className="t-meta mt-2">Сначала задайте и сохраните размерный ряд.</p>
+            )}
+          </div>
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>

@@ -1,6 +1,12 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import type { BatchPassportResponseDto, DocumentResponseDto } from "@garmentos/shared-types";
+import type {
+  BatchPassportResponseDto,
+  CuttingFactResponseDto,
+  CuttingOrderResponseDto,
+  DocumentResponseDto,
+  WarehouseResponseDto,
+} from "@garmentos/shared-types";
 import { apiDownload, apiRequest, apiUpload, ApiError } from "../api/client";
 import { Card, CardTitle, SectionLabel } from "../design-system/Card/Card";
 import { StatusBadge } from "../design-system/StatusBadge/StatusBadge";
@@ -17,6 +23,7 @@ import {
   MoneyBlock,
   ProductionStepper,
   Timeline,
+  type CuttingStageState,
   isProductionStage,
   type CostRow,
 } from "../design-system/Blocks";
@@ -31,6 +38,7 @@ import {
 import { Upload } from "../design-system/Upload/Upload";
 import { Field } from "../design-system/Form/Field";
 import { Input } from "../design-system/Input/Input";
+import { NumberInput } from "../design-system/Input/NumberInput";
 import { DatePicker } from "../design-system/Form/DatePicker";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../design-system/Select/Select";
 import { statusMeta } from "../lib/status";
@@ -57,7 +65,7 @@ import { toast } from "../design-system/Toast/Toast";
 // соответствия нет, поэтому они показаны отдельными карточками через
 // перенесённый EmptyState, а не выдуманной вкладкой с нулями.
 
-type TabKey = "cost" | "materials" | "docs" | "colors" | "contract" | "history";
+type TabKey = "cost" | "materials" | "cutting" | "docs" | "colors" | "contract" | "history";
 
 // Тип документа хранится в базе строкой (`documents.doc_type`) и намеренно не
 // ограничен списком: у каждой компании свой словарь документов. В интерфейсе
@@ -66,12 +74,20 @@ type TabKey = "cost" | "materials" | "docs" | "colors" | "contract" | "history";
 const DOC_TYPE_LABELS: Record<string, string> = {
   specification: "Спецификация",
   specification_signed: "Подписанная спецификация",
+  cutting_order: "Раскройное задание",
   invoice: "Счёт",
   contract: "Договор",
   act: "Акт",
   waybill: "Накладная",
   photo: "Фото",
   other: "Другое",
+};
+
+const CUTTING_STATUS_LABELS: Record<string, string> = {
+  draft: "черновик",
+  issued: "в крое",
+  completed: "крой завершён",
+  cancelled: "отменено",
 };
 
 function documentTypeLabel(docType: string): string {
@@ -94,6 +110,7 @@ const UPLOADABLE_DOC_TYPES = [
 const TABS: { key: TabKey; label: string }[] = [
   { key: "cost", label: "Себестоимость" },
   { key: "materials", label: "Нормы расхода материалов" },
+  { key: "cutting", label: "Раскрой" },
   { key: "docs", label: "Документы" },
   { key: "colors", label: "Размеры и цвета" },
   { key: "contract", label: "Договор" },
@@ -115,6 +132,17 @@ export function BatchPassportPage() {
   const [uploadTitle, setUploadTitle] = useState("");
   const [uploadIssuedAt, setUploadIssuedAt] = useState<Date | undefined>(undefined);
   const [isUploading, setIsUploading] = useState(false);
+  // Раскрой — отдельная сущность со своим состоянием; статус заказа она не
+  // меняет (владелец проекта, 2026-08-30).
+  const [cuttingOrders, setCuttingOrders] = useState<CuttingOrderResponseDto[]>([]);
+  const [cuttingBusy, setCuttingBusy] = useState(false);
+  const [factWarehouse, setFactWarehouse] = useState("");
+  const [warehouses, setWarehouses] = useState<WarehouseResponseDto[]>([]);
+  const [allocations, setAllocations] = useState<Record<string, number | undefined>>({});
+  const [rollNotes, setRollNotes] = useState<Record<string, string>>({});
+  const [consumed, setConsumed] = useState<Record<string, number | undefined>>({});
+  const [actuals, setActuals] = useState<Record<string, number | undefined>>({});
+  const [shortages, setShortages] = useState<CuttingFactResponseDto["shortages"]>([]);
 
   const load = () => {
     if (!id) return;
@@ -124,7 +152,114 @@ export function BatchPassportPage() {
       .catch(() => setError(true));
   };
 
+  const loadCutting = () => {
+    if (!id) return;
+    void apiRequest<CuttingOrderResponseDto[]>(`/production-orders/${id}/cutting-orders`)
+      .then(setCuttingOrders)
+      .catch(() => setCuttingOrders([]));
+  };
+
   useEffect(load, [id]);
+  useEffect(loadCutting, [id]);
+  useEffect(() => {
+    void apiRequest<WarehouseResponseDto[]>("/warehouses")
+      .then((rows) => {
+        setWarehouses(rows);
+        if (rows.length === 1 && rows[0]) setFactWarehouse(rows[0].id);
+      })
+      .catch(() => setWarehouses([]));
+  }, []);
+
+  // Раскройное задание строится из данных заказа: матрица из его строк,
+  // потребность из зафиксированных норм партии. Вводить заново ничего не надо.
+  const createCuttingOrder = async () => {
+    if (!id) return;
+    setCuttingBusy(true);
+    try {
+      await apiRequest<CuttingOrderResponseDto>(`/production-orders/${id}/cutting-orders`, {
+        method: "POST",
+        body: {},
+      });
+      loadCutting();
+      toast.success("Раскройное задание создано");
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Не удалось создать раскройное задание");
+    } finally {
+      setCuttingBusy(false);
+    }
+  };
+
+  const issueCutting = async (cuttingId: string, materials: CuttingOrderResponseDto["materials"]) => {
+    setCuttingBusy(true);
+    try {
+      await apiRequest(`/cutting-orders/${cuttingId}/issue`, {
+        method: "POST",
+        body: {
+          allocations: materials.map((material) => ({
+            materialId: material.materialId,
+            allocatedQuantity: allocations[material.materialId] ?? material.requiredQuantity,
+            rollNote: rollNotes[material.materialId] ?? null,
+          })),
+        },
+      });
+      loadCutting();
+      toast.success("Задание выдано в крой", { description: "Материал со склада пока не списан" });
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Не удалось выдать задание в крой");
+    } finally {
+      setCuttingBusy(false);
+    }
+  };
+
+  const submitFact = async (order: CuttingOrderResponseDto, correction: boolean) => {
+    if (!factWarehouse) {
+      toast.error("Выберите склад, с которого брали материал");
+      return;
+    }
+    setCuttingBusy(true);
+    try {
+      const response = await apiRequest<CuttingFactResponseDto>(
+        `/cutting-orders/${order.id}/${correction ? "correct" : "result"}`,
+        {
+          method: "POST",
+          body: {
+            warehouseId: factWarehouse,
+            materials: order.materials.map((material) => ({
+              materialId: material.materialId,
+              consumedQuantity: consumed[material.materialId] ?? material.consumedQuantity ?? 0,
+              rollNote: rollNotes[material.materialId] ?? material.rollNote,
+            })),
+            results: order.results.map((row) => ({
+              productVariantId: row.productVariantId,
+              actualQuantity: Math.round(actuals[row.productVariantId] ?? row.actualQuantity ?? row.plannedQuantity),
+            })),
+          },
+        },
+      );
+      setShortages(response.shortages);
+      loadCutting();
+      toast.success(correction ? "Факт исправлен" : "Факт кроя внесён", {
+        description: correction ? "Разница проведена корректировкой склада" : "Фактический расход списан со склада",
+      });
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Не удалось сохранить факт кроя");
+    } finally {
+      setCuttingBusy(false);
+    }
+  };
+
+  const generateCuttingDocument = async (cuttingId: string) => {
+    setCuttingBusy(true);
+    try {
+      await apiRequest(`/cutting-orders/${cuttingId}/generate-document`, { method: "POST" });
+      load();
+      toast.success("Раскройное задание сформировано", { description: "Файл — во вкладке «Документы»" });
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Не удалось сформировать документ");
+    } finally {
+      setCuttingBusy(false);
+    }
+  };
 
   // Спецификация формируется существующим механизмом Document Engine —
   // второго генератора не заводится. Номер документа резервируется по
@@ -247,6 +382,15 @@ export function BatchPassportPage() {
   // нём показатели из интерфейса убраны, а не показаны «примерно верными».
   const agreedUnitPrice = Number(passport.agreedUnitPrice);
   const batchSum = agreedUnitPrice * plannedQuantity;
+
+  // Состояние шага «Раскрой» на шкале выводится из раскройных заданий, а не из
+  // статуса заказа: статус описывает отношения с цехом, раскрой — нашу работу.
+  const cuttingStage: CuttingStageState =
+    cuttingOrders.length === 0
+      ? "none"
+      : cuttingOrders.some((order) => order.status === "draft" || order.status === "issued")
+        ? "in_progress"
+        : "done";
 
   // Потребность в материалах по этой партии — из норм, замороженных при
   // подтверждении заказа. Стоимости разных валютных контуров (ткань в USD,
@@ -492,6 +636,229 @@ export function BatchPassportPage() {
               {requirementWithoutPrice.map((row) => row.materialName).join(", ")} — потребность посчитана, стоимость нет.
             </p>
           ) : null}
+        </div>
+      );
+    }
+
+    if (key === "cutting") {
+      const active = cuttingOrders[cuttingOrders.length - 1];
+      const canCreate = passport.status !== "draft" && passport.status !== "cancelled";
+      if (cuttingOrders.length === 0) {
+        return (
+          <EmptyState
+            compact
+            title="Раскройного задания ещё нет"
+            description={
+              canCreate
+                ? "Задание соберётся само: размеры и цвета возьмутся из заказа, потребность в материалах — из зафиксированных норм партии."
+                : "Раскрой начинается по подтверждённому заказу. Сначала подтвердите заказ."
+            }
+            action={
+              canCreate ? (
+                <Button size="sm" loading={cuttingBusy} onClick={() => void createCuttingOrder()}>
+                  Создать раскройное задание
+                </Button>
+              ) : undefined
+            }
+          />
+        );
+      }
+      if (!active) return null;
+
+      const sizes = [...new Set(active.results.map((row) => row.size))];
+      const colors = [...new Set(active.results.map((row) => row.color))];
+      const cell = (size: string, color: string) =>
+        active.results.find((row) => row.size === size && row.color === color);
+      const isDraft = active.status === "draft";
+      const isIssued = active.status === "issued";
+      const isCompleted = active.status === "completed";
+
+      return (
+        <div className="space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="text-[13px] font-medium">
+              Задание №{active.number} · {CUTTING_STATUS_LABELS[active.status]}
+              {active.executorType === "workshop" && active.executorWorkshopName
+                ? ` · подрядчик «${active.executorWorkshopName}»`
+                : " · кроим сами"}
+            </span>
+            <span className="flex flex-wrap gap-2">
+              <Button variant="secondary" size="sm" loading={cuttingBusy} onClick={() => void generateCuttingDocument(active.id)}>
+                Сформировать задание
+              </Button>
+              {cuttingOrders.length > 0 && isCompleted && (
+                <Button variant="secondary" size="sm" loading={cuttingBusy} onClick={() => void createCuttingOrder()}>
+                  Добавить докрой
+                </Button>
+              )}
+            </span>
+          </div>
+
+          {/* Матрица кроя: план и факт по каждому размеру и цвету. */}
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[320px] border-collapse text-[13px]">
+              <thead>
+                <tr>
+                  <th className="border border-border px-2 py-1.5 text-left font-medium">Размер</th>
+                  {colors.map((color) => (
+                    <th key={color} className="border border-border px-2 py-1.5 text-right font-medium">
+                      {color}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {sizes.map((size) => (
+                  <tr key={size}>
+                    <td className="border border-border px-2 py-1 font-medium">{size}</td>
+                    {colors.map((color) => {
+                      const row = cell(size, color);
+                      if (!row) return <td key={color} className="border border-border px-2 py-1 text-right text-muted-foreground">—</td>;
+                      return (
+                        <td key={color} className="border border-border px-2 py-1 text-right">
+                          {isIssued ? (
+                            <NumberInput
+                              value={actuals[row.productVariantId] ?? row.actualQuantity ?? row.plannedQuantity}
+                              onChange={(value) =>
+                                setActuals((prev) => ({ ...prev, [row.productVariantId]: value }))
+                              }
+                              min={0}
+                            />
+                          ) : (
+                            <span className="num">
+                              {formatQuantity(row.plannedQuantity)}
+                              {row.actualQuantity !== null && row.actualQuantity !== row.plannedQuantity ? (
+                                <span className="ml-1 text-warning">→ {formatQuantity(row.actualQuantity)}</span>
+                              ) : null}
+                            </span>
+                          )}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+                <tr>
+                  <td className="border border-border px-2 py-1.5 font-semibold">Итого</td>
+                  {colors.map((color) => (
+                    <td key={color} className="num border border-border px-2 py-1.5 text-right font-semibold">
+                      {formatQuantity(
+                        sizes.reduce((sum, size) => sum + (cell(size, color)?.plannedQuantity ?? 0), 0),
+                      )}
+                    </td>
+                  ))}
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div>
+            <SectionLabel>Материалы</SectionLabel>
+            <div className="mt-2 divide-y divide-border rounded-[10px] border border-border">
+              {active.materials.map((material) => (
+                <div key={material.materialId} className="px-3.5 py-3">
+                  <div className="text-[13px] font-medium">{material.materialName}</div>
+                  <div className="mt-2 flex flex-wrap items-end gap-3">
+                    <span className="num text-[12px] text-muted-foreground">
+                      Требуется {formatQuantity(material.requiredQuantity, unitLabel(material.unit), 2)}
+                    </span>
+                    {isDraft ? (
+                      <Field label="Выделено" className="min-w-[120px]">
+                        <NumberInput
+                          value={allocations[material.materialId] ?? material.requiredQuantity}
+                          onChange={(value) => setAllocations((prev) => ({ ...prev, [material.materialId]: value }))}
+                          min={0}
+                          decimals={2}
+                        />
+                      </Field>
+                    ) : (
+                      <span className="num text-[12px] text-muted-foreground">
+                        Выделено{" "}
+                        {material.allocatedQuantity === null
+                          ? "—"
+                          : formatQuantity(material.allocatedQuantity, unitLabel(material.unit), 2)}
+                      </span>
+                    )}
+                    {isIssued || isCompleted ? (
+                      <Field label="Использовано" className="min-w-[130px]">
+                        <NumberInput
+                          value={consumed[material.materialId] ?? material.consumedQuantity ?? undefined}
+                          onChange={(value) => setConsumed((prev) => ({ ...prev, [material.materialId]: value }))}
+                          min={0}
+                          decimals={2}
+                        />
+                      </Field>
+                    ) : null}
+                    {material.consumedQuantity !== null && material.allocatedQuantity !== null ? (
+                      <span className="num text-[12px] text-muted-foreground">
+                        Остаток{" "}
+                        {formatQuantity(material.allocatedQuantity - material.consumedQuantity, unitLabel(material.unit), 2)}
+                      </span>
+                    ) : null}
+                    <Field label="Рулоны" className="min-w-[150px] flex-1">
+                      <Input
+                        value={rollNotes[material.materialId] ?? material.rollNote ?? ""}
+                        onChange={(event) =>
+                          setRollNotes((prev) => ({ ...prev, [material.materialId]: event.target.value }))
+                        }
+                        placeholder="например: 700 + 600"
+                      />
+                    </Field>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {shortages.length > 0 && (
+            <p className="rounded-[10px] border border-warning/30 bg-warning/[0.06] px-3 py-2 text-[12px] font-medium text-warning">
+              Расхождение со складом:{" "}
+              {shortages
+                .map((row) => `${row.materialName} — не хватало ${formatQuantity(row.shortage, "", 2)}`)
+                .join("; ")}
+              . Факт кроя сохранён; оприходуйте недостающий приход.
+            </p>
+          )}
+
+          <div className="flex flex-wrap items-end gap-3">
+            {(isIssued || isCompleted) && (
+              <Field label="Склад, с которого брали материал" className="min-w-[220px]">
+                <Select value={factWarehouse} onValueChange={setFactWarehouse}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Выберите склад" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {warehouses.map((warehouse) => (
+                      <SelectItem key={warehouse.id} value={warehouse.id}>
+                        {warehouse.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Field>
+            )}
+            {isDraft && (
+              <Button size="sm" loading={cuttingBusy} onClick={() => void issueCutting(active.id, active.materials)}>
+                Выдать в крой
+              </Button>
+            )}
+            {isIssued && (
+              <Button size="sm" loading={cuttingBusy} onClick={() => void submitFact(active, false)}>
+                Внести факт кроя
+              </Button>
+            )}
+            {isCompleted && (
+              <Button variant="secondary" size="sm" loading={cuttingBusy} onClick={() => void submitFact(active, true)}>
+                Исправить факт
+              </Button>
+            )}
+          </div>
+          <p className="t-meta">
+            {isDraft
+              ? "Выдача в крой фиксирует план и выделенное количество. Материал со склада не списывается."
+              : isIssued
+                ? "Фактический расход спишется со склада. Если остатка не хватит, факт всё равно сохранится, а расхождение будет показано."
+                : "Исправление проводится отдельной корректировкой склада на разницу; прежняя запись сохраняется в истории."}
+          </p>
         </div>
       );
     }
@@ -811,11 +1178,11 @@ export function BatchPassportPage() {
       <Card className="mt-4 p-4 md:p-5">
         <div className="flex items-center justify-between gap-3">
           <CardTitle className="text-[16px]">Производство</CardTitle>
-          <span className="t-meta shrink-0">5 этапов</span>
+          <span className="t-meta shrink-0">6 этапов</span>
         </div>
         <div className="mt-4">
           {isProductionStage(passport.status) ? (
-            <ProductionStepper current={passport.status} />
+            <ProductionStepper current={passport.status} cutting={cuttingStage} />
           ) : (
             <p className="t-secondary">Заказ отменён — партия вышла из производственной шкалы.</p>
           )}
@@ -823,8 +1190,8 @@ export function BatchPassportPage() {
         <div className="mt-4">
           <EmptyState
             compact
-            title="Детальный ход кроя и пошива появится здесь"
-            description="Проценты готовности, комментарии и фото от цеха — разделы 19-20 «Баланса производственной партии», ждёт реализации."
+            title="Детальный ход пошива появится здесь"
+            description="Проценты готовности, комментарии и фото от цеха — разделы 19-20 «Баланса производственной партии», ждёт реализации. Раскрой уже ведётся во вкладке «Раскрой»."
           />
         </div>
       </Card>
@@ -874,10 +1241,6 @@ export function BatchPassportPage() {
           показываем честные пустые состояния, а не выдуманные нули. */}
       <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
         {[
-          {
-            title: "Раскрой",
-            hint: "Сколько ткани выделено на партию и сколько фактически ушло. Потребность уже посчитана — в разделе «Нормы расхода материалов»; сам раскрой ждёт следующего этапа.",
-          },
           {
             title: "ОТК и брак",
             hint: "Отправлено / принято / брак / устранение — появится после утверждения раздела 4 «Баланса производственной партии».",

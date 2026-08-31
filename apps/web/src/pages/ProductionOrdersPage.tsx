@@ -6,6 +6,7 @@ import {
   type ProductResponseDto,
   type ProductVariantResponseDto,
   type ProductionOrderResponseDto,
+  type PreviewProductionOrderVariantsResponseDto,
   type ProductionOrderVariantDraft,
   type WarehouseResponseDto,
   type WorkshopResponseDto,
@@ -59,6 +60,14 @@ export function ProductionOrdersPage() {
   const [unitPrice, setUnitPrice] = useState<number | undefined>(undefined);
   const [dueDate, setDueDate] = useState<Date | undefined>(undefined);
   const [lines, setLines] = useState<ProductionOrderVariantDraft[]>([]);
+  // Матрица размер × цвет: выбираем цвета с количеством, система раскладывает
+  // по размерам, пользователь при необходимости правит отдельные ячейки —
+  // и только потом сохраняет (владелец проекта, 2026-08-30).
+  const [colorRows, setColorRows] = useState<Array<{ color: string; quantity: number | undefined }>>([]);
+  const [matrix, setMatrix] = useState<PreviewProductionOrderVariantsResponseDto | null>(null);
+  const [matrixQuantities, setMatrixQuantities] = useState<Record<string, number>>({});
+  const [isPreviewing, setIsPreviewing] = useState(false);
+
   const [pendingVariantId, setPendingVariantId] = useState("");
   const [pendingQuantity, setPendingQuantity] = useState<number | undefined>(undefined);
   const [receiveWarehouse, setReceiveWarehouse] = useState<Record<string, string>>({});
@@ -103,6 +112,39 @@ export function ProductionOrdersPage() {
     return variant ? `${variant.size} / ${variant.color}` : id;
   };
 
+  // Цвета модели — из её вариантов: отдельного справочника цветов нет и не
+  // нужно, цвет существует ровно там, где заведён вариант.
+  const productColors = [...new Set(variants.map((variant) => variant.color))];
+
+  const buildMatrix = async () => {
+    const rows = colorRows.filter((row) => row.color && (row.quantity ?? 0) > 0);
+    if (!productId || rows.length === 0) return;
+    setIsPreviewing(true);
+    try {
+      const preview = await apiRequest<PreviewProductionOrderVariantsResponseDto>(
+        "/production-orders/preview-variants",
+        {
+          method: "POST",
+          body: { productId, colors: rows.map((row) => ({ color: row.color, quantity: row.quantity })) },
+        },
+      );
+      setMatrix(preview);
+      setMatrixQuantities(
+        Object.fromEntries(preview.rows.map((row) => [row.productVariantId, row.quantity])),
+      );
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Не удалось рассчитать раскладку");
+    } finally {
+      setIsPreviewing(false);
+    }
+  };
+
+  const matrixSizes = matrix ? [...new Set(matrix.rows.map((row) => row.size))] : [];
+  const matrixColors = matrix ? [...new Set(matrix.rows.map((row) => row.color))] : [];
+  const matrixCell = (size: string, color: string) =>
+    matrix?.rows.find((row) => row.size === size && row.color === color);
+  const matrixTotal = Object.values(matrixQuantities).reduce((sum, value) => sum + (value || 0), 0);
+
   const addLine = () => {
     if (!pendingVariantId || !pendingQuantity) return;
     setLines((prev) => [...prev, { productVariantId: pendingVariantId, quantity: pendingQuantity }]);
@@ -110,7 +152,14 @@ export function ProductionOrdersPage() {
     setPendingQuantity(undefined);
   };
 
-  const totalQuantity = lines.reduce((sum, line) => sum + line.quantity, 0);
+  // Строки заказа: из матрицы, если она построена, иначе из построчного ввода
+  // (прежний путь сохраняется — он остаётся запасным).
+  const effectiveLines: ProductionOrderVariantDraft[] = matrix
+    ? Object.entries(matrixQuantities)
+        .filter(([, quantity]) => quantity > 0)
+        .map(([productVariantId, quantity]) => ({ productVariantId, quantity }))
+    : lines;
+  const totalQuantity = effectiveLines.reduce((sum, line) => sum + line.quantity, 0);
 
   // Предварительный расчёт потребности в материалах: сколько ткани и
   // фурнитуры уйдёт на набранное количество. Показывается до создания
@@ -142,7 +191,7 @@ export function ProductionOrdersPage() {
       : [];
 
   const submitOrder = async () => {
-    if (!productId || !workshopId || !approvedBom || !unitPrice || lines.length === 0) return;
+    if (!productId || !workshopId || !approvedBom || !unitPrice || effectiveLines.length === 0) return;
     setIsSubmitting(true);
     try {
       await apiRequest("/production-orders", {
@@ -154,7 +203,7 @@ export function ProductionOrdersPage() {
           plannedQuantity: totalQuantity,
           agreedUnitPrice: unitPrice,
           dueDate: dueDate ? dueDate.toISOString().slice(0, 10) : undefined,
-          variants: lines,
+          variants: effectiveLines,
         },
       });
       setProductId("");
@@ -162,6 +211,9 @@ export function ProductionOrdersPage() {
       setUnitPrice(undefined);
       setDueDate(undefined);
       setLines([]);
+      setColorRows([]);
+      setMatrix(null);
+      setMatrixQuantities({});
       await reload();
       toast.success("Заказ пошива создан", { description: "Черновик добавлен в список ниже" });
     } catch (err) {
@@ -308,6 +360,154 @@ export function ProductionOrdersPage() {
               <DatePicker value={dueDate} onChange={setDueDate} />
             </label>
 
+            {/* Матрица размер × цвет. Выбираем цвета с количеством, система
+                раскладывает по размерам из карточки модели, ячейки можно
+                поправить руками — и только потом сохранить. */}
+            <div className="flex flex-col gap-3 rounded-[16px] border border-border bg-card p-3.5">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="text-[0.9rem] font-semibold">Цвета и количество</span>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  disabled={!productId || productColors.length === 0}
+                  onClick={() => setColorRows((prev) => [...prev, { color: "", quantity: undefined }])}
+                >
+                  Добавить цвет
+                </Button>
+              </div>
+
+              {colorRows.map((row, index) => (
+                <div key={index} className="flex flex-wrap items-end gap-2">
+                  <label className="flex min-w-[150px] flex-1 flex-col gap-1.5 text-[0.9rem] font-semibold text-muted-foreground">
+                    Цвет
+                    <Select
+                      value={row.color}
+                      onValueChange={(value) =>
+                        setColorRows((prev) => prev.map((r, i) => (i === index ? { ...r, color: value } : r)))
+                      }
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Выберите цвет" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {productColors.map((color) => (
+                          <SelectItem key={color} value={color}>
+                            {color}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </label>
+                  <label className="flex min-w-[120px] flex-1 flex-col gap-1.5 text-[0.9rem] font-semibold text-muted-foreground">
+                    Количество
+                    <NumberInput
+                      value={row.quantity}
+                      onChange={(value) =>
+                        setColorRows((prev) => prev.map((r, i) => (i === index ? { ...r, quantity: value } : r)))
+                      }
+                      min={0}
+                    />
+                  </label>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => setColorRows((prev) => prev.filter((_, i) => i !== index))}
+                  >
+                    Убрать
+                  </Button>
+                </div>
+              ))}
+
+              {colorRows.length > 0 && (
+                <Button
+                  type="button"
+                  size="sm"
+                  className="sm:self-start"
+                  loading={isPreviewing}
+                  onClick={() => void buildMatrix()}
+                >
+                  Разложить по размерам
+                </Button>
+              )}
+
+              {matrix && (
+                <div className="mt-1">
+                  {matrix.usedFallbackRatio && (
+                    <p className="mb-2 rounded-[10px] border border-warning/30 bg-warning/[0.06] px-3 py-2 text-[12px] font-medium text-warning">
+                      У модели не задан размерный ряд — количество разделено поровну. Задайте раскладку в карточке модели.
+                    </p>
+                  )}
+                  {matrix.missingVariants.length > 0 && (
+                    <p className="mb-2 rounded-[10px] border border-warning/30 bg-warning/[0.06] px-3 py-2 text-[12px] font-medium text-warning">
+                      Нет варианта модели для:{" "}
+                      {matrix.missingVariants.map((row) => `${row.size} / ${row.color}`).join(", ")} — эти сочетания в заказ не попадут.
+                    </p>
+                  )}
+                  <div className="overflow-x-auto">
+                    <table className="w-full min-w-[320px] border-collapse text-[13px]">
+                      <thead>
+                        <tr>
+                          <th className="border border-border px-2 py-1.5 text-left font-medium">Размер</th>
+                          {matrixColors.map((color) => (
+                            <th key={color} className="border border-border px-2 py-1.5 text-right font-medium">
+                              {color}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {matrixSizes.map((size) => (
+                          <tr key={size}>
+                            <td className="border border-border px-2 py-1 font-medium">{size}</td>
+                            {matrixColors.map((color) => {
+                              const cell = matrixCell(size, color);
+                              return (
+                                <td key={color} className="border border-border p-0.5">
+                                  {cell ? (
+                                    <NumberInput
+                                      value={matrixQuantities[cell.productVariantId] ?? 0}
+                                      onChange={(value) =>
+                                        setMatrixQuantities((prev) => ({
+                                          ...prev,
+                                          [cell.productVariantId]: value ?? 0,
+                                        }))
+                                      }
+                                      min={0}
+                                    />
+                                  ) : (
+                                    <span className="block px-2 py-1 text-right text-muted-foreground">—</span>
+                                  )}
+                                </td>
+                              );
+                            })}
+                          </tr>
+                        ))}
+                        <tr>
+                          <td className="border border-border px-2 py-1.5 font-semibold">Итого</td>
+                          {matrixColors.map((color) => (
+                            <td key={color} className="num border border-border px-2 py-1.5 text-right font-semibold">
+                              {formatQuantity(
+                                matrixSizes.reduce((sum, size) => {
+                                  const cell = matrixCell(size, color);
+                                  return sum + (cell ? (matrixQuantities[cell.productVariantId] ?? 0) : 0);
+                                }, 0),
+                              )}
+                            </td>
+                          ))}
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                  <p className="t-meta mt-2">
+                    Всего по заказу: {formatQuantity(matrixTotal, "изделий")}. Ячейки можно поправить вручную — после
+                    сохранения эти числа закрепятся за заказом и правка карточки модели их не изменит.
+                  </p>
+                </div>
+              )}
+            </div>
+
             <div className="flex flex-col gap-3 rounded-[16px] bg-secondary p-3.5 sm:flex-row sm:items-end sm:flex-wrap">
               <label className="flex flex-1 min-w-[140px] flex-col gap-1.5 text-[0.9rem] font-semibold text-muted-foreground">
                 Размер и цвет
@@ -333,7 +533,7 @@ export function ProductionOrdersPage() {
               </Button>
             </div>
 
-            {lines.length > 0 && (
+            {!matrix && lines.length > 0 && (
               <ul className="m-0 list-none p-0 text-[0.9rem] text-muted-foreground">
                 {lines.map((line, index) => (
                   <li key={index} className="flex justify-between border-b border-border py-1.5 last:border-none">
@@ -369,7 +569,7 @@ export function ProductionOrdersPage() {
             <Button
               type="button"
               loading={isSubmitting}
-              disabled={!productId || !workshopId || !approvedBom || !unitPrice || lines.length === 0}
+              disabled={!productId || !workshopId || !approvedBom || !unitPrice || effectiveLines.length === 0}
               onClick={() => void submitOrder()}
             >
               {isSubmitting ? "Создаём заказ..." : "Создать заказ пошива"}

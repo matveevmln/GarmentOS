@@ -7,7 +7,7 @@
 
 export { MoneyBlock } from "./MoneyBlock";
 export { ProductionStepper, PRODUCTION_STAGES, isProductionStage } from "./ProductionStepper";
-export type { ProductionStage } from "./ProductionStepper";
+export type { CuttingStageState, ProductionStage } from "./ProductionStepper";
 export { CostBreakdown } from "./CostBreakdown";
 export type { CostRow } from "./CostBreakdown";
 export { DocumentRow } from "./DocumentRow";

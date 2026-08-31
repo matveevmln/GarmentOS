@@ -4,6 +4,11 @@ import fontkit from "@pdf-lib/fontkit";
 import { PDFDocument, PDFFont, PDFPage, rgb } from "pdf-lib";
 import { applyPlaceholders, type SpecificationDocumentData, type SpecificationTemplateDefinition } from "../domain/specification-template";
 import type { DocumentRenderAdapter } from "../application/ports";
+import {
+  buildCuttingOrderColumns,
+  type CuttingOrderDocumentData,
+  type TableColumn,
+} from "../domain/cutting-order-template";
 
 // pdf-lib — программная раскладка без headless-браузера (docs/TECH_STACK.md,
 // раздел "Document Engine — генерация PDF"). Document Template Engine
@@ -121,8 +126,20 @@ function drawParagraph(
   ctx.y -= options.gapAfter ?? 4;
 }
 
-function drawTable(ctx: DrawContext, template: SpecificationTemplateDefinition, data: SpecificationDocumentData): void {
-  const { columns } = template.table;
+// Обобщённая отрисовка таблицы: колонки и готовые строки. Раньше функция
+// знала форму данных спецификации (жёсткий маппинг семи ключей и строка
+// «Итого»); теперь она рисует любую таблицу, а «что это за колонки» решает
+// вызывающий — так раскройное задание с колонкой на каждый цвет использует
+// тот же код, а не второй генератор.
+//
+// Шапка перерисовывается на каждой новой странице: до этого при переносе
+// таблица продолжалась без заголовков.
+function drawTableRows(
+  ctx: DrawContext,
+  columns: readonly TableColumn[],
+  rows: ReadonlyArray<Record<string, string>>,
+  totalRow?: Record<string, string>,
+): void {
   // Высоты строк измерены по эталону автоматическим детектированием
   // горизонтальных границ (владелец проекта, 2026-08-03, вторая проверка):
   // ряд данных ~15pt (подтверждено), шапка ~25.2pt (не 22pt — двухстрочные
@@ -132,7 +149,6 @@ function drawTable(ctx: DrawContext, template: SpecificationTemplateDefinition, 
   const fontSize = 9;
 
   const drawHeaderRow = (): void => {
-    ensureSpace(ctx, headerHeight);
     let x = MARGIN;
     const top = ctx.y;
     for (const column of columns) {
@@ -154,7 +170,12 @@ function drawTable(ctx: DrawContext, template: SpecificationTemplateDefinition, 
   };
 
   const drawDataRow = (values: Record<string, string>, bold = false): void => {
-    ensureSpace(ctx, rowHeight);
+    // Не влезает — новая страница И повтор шапки, иначе продолжение таблицы
+    // читается как набор чисел без названий колонок.
+    if (ctx.y - rowHeight < MARGIN) {
+      ensureSpace(ctx, rowHeight);
+      drawHeaderRow();
+    }
     let x = MARGIN;
     const top = ctx.y;
     const font = bold ? ctx.boldFont : ctx.font;
@@ -174,9 +195,20 @@ function drawTable(ctx: DrawContext, template: SpecificationTemplateDefinition, 
     ctx.y = top - rowHeight;
   };
 
+  ensureSpace(ctx, headerHeight);
   drawHeaderRow();
-  data.items.forEach((item, index) => {
-    drawDataRow({
+  for (const row of rows) drawDataRow(row);
+  if (totalRow) drawDataRow(totalRow, true);
+  ctx.y -= 12;
+}
+
+// Таблица спецификации — тонкая обёртка над обобщённой отрисовкой: форма
+// данных спецификации остаётся её собственным знанием.
+function drawTable(ctx: DrawContext, template: SpecificationTemplateDefinition, data: SpecificationDocumentData): void {
+  drawTableRows(
+    ctx,
+    template.table.columns,
+    data.items.map((item, index) => ({
       index: String(index + 1),
       name: item.name,
       unit: item.unit,
@@ -184,13 +216,56 @@ function drawTable(ctx: DrawContext, template: SpecificationTemplateDefinition, 
       quantity: item.quantity,
       unitPrice: item.unitPrice,
       sum: item.sum,
-    });
-  });
-  drawDataRow({ name: "Итого", quantity: data.totals.quantity, sum: data.totals.sum }, true);
-  ctx.y -= 12;
+    })),
+    { name: "Итого", quantity: data.totals.quantity, sum: data.totals.sum },
+  );
 }
 
 export class PdfLibTemplateRenderer implements DocumentRenderAdapter {
+  // Раскройное задание: тот же движок, что и спецификация — те же шрифты с
+  // кириллицей, та же геометрия, та же отрисовка таблицы. Отличие одно:
+  // колонки матрицы строятся по числу цветов партии.
+  async renderCuttingOrder(data: CuttingOrderDocumentData): Promise<Uint8Array> {
+    const pdfDoc = await PDFDocument.create();
+    pdfDoc.registerFontkit(fontkit);
+    const font = await pdfDoc.embedFont(readFileSync(join(FONTS_DIR, "LiberationSerif-Regular.ttf")), { subset: true });
+    const boldFont = await pdfDoc.embedFont(readFileSync(join(FONTS_DIR, "LiberationSerif-Bold.ttf")), { subset: true });
+
+    const ctx: DrawContext = { pdfDoc, font, boldFont, page: pdfDoc.addPage([PAGE_WIDTH, PAGE_HEIGHT]), y: PAGE_HEIGHT - MARGIN };
+
+    drawParagraph(ctx, data.title, { bold: true, size: 13, align: "center", gapAfter: 6 });
+    for (const line of data.subtitleLines) {
+      drawParagraph(ctx, line, { size: 10, align: "center", gapAfter: 2 });
+    }
+    ctx.y -= 10;
+
+    const columns: TableColumn[] = buildCuttingOrderColumns(data.colors);
+    drawTableRows(
+      ctx,
+      columns,
+      data.rows.map((row) => {
+        const values: Record<string, string> = { size: row.size };
+        row.quantities.forEach((quantity, index) => {
+          values[`c${index}`] = quantity;
+        });
+        return values;
+      }),
+      (() => {
+        const totals: Record<string, string> = { size: "ИТОГО" };
+        data.totals.forEach((total, index) => {
+          totals[`c${index}`] = total;
+        });
+        return totals;
+      })(),
+    );
+
+    for (const line of data.footerLines) {
+      drawParagraph(ctx, line, { size: 10, gapAfter: 4 });
+    }
+
+    return pdfDoc.save();
+  }
+
   async renderSpecification(template: SpecificationTemplateDefinition, data: SpecificationDocumentData): Promise<Uint8Array> {
     const pdfDoc = await PDFDocument.create();
     pdfDoc.registerFontkit(fontkit);

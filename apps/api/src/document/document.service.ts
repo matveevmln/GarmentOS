@@ -1,6 +1,9 @@
 import { Inject, Injectable } from "@nestjs/common";
 import {
+  CUTTING_ORDER_DOC_TYPE,
+  generateCuttingOrderDocument,
   generateSpecificationDocument,
+  type CuttingOrderDocumentData,
   listDocumentsForEntity,
   uploadDocument,
   type AttachDocumentResult,
@@ -58,6 +61,27 @@ export class DocumentService {
     return generateSpecificationDocument(
       { documents: this.documents, documentLinks: this.documentLinks, documentDerivatives: this.documentDerivatives, storage: this.storage, renderer: this.renderer },
       { companyId, productionOrderId, uploadedBy, data, supersedesDocumentIds },
+    );
+  }
+
+  // Раскройное задание — тот же механизм версий, но по собственной связи:
+  // прежние редакции ищутся среди документов этого задания, а не всей партии,
+  // иначе докрой гасил бы документ первого кроя.
+  async generateCuttingOrderDocument(
+    companyId: string,
+    cuttingOrderId: string,
+    productionOrderId: string,
+    number: number,
+    uploadedBy: string | null,
+    data: CuttingOrderDocumentData,
+  ): Promise<AttachDocumentResult> {
+    const existing = await this.listForEntity(companyId, "cutting_order", cuttingOrderId);
+    const supersedesDocumentIds = existing
+      .filter((doc) => doc.isCurrentVersion && doc.docType === CUTTING_ORDER_DOC_TYPE)
+      .map((doc) => doc.id);
+    return generateCuttingOrderDocument(
+      { documents: this.documents, documentLinks: this.documentLinks, documentDerivatives: this.documentDerivatives, storage: this.storage, renderer: this.renderer },
+      { companyId, cuttingOrderId, productionOrderId, number, uploadedBy, data, supersedesDocumentIds },
     );
   }
 

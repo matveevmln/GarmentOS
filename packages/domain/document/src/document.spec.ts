@@ -55,6 +55,12 @@ class FakeStorageAdapter implements StorageAdapter {
 class FakeRenderer implements DocumentRenderAdapter {
   public readonly calls: Array<{ template: SpecificationTemplateDefinition; data: SpecificationDocumentData }> = [];
 
+  // Раскройное задание в этих тестах не проверяется — тестовый двойник
+  // реализует метод заглушкой, чтобы удовлетворить порт.
+  renderCuttingOrder(): Promise<Uint8Array> {
+    return Promise.resolve(new Uint8Array([1, 2, 3]));
+  }
+
   renderSpecification(template: SpecificationTemplateDefinition, data: SpecificationDocumentData): Promise<Uint8Array> {
     this.calls.push({ template, data });
     return Promise.resolve(new Uint8Array([0x25, 0x50, 0x44, 0x46])); // "%PDF" — не настоящий PDF, просто узнаваемые байты

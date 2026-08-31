@@ -78,27 +78,27 @@ class FakeCuttingOrders implements CuttingOrderRepository {
   public created: NewCuttingOrderInput | null = null;
   public count = 0;
 
-  async create(input: NewCuttingOrderInput): Promise<CuttingOrder> {
+  create(input: NewCuttingOrderInput): Promise<CuttingOrder> {
     this.created = input;
-    return buildOrder({ number: input.number });
+    return Promise.resolve(buildOrder({ number: input.number }));
   }
-  async findById(): Promise<CuttingOrder | null> {
-    return this.order;
+  findById(): Promise<CuttingOrder | null> {
+    return Promise.resolve(this.order);
   }
-  async listByProductionOrder(): Promise<CuttingOrder[]> {
-    return [this.order];
+  listByProductionOrder(): Promise<CuttingOrder[]> {
+    return Promise.resolve([this.order]);
   }
-  async countByProductionOrder(): Promise<number> {
-    return this.count;
+  countByProductionOrder(): Promise<number> {
+    return Promise.resolve(this.count);
   }
-  async updateStatus(_id: string, status: CuttingOrderStatus): Promise<CuttingOrder> {
+  updateStatus(_id: string, status: CuttingOrderStatus): Promise<CuttingOrder> {
     this.order = { ...this.order, status };
-    return this.order;
+    return Promise.resolve(this.order);
   }
-  async updateAllocations(): Promise<CuttingOrder> {
-    return this.order;
+  updateAllocations(): Promise<CuttingOrder> {
+    return Promise.resolve(this.order);
   }
-  async recordFact(
+  recordFact(
     _id: string,
     materials: CuttingOrderMaterialFactInput[],
     results: CuttingOrderResultFactInput[],
@@ -114,7 +114,7 @@ class FakeCuttingOrders implements CuttingOrderRepository {
         return fact ? { ...row, actualQuantity: String(fact.actualQuantity) } : row;
       }),
     };
-    return this.order;
+    return Promise.resolve(this.order);
   }
 }
 
@@ -123,22 +123,24 @@ class FakeStock implements MaterialStockPort {
   public consumed: number[] = [];
   public adjusted: number[] = [];
 
-  async quantityOnHand(): Promise<number> {
-    return this.onHand;
+  quantityOnHand(): Promise<number> {
+    return Promise.resolve(this.onHand);
   }
-  async consume(_w: string, _m: string, quantity: number): Promise<void> {
+  consume(_w: string, _m: string, quantity: number): Promise<void> {
     this.consumed.push(quantity);
     this.onHand -= quantity;
+    return Promise.resolve();
   }
-  async adjust(_w: string, _m: string, delta: number): Promise<void> {
+  adjust(_w: string, _m: string, delta: number): Promise<void> {
     this.adjusted.push(delta);
     this.onHand += delta;
+    return Promise.resolve();
   }
 }
 
 const snapshotPort: ProductionOrderSnapshotPort = {
-  async findForCutting() {
-    return {
+  findForCutting() {
+    return Promise.resolve({
       status: "placed",
       plannedQuantity: 500,
       variants: [
@@ -146,7 +148,7 @@ const snapshotPort: ProductionOrderSnapshotPort = {
         { productVariantId: VARIANT_M, quantity: 300 },
       ],
       materialNorms: [{ materialId: FABRIC, unit: "m", quantityPerUnit: 2.6, wastePercent: 0 }],
-    };
+    });
   },
 };
 
@@ -181,8 +183,8 @@ describe("domain/cutting — создание задания", () => {
 
   it("не кроит по черновику заказа и по партии без зафиксированных норм", async () => {
     const draftPort: ProductionOrderSnapshotPort = {
-      async findForCutting() {
-        return { status: "draft", plannedQuantity: 500, variants: [], materialNorms: [] };
+      findForCutting() {
+        return Promise.resolve({ status: "draft", plannedQuantity: 500, variants: [], materialNorms: [] });
       },
     };
     await expect(
@@ -193,13 +195,13 @@ describe("domain/cutting — создание задания", () => {
     ).rejects.toThrow(DomainError);
 
     const noNormsPort: ProductionOrderSnapshotPort = {
-      async findForCutting() {
-        return {
+      findForCutting() {
+        return Promise.resolve({
           status: "placed",
           plannedQuantity: 500,
           variants: [{ productVariantId: VARIANT_S, quantity: 500 }],
           materialNorms: [],
-        };
+        });
       },
     };
     await expect(

@@ -33,6 +33,17 @@ export {
   type AttachDocumentResult,
 } from "./application/attach-document";
 export {
+  generateCuttingOrderDocument,
+  CUTTING_ORDER_DOC_TYPE,
+  type GenerateCuttingOrderDocumentDeps,
+  type GenerateCuttingOrderDocumentInput,
+} from "./application/generate-cutting-order-document";
+export {
+  buildCuttingOrderColumns,
+  type CuttingOrderDocumentData,
+  type TableColumn,
+} from "./domain/cutting-order-template";
+export {
   generateSpecificationDocument,
   type GenerateSpecificationDocumentDeps,
   type GenerateSpecificationDocumentInput,

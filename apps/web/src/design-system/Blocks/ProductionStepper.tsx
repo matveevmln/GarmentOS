@@ -31,22 +31,65 @@ export function isProductionStage(status: string): status is ProductionStage {
   return (PRODUCTION_STAGES as readonly string[]).includes(status);
 }
 
-export function ProductionStepper({ current }: { current: ProductionStage }) {
-  const idx = PRODUCTION_STAGES.indexOf(current);
+// Раскрой — наша собственная операция, а не состояние заказа у цеха, поэтому
+// он не значение production_order_status (владелец проекта, 2026-08-30: «не
+// превращать каждый производственный шаг в статус заказа»). На шкале он
+// показывается отдельным шагом между «Размещён» и «В производстве», а его
+// состояние приходит вторым входом — из раскройного задания.
+export type CuttingStageState = "none" | "in_progress" | "done";
+
+const CUTTING_LABEL: Record<CuttingStageState, string> = {
+  none: "не начат",
+  in_progress: "в работе",
+  done: "выполнен",
+};
+
+export function ProductionStepper({
+  current,
+  cutting = "none",
+}: {
+  current: ProductionStage;
+  cutting?: CuttingStageState;
+}) {
+  const baseIdx = PRODUCTION_STAGES.indexOf(current);
+  // Раскрой вставляется после «Размещён» (индекс 1) — визуально, не в enum.
+  const stages: Array<{ key: string; label: string; sub?: string }> = [];
+  PRODUCTION_STAGES.forEach((stage, i) => {
+    stages.push({ key: stage, label: statusMeta(stage).label });
+    if (i === 1) stages.push({ key: "cutting", label: "Раскрой", sub: CUTTING_LABEL[cutting] });
+  });
+  // Позиция на шкале: до раскроя — как раньше; сам раскрой считается текущим,
+  // пока заказ ещё «Размещён», а задание не завершено.
+  const cuttingIndex = 2;
+  const idx =
+    baseIdx <= 1
+      ? baseIdx === 1 && cutting !== "none" && cutting !== "done"
+        ? cuttingIndex
+        : baseIdx
+      : baseIdx + 1;
+
   return (
     <ol className="flex flex-col md:flex-row md:items-stretch">
-      {PRODUCTION_STAGES.map((stage, i) => {
+      {stages.map((stage, i) => {
         const state = i < idx ? "done" : i === idx ? "current" : "next";
         return (
           <li
-            key={stage}
-            className="relative flex flex-1 items-start gap-3 py-2.5 md:flex-col md:gap-0 md:py-0 md:pr-4"
+            key={stage.key}
+            className={cn(
+              // min-w-0 обязателен: без него flex-элемент не сжимается уже своего
+              // содержимого, и шести шагам не хватало ширины на 768px —
+              // подписи вроде «Готов к отгрузке» выталкивали шкалу за экран.
+              "relative flex min-w-0 flex-1 items-start gap-3 py-2.5 md:flex-col md:gap-0 md:py-0 md:pr-4",
+              // У последнего шага правого отступа быть не должно: с шестью
+              // шагами он выталкивал шкалу за край экрана на 768px.
+              i === stages.length - 1 && "md:pr-0",
+            )}
           >
             {/* ось: вертикальная на мобильном, горизонтальная на десктопе */}
             <span
               className={cn(
                 "absolute left-[5px] top-6 h-[calc(100%-12px)] w-px md:left-0 md:top-[5px] md:h-px md:w-full",
-                i === PRODUCTION_STAGES.length - 1 && "hidden",
+                i === stages.length - 1 && "hidden",
                 i < idx ? "bg-primary/45" : "bg-border",
               )}
             />
@@ -79,10 +122,10 @@ export function ProductionStepper({ current }: { current: ProductionStage }) {
                       : "text-muted-foreground",
                 )}
               >
-                {statusMeta(stage).label}
+                {stage.label}
               </div>
               <div className="mt-1 text-[11px] text-muted-foreground/80">
-                {state === "done" ? "пройден" : state === "current" ? "текущий" : "следующий"}
+                {stage.sub ?? (state === "done" ? "пройден" : state === "current" ? "текущий" : "следующий")}
               </div>
             </div>
           </li>

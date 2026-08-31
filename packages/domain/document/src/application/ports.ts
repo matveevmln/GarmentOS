@@ -1,5 +1,6 @@
 import type { DocumentDerivativeType, DocumentEntity, DocumentLink, DocumentLinkSource } from "../domain/document";
 import type { SpecificationDocumentData, SpecificationTemplateDefinition } from "../domain/specification-template";
+import type { CuttingOrderDocumentData } from "../domain/cutting-order-template";
 
 export interface NewDocumentInput {
   companyId: string;
@@ -92,4 +93,8 @@ export interface StorageAdapter {
 // структуру+данные в PDF.
 export interface DocumentRenderAdapter {
   renderSpecification(template: SpecificationTemplateDefinition, data: SpecificationDocumentData): Promise<Uint8Array>;
+  // Второй документ движка — раскройное задание (владелец проекта,
+  // 2026-08-30). Отдельный метод, а не замена: у спецификации своя форма
+  // данных, у матрицы кроя своя, а рендерер и шрифты общие.
+  renderCuttingOrder(data: CuttingOrderDocumentData): Promise<Uint8Array>;
 }

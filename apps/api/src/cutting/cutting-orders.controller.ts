@@ -105,6 +105,17 @@ export class CuttingOrdersController {
     return cuttingFactResponseSchema.parse(outcome);
   }
 
+  // Формирование PDF раскройного задания — матрица размер × цвет, которую
+  // физически передают закройному отделу.
+  @RequirePermissions("contract_manufacturing.write")
+  @Post("cutting-orders/:id/generate-document")
+  async generateDocument(
+    @Param("id") id: string,
+    @CurrentUser() currentUser: AuthenticatedRequestUser,
+  ): Promise<{ documentId: string; title: string | null }> {
+    return this.cuttingService.generateDocument(currentUser, id);
+  }
+
   @RequirePermissions("contract_manufacturing.write")
   @Post("cutting-orders/:id/cancel")
   async cancel(

@@ -1,4 +1,4 @@
-import { Inject, Injectable } from "@nestjs/common";
+import { HttpStatus, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import {
   cancelCuttingOrder,
   correctCuttingFact,
@@ -11,6 +11,8 @@ import {
   type ProductionOrderSnapshotPort,
   type StockShortage,
 } from "@garmentos/domain-cutting";
+import type { CuttingOrderDocumentData } from "@garmentos/domain-document";
+import { formatRuDate, formatRuQuantity } from "../ai-production-assistant/ru-number-format";
 import type {
   CreateCuttingOrderDto,
   CuttingFactDto,
@@ -18,6 +20,7 @@ import type {
   IssueCuttingOrderDto,
 } from "@garmentos/shared-types";
 import { AuditService } from "../audit/audit.service";
+import { DocumentService } from "../document/document.service";
 import { CatalogService } from "../catalog/catalog.service";
 import { ContractManufacturingService } from "../contract-manufacturing/contract-manufacturing.service";
 import { ProcurementService } from "../procurement/procurement.service";
@@ -27,6 +30,11 @@ import {
   CUTTING_ORDER_REPOSITORY,
   CUTTING_PRODUCTION_ORDER_PORT,
 } from "./cutting.tokens";
+
+// Единица измерения хранится кодом (m/kg/pcs), а документ читает человек —
+// в PDF уходит русская подпись, а не код из справочника.
+const UNIT_LABELS: Record<string, string> = { m: "м", kg: "кг", pcs: "шт" };
+const unitLabel = (unit: string): string => UNIT_LABELS[unit] ?? unit;
 
 export interface CuttingFactOutcome {
   cuttingOrder: CuttingOrderResponseDto;
@@ -46,6 +54,7 @@ export class CuttingService {
     private readonly procurementService: ProcurementService,
     private readonly contractManufacturingService: ContractManufacturingService,
     private readonly auditService: AuditService,
+    private readonly documentService: DocumentService,
   ) {}
 
   private async toResponse(companyId: string, order: CuttingOrder): Promise<CuttingOrderResponseDto> {
@@ -96,6 +105,89 @@ export class CuttingService {
       materials,
       results,
     };
+  }
+
+  // Раскройное задание в PDF: матрица размер × цвет, как в рабочем документе
+  // владельца («КРОЙ СТЕГАНКА · 4542 ед · 3 ЦВЕТА»). Генератор общий со
+  // спецификацией — те же шрифты, хранилище и версионность.
+  async generateDocument(
+    currentUser: AuthenticatedRequestUser,
+    cuttingOrderId: string,
+  ): Promise<{ documentId: string; title: string | null }> {
+    const order = await this.cuttingOrders.findById(currentUser.companyId, cuttingOrderId);
+    if (!order) {
+      throw new NotFoundException({
+        statusCode: HttpStatus.NOT_FOUND,
+        code: "CUTTING_ORDER_NOT_FOUND",
+        message: `Раскройное задание ${cuttingOrderId} не найдено`,
+      });
+    }
+    const response = await this.toResponse(currentUser.companyId, order);
+    const production = await this.contractManufacturingService.findProductionOrderById(
+      currentUser.companyId,
+      order.productionOrderId,
+    );
+    const product = production
+      ? await this.catalogService.findProductById(currentUser.companyId, production.productId)
+      : null;
+    const workshop = production
+      ? await this.contractManufacturingService.findWorkshopById(currentUser.companyId, production.workshopId)
+      : null;
+
+    // Порядок цветов и размеров — порядок появления в матрице задания, то
+    // есть тот же, что был зафиксирован в заказе.
+    const colors: string[] = [];
+    const sizes: string[] = [];
+    for (const row of response.results) {
+      if (!colors.includes(row.color)) colors.push(row.color);
+      if (!sizes.includes(row.size)) sizes.push(row.size);
+    }
+    const quantityAt = (size: string, color: string): number => {
+      const row = response.results.find((item) => item.size === size && item.color === color);
+      return row ? row.plannedQuantity : 0;
+    };
+    const total = response.results.reduce((sum, row) => sum + row.plannedQuantity, 0);
+
+    const data: CuttingOrderDocumentData = {
+      title: `КРОЙ ${(product?.name ?? "").toUpperCase()} · ${formatRuQuantity(total)} ед · ${colors.length} ЦВЕТ${colors.length === 1 ? "" : "А"}`.trim(),
+      subtitleLines: [
+        `Раскройное задание №${response.number} к заказу от ${formatRuDate(production?.createdAt?.toISOString() ?? "")}`,
+        `Цех «${workshop?.name ?? "—"}»${production?.dueDate ? ` · срок ${formatRuDate(production.dueDate)}` : ""}`,
+        response.executorType === "workshop"
+          ? `Раскрой выполняет: ${response.executorWorkshopName ?? "подрядчик"}`
+          : "Раскрой выполняем сами",
+      ],
+      colors,
+      rows: sizes.map((size) => ({
+        size,
+        quantities: colors.map((color) => formatRuQuantity(quantityAt(size, color))),
+      })),
+      totals: colors.map((color) =>
+        formatRuQuantity(sizes.reduce((sum, size) => sum + quantityAt(size, color), 0)),
+      ),
+      footerLines: [
+        `Материалы: ${response.materials
+          .map((material) => `${material.materialName} ${formatRuQuantity(material.requiredQuantity)} ${unitLabel(material.unit)}`)
+          .join(" · ")}`,
+        ...(response.comment ? [`Примечание: ${response.comment}`] : []),
+      ],
+    };
+
+    const result = await this.documentService.generateCuttingOrderDocument(
+      currentUser.companyId,
+      order.id,
+      order.productionOrderId,
+      order.number,
+      currentUser.id,
+      data,
+    );
+    await this.auditService.recordForUser(currentUser, {
+      entityType: "cutting_order",
+      entityId: order.id,
+      action: "cutting_order.document_generated",
+      afterJson: { documentId: result.document.id },
+    });
+    return { documentId: result.document.id, title: result.document.title };
   }
 
   async create(

@@ -5,6 +5,7 @@ import { AuditModule } from "../audit/audit.module";
 import { CatalogModule } from "../catalog/catalog.module";
 import { ContractManufacturingModule } from "../contract-manufacturing/contract-manufacturing.module";
 import { DATABASE_CONNECTION } from "../database/database.module";
+import { DocumentModule } from "../document/document.module";
 import { ProcurementModule } from "../procurement/procurement.module";
 import { WarehouseModule } from "../warehouse/warehouse.module";
 import { CuttingOrdersController } from "./cutting-orders.controller";
@@ -21,7 +22,7 @@ import { ProductionOrderSnapshotAdapter } from "./production-order-snapshot.adap
 // принцип 2) — модуль подключает существующие сервисы как адаптеры, а не
 // заводит собственный доступ к их таблицам.
 @Module({
-  imports: [ContractManufacturingModule, CatalogModule, ProcurementModule, WarehouseModule, AuditModule],
+  imports: [ContractManufacturingModule, CatalogModule, ProcurementModule, WarehouseModule, AuditModule, DocumentModule],
   controllers: [CuttingOrdersController],
   providers: [
     CuttingService,
