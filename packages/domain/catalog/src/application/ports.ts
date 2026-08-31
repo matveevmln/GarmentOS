@@ -1,6 +1,7 @@
 import type { Collection, CollectionSeason } from "../domain/collection";
 import type { Product, ProductStatus } from "../domain/product";
 import type { ProductVariant } from "../domain/product-variant";
+import type { ProductSize, ProductSizeDraft } from "../domain/product-size";
 
 export interface NewCollectionInput {
   companyId: string;
@@ -55,6 +56,13 @@ export interface NewProductVariantInput {
   skuCode: string;
   barcode: string | null;
   createdBy: string | null;
+}
+
+// Размерный ряд заменяется целиком: порядок и веса меняются вместе, поэтому
+// частичного обновления нет — иначе ряд мог бы остаться противоречивым.
+export interface ProductSizeRepository {
+  listByProduct(productId: string): Promise<ProductSize[]>;
+  replaceForProduct(productId: string, sizes: ProductSizeDraft[]): Promise<ProductSize[]>;
 }
 
 export interface ProductVariantRepository {

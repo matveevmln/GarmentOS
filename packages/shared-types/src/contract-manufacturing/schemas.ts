@@ -226,3 +226,40 @@ export const productionOrderResponseSchema = z.object({
   variants: z.array(productionOrderVariantResponseSchema),
 });
 export type ProductionOrderResponseDto = z.infer<typeof productionOrderResponseSchema>;
+
+// Предпросмотр матрицы размер × цвет до сохранения заказа (владелец проекта,
+// 2026-08-30). Считается на сервере, а не на клиенте: округление по методу
+// наибольших остатков должно быть одним и тем же, иначе показанная матрица
+// разойдётся с сохранённой.
+export const previewProductionOrderVariantsSchema = z.object({
+  productId: z.string().uuid(),
+  colors: z
+    .array(
+      z.object({
+        color: z.string().min(1),
+        quantity: z.number().int().positive(),
+      }),
+    )
+    .min(1, "Укажите хотя бы один цвет с количеством"),
+});
+export type PreviewProductionOrderVariantsDto = z.infer<typeof previewProductionOrderVariantsSchema>;
+
+export const productionOrderVariantPreviewRowSchema = z.object({
+  productVariantId: z.string().uuid(),
+  size: z.string(),
+  color: z.string(),
+  quantity: z.number().int(),
+});
+
+export const previewProductionOrderVariantsResponseSchema = z.object({
+  rows: z.array(productionOrderVariantPreviewRowSchema),
+  totalQuantity: z.number().int(),
+  // Размеры модели, у которых нет варианта под выбранный цвет — показываются
+  // честно, а не выкидываются молча.
+  missingVariants: z.array(z.object({ size: z.string(), color: z.string() })),
+  // true — у модели не задана раскладка, количества делятся поровну.
+  usedFallbackRatio: z.boolean(),
+});
+export type PreviewProductionOrderVariantsResponseDto = z.infer<
+  typeof previewProductionOrderVariantsResponseSchema
+>;

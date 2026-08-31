@@ -4,8 +4,11 @@ import { createZodDto } from "nestjs-zod";
 import {
   createProductionOrderFromQuantitySchema,
   createProductionOrderSchema,
+  previewProductionOrderVariantsResponseSchema,
+  previewProductionOrderVariantsSchema,
   productionOrderResponseSchema,
   receiveProductionOrderSchema,
+  type PreviewProductionOrderVariantsResponseDto,
   type ProductionOrderResponseDto,
 } from "@garmentos/shared-types";
 import { CurrentUser, type AuthenticatedRequestUser } from "../auth/current-user.decorator";
@@ -15,6 +18,7 @@ import { ContractManufacturingService } from "./contract-manufacturing.service";
 class CreateProductionOrderDto extends createZodDto(createProductionOrderSchema) {}
 class CreateProductionOrderFromQuantityDto extends createZodDto(createProductionOrderFromQuantitySchema) {}
 class ReceiveProductionOrderDto extends createZodDto(receiveProductionOrderSchema) {}
+class PreviewProductionOrderVariantsDto extends createZodDto(previewProductionOrderVariantsSchema) {}
 
 @ApiTags("production-orders")
 @Controller("production-orders")
@@ -32,6 +36,19 @@ export class ProductionOrdersController {
       body,
     );
     return productionOrderResponseSchema.parse(productionOrder);
+  }
+
+  // Предпросмотр матрицы размер × цвет до сохранения заказа (владелец
+  // проекта, 2026-08-30): пользователь видит раскладку, может поправить
+  // отдельные ячейки и только потом сохраняет. Считается на сервере, чтобы
+  // показанные числа в точности совпали с сохранёнными.
+  @RequirePermissions("contract_manufacturing.read")
+  @Post("preview-variants")
+  async previewVariants(
+    @Body() body: PreviewProductionOrderVariantsDto,
+  ): Promise<PreviewProductionOrderVariantsResponseDto> {
+    const preview = await this.contractManufacturingService.previewProductionOrderVariants(body);
+    return previewProductionOrderVariantsResponseSchema.parse(preview);
   }
 
   // «Указываю только модель и общее количество» (владелец проекта,

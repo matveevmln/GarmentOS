@@ -31,6 +31,11 @@ export {
   type ConsumeMaterialStockDeps,
   type ConsumeMaterialStockInput,
 } from "./application/consume-material-stock";
+export {
+  adjustMaterialStock,
+  type AdjustMaterialStockDeps,
+  type AdjustMaterialStockInput,
+} from "./application/adjust-material-stock";
 export { dispatchStock, type DispatchStockDeps, type DispatchStockInput } from "./application/dispatch-stock";
 export { transferStock, type TransferStockDeps, type TransferStockInput } from "./application/transfer-stock";
 export {

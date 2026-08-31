@@ -30,8 +30,11 @@ export class ProductionRequestController {
   // доменных записей, только готовит данные для следующего шага сценария.
   @RequirePermissions("contract_manufacturing.write")
   @Post("parse")
-  async parse(@Body() body: ParseProductionRequestDto): Promise<ParsedProductionRequestResponseDto> {
-    const parsed = await this.productionRequestService.parse(body.text);
+  async parse(
+    @Body() body: ParseProductionRequestDto,
+    @CurrentUser() currentUser: AuthenticatedRequestUser,
+  ): Promise<ParsedProductionRequestResponseDto> {
+    const parsed = await this.productionRequestService.parse(currentUser.companyId, body.text);
     return parsedProductionRequestResponseSchema.parse(parsed);
   }
 

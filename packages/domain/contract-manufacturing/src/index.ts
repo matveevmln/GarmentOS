@@ -7,6 +7,7 @@ export type {
   ProductionOrderVariant,
   ProductionOrderVariantDraft,
 } from "./domain/production-order";
+export { assertVariantsMatchPlannedQuantity } from "./domain/production-order";
 export { DomainError } from "./domain/errors";
 
 export type {

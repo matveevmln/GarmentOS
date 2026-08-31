@@ -56,6 +56,10 @@ const EXPECTED_TABLES = [
   "inbox_items",
   "inbox_suggestions",
   "telegram_invite_codes",
+  "product_sizes",
+  "cutting_orders",
+  "cutting_order_materials",
+  "cutting_order_results",
 ];
 
 function collectTables(): Record<string, unknown> {
@@ -113,6 +117,11 @@ describe("schema", () => {
       // — companyId не имеет смысла напрямую на этой строке, как и entity_type/
       // entity_id таблицы document_links/notes/audit_log выше.
       "telegram_invite_codes",
+      // Размерный ряд и строки раскройного задания наследуют тенант через FK
+      // на products/cutting_orders — как product_variants и bom_items выше.
+      "product_sizes",
+      "cutting_order_materials",
+      "cutting_order_results",
     ]);
 
     for (const [key, table] of Object.entries(tables)) {

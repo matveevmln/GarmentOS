@@ -101,3 +101,36 @@ export const listProductVariantsQuerySchema = z.object({
   productId: z.string().uuid(),
 });
 export type ListProductVariantsQueryDto = z.infer<typeof listProductVariantsQuerySchema>;
+
+// Размерный ряд модели: порядок размеров и веса раскладки (владелец проекта,
+// 2026-08-30). Веса — рабочие числа («185 / 381 / 381 / 381 / 186»), а не
+// проценты: сумма ничему не обязана равняться, важны только соотношения.
+export const productSizeSchema = z.object({
+  size: z.string().min(1, "Название размера не может быть пустым"),
+  ratioWeight: z.number().positive("Вес размера должен быть положительным"),
+});
+export type ProductSizeDto = z.infer<typeof productSizeSchema>;
+
+// Ряд заменяется целиком одной операцией: порядок и веса меняются вместе, и
+// частичное обновление оставило бы ряд в противоречивом состоянии.
+export const replaceProductSizesSchema = z.object({
+  sizes: z.array(productSizeSchema).min(1, "Размерный ряд должен содержать хотя бы один размер"),
+});
+export type ReplaceProductSizesDto = z.infer<typeof replaceProductSizesSchema>;
+
+export const productSizeResponseSchema = z.object({
+  size: z.string(),
+  sortOrder: z.number().int(),
+  ratioWeight: z.number(),
+});
+export type ProductSizeResponseDto = z.infer<typeof productSizeResponseSchema>;
+
+// Добавление цвета создаёт варианты сразу на все размеры ряда — иначе сетка
+// 5 размеров × 3 цвета требует пятнадцати ручных операций.
+export const addProductColorSchema = z.object({
+  color: z.string().min(1, "Название цвета не может быть пустым"),
+  // Код цвета вводит человек: транслитерация «Петроль» → «PETROL» машиной
+  // была бы угадыванием, а артикул попадает в документы.
+  colorCode: z.string().min(1, "Код цвета нужен для артикула"),
+});
+export type AddProductColorDto = z.infer<typeof addProductColorSchema>;

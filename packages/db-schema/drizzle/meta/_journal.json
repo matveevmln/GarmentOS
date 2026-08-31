@@ -134,6 +134,20 @@
       "when": 1788092732256,
       "tag": "0018_sloppy_sharon_carter",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1788109041936,
+      "tag": "0019_thin_sumo",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1788109042936,
+      "tag": "0020_product_variant_size_color_unique",
+      "breakpoints": true
     }
   ]
 }

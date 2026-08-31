@@ -87,3 +87,33 @@ export const productVariants = pgTable(
   },
   (table) => [uniqueIndex("product_variants_sku_idx").on(table.skuCode)],
 );
+
+// Размерный ряд модели: порядок размеров и пропорция раскладки (владелец
+// проекта, 2026-08-30). Отдельная таблица, а не колонки в product_variants:
+// там размер повторяется на каждый цвет (при 3 цветах «48-50» лежит в трёх
+// строках), и вес пришлось бы хранить тремя копиями, которые разъедутся.
+// Порядка размеров в схеме не было вовсе — «48-50 идёт раньше 52-54» до сих
+// пор выводилось из порядка создания SKU (известное упрощение,
+// contract-manufacturing.service.ts).
+//
+// ratioWeight — вес, а не готовое количество и не процент: владелец вводит
+// свои рабочие числа (185/381/381/381/186), система масштабирует их на любой
+// объём. Сумма весов ничему не обязана равняться.
+//
+// Версий у таблицы нет намеренно: результат применения раскладки навсегда
+// лежит в строках заказа (production_order_variants), поэтому правка ряда
+// не может задеть уже созданные заказы — гарантия структурой, не дисциплиной.
+export const productSizes = pgTable(
+  "product_sizes",
+  {
+    id: id(),
+    productId: uuid("product_id")
+      .notNull()
+      .references(() => products.id),
+    size: text("size").notNull(),
+    sortOrder: integer("sort_order").notNull(),
+    ratioWeight: numeric("ratio_weight", { precision: 12, scale: 3 }).notNull(),
+    ...auditColumns,
+  },
+  (table) => [uniqueIndex("product_sizes_product_size_idx").on(table.productId, table.size)],
+);

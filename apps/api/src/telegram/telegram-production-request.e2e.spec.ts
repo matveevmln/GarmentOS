@@ -339,13 +339,16 @@ describe("Telegram: текст → предпросмотр → подтверж
       .where(and(eq(auditLog.entityId, orderId ?? ""), eq(auditLog.action, "document.specification_generated")));
     expect(specAuditEntries).toHaveLength(1);
 
-    // Расход материала при подтверждении: 100 шт × 1.1 м/шт = 110 м списано
-    // со склада (150 - 110 = 40) — владелец проекта, 2026-08-02.
+    // Подтверждение заказа остаток НЕ меняет (владелец проекта, 2026-08-30):
+    // это договорённость с цехом, а не расход ткани. Единственная точка
+    // фактического списания — внесение факта раскроя, где известно, сколько
+    // реально ушло. До этого решения здесь ожидалось 40 (150 − 110 по нормам),
+    // причём только на Telegram-пути: веб-подтверждение не списывало вообще.
     const [stockAfterConfirm] = await db
       .select()
       .from(materialStockItems)
       .where(and(eq(materialStockItems.warehouseId, warehouse.id), eq(materialStockItems.materialId, material.id)));
-    expect(Number(stockAfterConfirm?.quantityOnHand)).toBe(40);
+    expect(Number(stockAfterConfirm?.quantityOnHand)).toBe(150);
 
     // Шаг 3: цех отвечает "Готово" — компания должна узнать об этом в своём
     // Telegram-чате, а не только запросив статус напрямую через API (владелец

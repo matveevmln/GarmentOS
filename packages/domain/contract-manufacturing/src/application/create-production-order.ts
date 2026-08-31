@@ -4,6 +4,7 @@ import {
   assertHasVariants,
   assertValidPlannedQuantity,
   assertValidUnitPrice,
+  assertVariantsMatchPlannedQuantity,
   assertValidVariant,
   type ProductionOrder,
   type ProductionOrderVariantDraft,
@@ -41,6 +42,7 @@ export async function createProductionOrderDraft(
   assertHasVariants(input.variants);
   for (const variant of input.variants) assertValidVariant(variant);
   assertValidPlannedQuantity(input.plannedQuantity);
+  assertVariantsMatchPlannedQuantity(input.variants, input.plannedQuantity);
   assertValidUnitPrice(input.agreedUnitPrice);
 
   const workshop = await deps.workshops.findById(input.companyId, input.workshopId);

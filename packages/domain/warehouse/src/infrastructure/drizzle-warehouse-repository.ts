@@ -369,14 +369,24 @@ export class DrizzleMaterialStockRepository implements MaterialStockRepository {
         .from(materialStockItems)
         .where(and(eq(materialStockItems.warehouseId, warehouseId), eq(materialStockItems.materialId, materialId)))
         .limit(1);
-      if (!existing) {
-        throw new Error(`consume: material_stock_items не найден (warehouse=${warehouseId}, material=${materialId})`);
-      }
+      // Строки остатка может не быть вовсе — например, материал реально
+      // израсходован в крое, но приход по нему ещё не оприходован. Раньше
+      // это была ошибка; с 2026-08-30 факт производства не блокируется
+      // состоянием учёта, поэтому строка заводится с нуля и уходит в минус.
+      const target = existing
+        ? existing
+        : (
+            await tx
+              .insert(materialStockItems)
+              .values({ warehouseId, materialId, quantityOnHand: "0" })
+              .returning()
+          )[0];
+      if (!target) throw new Error("consume: не удалось создать material_stock_items");
 
       const [row] = await tx
         .update(materialStockItems)
-        .set({ quantityOnHand: String(Number(existing.quantityOnHand) - quantity), updatedAt: new Date() })
-        .where(eq(materialStockItems.id, existing.id))
+        .set({ quantityOnHand: String(Number(target.quantityOnHand) - quantity), updatedAt: new Date() })
+        .where(eq(materialStockItems.id, target.id))
         .returning();
       if (!row) throw new Error("consume: UPDATE material_stock_items не вернул строку");
 
@@ -384,6 +394,50 @@ export class DrizzleMaterialStockRepository implements MaterialStockRepository {
         materialStockItemId: row.id,
         type: "consumption",
         quantity: String(quantity),
+        referenceType: meta.referenceType ?? null,
+        referenceId: meta.referenceId ?? null,
+        createdBy: meta.createdBy ?? null,
+      });
+
+      return toMaterialStockItem(row);
+    });
+  }
+
+  // Корректировка остатка на разницу (владелец проекта, 2026-08-30 —
+  // «нельзя молча переписывать историю»). Прошлое движение не изменяется и не
+  // удаляется: исправление факта кроя добавляет отдельную строку типа
+  // adjustment на дельту. delta > 0 — остаток вырос (списали меньше, чем
+  // думали), delta < 0 — уменьшился. Значение типа adjustment существовало в
+  // enum с самого начала, но до сих пор не имело ни одного вызывающего.
+  async adjust(warehouseId: string, materialId: string, delta: number, meta: MaterialStockMovementMeta): Promise<MaterialStockItem> {
+    return this.db.transaction(async (tx) => {
+      const [existing] = await tx
+        .select()
+        .from(materialStockItems)
+        .where(and(eq(materialStockItems.warehouseId, warehouseId), eq(materialStockItems.materialId, materialId)))
+        .limit(1);
+
+      const target = existing
+        ? existing
+        : (
+            await tx
+              .insert(materialStockItems)
+              .values({ warehouseId, materialId, quantityOnHand: "0" })
+              .returning()
+          )[0];
+      if (!target) throw new Error("adjust: не удалось создать material_stock_items");
+
+      const [row] = await tx
+        .update(materialStockItems)
+        .set({ quantityOnHand: String(Number(target.quantityOnHand) + delta), updatedAt: new Date() })
+        .where(eq(materialStockItems.id, target.id))
+        .returning();
+      if (!row) throw new Error("adjust: UPDATE material_stock_items не вернул строку");
+
+      await tx.insert(materialStockMovements).values({
+        materialStockItemId: row.id,
+        type: "adjustment",
+        quantity: String(delta),
         referenceType: meta.referenceType ?? null,
         referenceId: meta.referenceId ?? null,
         createdBy: meta.createdBy ?? null,

@@ -151,7 +151,7 @@ describe("Contract Manufacturing API (e2e)", () => {
         productId: product.id,
         bomId: draftBom.id,
         workshopId: workshop.id,
-        plannedQuantity: 150,
+        plannedQuantity: 100,
         agreedUnitPrice: 450,
         variants: [{ productVariantId: variant.id, quantity: 100 }],
       })
@@ -172,7 +172,7 @@ describe("Contract Manufacturing API (e2e)", () => {
         productId: product.id,
         bomId: approvedBom.id,
         workshopId: workshop.id,
-        plannedQuantity: 150,
+        plannedQuantity: 100,
         agreedUnitPrice: 450,
         variants: [{ productVariantId: variant.id, quantity: 100 }],
       })

@@ -21,6 +21,7 @@ import { TelegramModule } from "./telegram/telegram.module";
 import { AiProductionAssistantModule } from "./ai-production-assistant/ai-production-assistant.module";
 import { DocumentModule } from "./document/document.module";
 import { ReportingModule } from "./reporting/reporting.module";
+import { CuttingModule } from "./cutting/cutting.module";
 
 // Presentation-слой (docs/ARCHITECTURE.md, п.2). Доменные модули
 // (packages/domain/*) подключаются сюда по мере реализации итераций
@@ -46,6 +47,7 @@ import { ReportingModule } from "./reporting/reporting.module";
     DocumentModule,
     AiProductionAssistantModule,
     ReportingModule,
+    CuttingModule,
   ],
   providers: [
     { provide: APP_PIPE, useClass: ZodValidationPipe },

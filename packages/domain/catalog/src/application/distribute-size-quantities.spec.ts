@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { distributeQuantityBySize } from "./distribute-size-quantities";
+import { distributeQuantityByRatio, distributeQuantityBySize, type SizeRatio } from "./distribute-size-quantities";
 import { DomainError } from "../domain/errors";
 
 describe("distributeQuantityBySize", () => {
@@ -47,5 +47,68 @@ describe("distributeQuantityBySize", () => {
     expect(() => distributeQuantityBySize(["S"], 0)).toThrow(DomainError);
     expect(() => distributeQuantityBySize(["S"], -5)).toThrow(DomainError);
     expect(() => distributeQuantityBySize(["S"], 10.5)).toThrow(DomainError);
+  });
+});
+
+describe("distributeQuantityByRatio (раскладка из карточки модели)", () => {
+  // Реальный размерный ряд «Стеганки» (владелец проекта, 2026-08-30).
+  const STEGANKA: SizeRatio[] = [
+    { size: "48-50", weight: 185 },
+    { size: "52-54", weight: 381 },
+    { size: "56-58", weight: 381 },
+    { size: "60-62", weight: 381 },
+    { size: "64-66", weight: 186 },
+  ];
+
+  it("на количестве, равном сумме весов, возвращает сами веса", () => {
+    expect(distributeQuantityByRatio(STEGANKA, 1514).map((row) => row.quantity)).toEqual([
+      185, 381, 381, 381, 186,
+    ]);
+  });
+
+  it("масштабирует раскладку на другой объём (пример владельца: 500 → 61/126/126/126/61)", () => {
+    expect(distributeQuantityByRatio(STEGANKA, 500).map((row) => row.quantity)).toEqual([
+      61, 126, 126, 126, 61,
+    ]);
+  });
+
+  it("«Двухнитка»: 300 и 200 по одной и той же раскладке дают ровно 300 и 200", () => {
+    const dvuhnitka: SizeRatio[] = [
+      { size: "48-50", weight: 185 },
+      { size: "52-54", weight: 381 },
+      { size: "56-58", weight: 381 },
+      { size: "60-62", weight: 381 },
+      { size: "64-66", weight: 186 },
+    ];
+    const petrol = distributeQuantityByRatio(dvuhnitka, 300);
+    const bordo = distributeQuantityByRatio(dvuhnitka, 200);
+    expect(petrol.reduce((sum, row) => sum + row.quantity, 0)).toBe(300);
+    expect(bordo.reduce((sum, row) => sum + row.quantity, 0)).toBe(200);
+  });
+
+  it("не теряет и не добавляет ни одной единицы на любом объёме", () => {
+    for (const total of [1, 7, 99, 1000, 4542, 12345]) {
+      const result = distributeQuantityByRatio(STEGANKA, total);
+      expect(result.reduce((sum, row) => sum + row.quantity, 0), `объём ${total}`).toBe(total);
+    }
+  });
+
+  it("детерминирована: один и тот же вход всегда даёт один и тот же выход", () => {
+    const first = distributeQuantityByRatio(STEGANKA, 777);
+    for (let i = 0; i < 20; i += 1) {
+      expect(distributeQuantityByRatio(STEGANKA, 777)).toEqual(first);
+    }
+  });
+
+  it("при равных весах ведёт себя как равномерное деление, остаток — первым размерам", () => {
+    const equal: SizeRatio[] = ["S", "M", "L"].map((size) => ({ size, weight: 1 }));
+    expect(distributeQuantityByRatio(equal, 11).map((row) => row.quantity)).toEqual([4, 4, 3]);
+  });
+
+  it("отклоняет пустой ряд, неположительный вес и нецелое количество", () => {
+    expect(() => distributeQuantityByRatio([], 100)).toThrow(DomainError);
+    expect(() => distributeQuantityByRatio([{ size: "S", weight: 0 }], 100)).toThrow(DomainError);
+    expect(() => distributeQuantityByRatio([{ size: "S", weight: -1 }], 100)).toThrow(DomainError);
+    expect(() => distributeQuantityByRatio(STEGANKA, 10.5)).toThrow(DomainError);
   });
 });

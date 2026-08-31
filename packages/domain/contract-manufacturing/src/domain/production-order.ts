@@ -68,6 +68,28 @@ export function assertValidVariant(variant: ProductionOrderVariantDraft): void {
   }
 }
 
+// Плановое количество партии обязано совпадать с суммой разбивки по размерам
+// и цветам (владелец проекта, 2026-08-30). До этой проверки числа могли
+// разойтись молча, и разные части системы считали по разным: паспорт партии
+// умножает нормы расхода на plannedQuantity, приёмка идёт по строкам
+// вариантов, а раскрой считает по ним же. Все существующие пути создания
+// заказа уже суммируют варианты, поэтому проверка ничего не ломает — она
+// закрывает дыру, а не меняет поведение.
+export function assertVariantsMatchPlannedQuantity(
+  variants: ProductionOrderVariantDraft[],
+  plannedQuantity: number,
+): void {
+  const sum = variants.reduce((total, variant) => total + variant.quantity, 0);
+  // Количества хранятся как numeric(12,3), поэтому сравнение с допуском, а не
+  // строгое равенство: 0.1 + 0.2 !== 0.3 в двоичной арифметике.
+  if (Math.abs(sum - plannedQuantity) > 0.0005) {
+    throw new DomainError(
+      `Сумма количеств по размерам и цветам (${sum}) не совпадает с плановым количеством заказа (${plannedQuantity})`,
+      "PRODUCTION_ORDER_VARIANTS_SUM_MISMATCH",
+    );
+  }
+}
+
 export function assertValidPlannedQuantity(plannedQuantity: number): void {
   if (plannedQuantity <= 0) {
     throw new DomainError(

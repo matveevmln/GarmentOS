@@ -21,6 +21,7 @@
     "@garmentos/domain-bom": "workspace:*",
     "@garmentos/domain-catalog": "workspace:*",
     "@garmentos/domain-contract-manufacturing": "workspace:*",
+    "@garmentos/domain-cutting": "workspace:*",
     "@garmentos/domain-document": "workspace:*",
     "@garmentos/domain-finance": "workspace:*",
     "@garmentos/domain-honest-sign": "workspace:*",

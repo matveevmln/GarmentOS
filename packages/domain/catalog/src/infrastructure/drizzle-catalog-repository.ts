@@ -1,8 +1,9 @@
-import { collections, products, productVariants, type DbOrTx } from "@garmentos/db-schema";
-import { and, eq, ilike } from "drizzle-orm";
+import { collections, productSizes, products, productVariants, type DbOrTx } from "@garmentos/db-schema";
+import { and, asc, eq, ilike } from "drizzle-orm";
 import type { Collection } from "../domain/collection";
 import type { Product } from "../domain/product";
 import type { ProductVariant } from "../domain/product-variant";
+import type { ProductSize, ProductSizeDraft } from "../domain/product-size";
 import type {
   CollectionRepository,
   NewCollectionInput,
@@ -10,6 +11,7 @@ import type {
   NewProductVariantInput,
   ProductCostsInput,
   ProductRepository,
+  ProductSizeRepository,
   ProductVariantRepository,
 } from "../application/ports";
 
@@ -187,5 +189,51 @@ export class DrizzleProductVariantRepository implements ProductVariantRepository
   async listByProduct(productId: string): Promise<ProductVariant[]> {
     const rows = await this.db.select().from(productVariants).where(eq(productVariants.productId, productId));
     return rows.map(toProductVariant);
+  }
+}
+
+function toProductSize(row: typeof productSizes.$inferSelect): ProductSize {
+  return {
+    id: row.id,
+    productId: row.productId,
+    size: row.size,
+    sortOrder: row.sortOrder,
+    ratioWeight: row.ratioWeight,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  };
+}
+
+export class DrizzleProductSizeRepository implements ProductSizeRepository {
+  constructor(private readonly db: DbOrTx) {}
+
+  async listByProduct(productId: string): Promise<ProductSize[]> {
+    const rows = await this.db
+      .select()
+      .from(productSizes)
+      .where(eq(productSizes.productId, productId))
+      .orderBy(asc(productSizes.sortOrder));
+    return rows.map(toProductSize);
+  }
+
+  // Ряд заменяется целиком в одной транзакции: порядок и веса меняются
+  // вместе, и промежуточное состояние (часть старых размеров, часть новых)
+  // не должно быть видно ни одному читателю.
+  async replaceForProduct(productId: string, sizes: ProductSizeDraft[]): Promise<ProductSize[]> {
+    return this.db.transaction(async (tx) => {
+      await tx.delete(productSizes).where(eq(productSizes.productId, productId));
+      const rows = await tx
+        .insert(productSizes)
+        .values(
+          sizes.map((row, index) => ({
+            productId,
+            size: row.size,
+            sortOrder: index,
+            ratioWeight: String(row.ratioWeight),
+          })),
+        )
+        .returning();
+      return rows.map(toProductSize);
+    });
   }
 }

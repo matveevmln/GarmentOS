@@ -13,12 +13,14 @@ import {
   type WorkshopRepository,
 } from "@garmentos/domain-contract-manufacturing";
 import {
-  distributeQuantityBySize,
+  distributeQuantityByRatio,
   distributeQuantityEvenly,
   DomainError as CatalogDomainError,
 } from "@garmentos/domain-catalog";
 import type {
   CreateProductionOrderDto,
+  PreviewProductionOrderVariantsDto,
+  PreviewProductionOrderVariantsResponseDto,
   CreateProductionOrderFromQuantityDto,
   CreateWorkshopDto,
   UpdateWorkshopDto,
@@ -115,6 +117,7 @@ export class ContractManufacturingService {
     if (variants.length === 0) {
       throw new CatalogDomainError(`У модели ${input.productId} нет ни одного SKU`, "PRODUCT_HAS_NO_VARIANTS");
     }
+    const ratios = await this.loadSizeRatios(input.productId);
 
     // Цвета делятся поровну (не по правилу размерных тиров — оно осмысленно
     // только для размеров, не для цветов), внутри каждого цвета — по
@@ -126,8 +129,9 @@ export class ContractManufacturingService {
       const sizesForColor = variants.filter((variant) => variant.color === color);
       const colorQuantity = colorQuantities[colorIndex] ?? 0;
       if (colorQuantity === 0) return [];
-      return distributeQuantityBySize(
+      return this.distributeAcrossSizes(
         sizesForColor.map((variant) => variant.size),
+        ratios,
         colorQuantity,
       )
         .filter((row) => row.quantity > 0)
@@ -148,6 +152,77 @@ export class ContractManufacturingService {
       createdBy: input.createdBy,
       variants: variantDrafts,
     });
+  }
+
+  // Раскладка модели: порядок размеров и веса из карточки (product_sizes).
+  // Пустой результат означает «ряд не задан» — тогда применяется запасное
+  // равномерное деление, а вызывающий явно об этом сообщает пользователю
+  // (числа финансово значимые, молча угадывать пропорцию нельзя).
+  private async loadSizeRatios(productId: string): Promise<Map<string, number>> {
+    const sizes = await this.catalogService.listProductSizes(productId);
+    return new Map(sizes.map((size) => [size.size, Number(size.ratioWeight)]));
+  }
+
+  // Единая точка распределения количества по размерам (владелец проекта,
+  // 2026-08-30). Веса берутся из карточки модели; размеры, которых нет в
+  // ряду, получают вес 1 — иначе вариант с «забытым» размером молча выпал бы
+  // из заказа. Если раскладки нет вовсе, все веса равны, то есть деление
+  // становится равномерным.
+  private distributeAcrossSizes(
+    sizes: string[],
+    ratios: Map<string, number>,
+    totalQuantity: number,
+  ): Array<{ size: string; quantity: number }> {
+    return distributeQuantityByRatio(
+      sizes.map((size) => ({ size, weight: ratios.get(size) ?? 1 })),
+      totalQuantity,
+    );
+  }
+
+  // Предпросмотр матрицы размер × цвет до сохранения заказа. Считается на
+  // сервере, чтобы показанные числа совпадали с сохранёнными: округление по
+  // методу наибольших остатков должно быть ровно одним и тем же.
+  async previewProductionOrderVariants(
+    input: PreviewProductionOrderVariantsDto,
+  ): Promise<PreviewProductionOrderVariantsResponseDto> {
+    const variants = await this.catalogService.listProductVariants(input.productId);
+    if (variants.length === 0) {
+      throw new CatalogDomainError(`У модели ${input.productId} нет ни одного SKU`, "PRODUCT_HAS_NO_VARIANTS");
+    }
+    const ratios = await this.loadSizeRatios(input.productId);
+
+    // Порядок размеров — из раскладки модели; размеры без раскладки идут
+    // следом в порядке появления среди вариантов.
+    const orderedSizes = [...ratios.keys()];
+    for (const variant of variants) {
+      if (!orderedSizes.includes(variant.size)) orderedSizes.push(variant.size);
+    }
+
+    const rows: PreviewProductionOrderVariantsResponseDto["rows"] = [];
+    const missingVariants: PreviewProductionOrderVariantsResponseDto["missingVariants"] = [];
+
+    for (const colorRow of input.colors) {
+      const sizesForColor = orderedSizes.filter((size) =>
+        variants.some((variant) => variant.size === size && variant.color === colorRow.color),
+      );
+      for (const size of orderedSizes) {
+        if (!sizesForColor.includes(size)) missingVariants.push({ size, color: colorRow.color });
+      }
+      if (sizesForColor.length === 0) continue;
+
+      for (const { size, quantity } of this.distributeAcrossSizes(sizesForColor, ratios, colorRow.quantity)) {
+        const variant = variants.find((row) => row.size === size && row.color === colorRow.color);
+        if (!variant) continue;
+        rows.push({ productVariantId: variant.id, size, color: colorRow.color, quantity });
+      }
+    }
+
+    return {
+      rows,
+      totalQuantity: rows.reduce((sum, row) => sum + row.quantity, 0),
+      missingVariants,
+      usedFallbackRatio: ratios.size === 0,
+    };
   }
 
   async confirmProductionOrder(companyId: string, productionOrderId: string): Promise<ProductionOrder> {

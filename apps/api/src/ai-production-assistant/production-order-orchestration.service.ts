@@ -1,9 +1,8 @@
-import { Inject, Injectable, Logger } from "@nestjs/common";
+import { Inject, Injectable } from "@nestjs/common";
 import type { BomItem } from "@garmentos/domain-bom";
 import type { ProductionOrder } from "@garmentos/domain-contract-manufacturing";
 import type { AuditSource } from "@garmentos/domain-audit";
 import type { DocumentEntity, SpecificationDocumentData, SpecificationLineItem } from "@garmentos/domain-document";
-import { DomainError as WarehouseDomainError } from "@garmentos/domain-warehouse";
 import type { ProductionOrderCostSnapshot } from "@garmentos/shared-types";
 import { AuditService } from "../audit/audit.service";
 import { BomService } from "../bom/bom.service";
@@ -87,7 +86,6 @@ export class ProductionOrderOrchestrationService {
   // использовали тот же механизм (требование владельца проекта 2026-07-26:
   // "Telegram — только интерфейс, вся логика должна жить в GarmentOS").
   private readonly pendingByChannel = new Map<string, PendingProductionRequest>();
-  private readonly logger = new Logger(ProductionOrderOrchestrationService.name);
 
   constructor(
     private readonly productionRequestService: ProductionRequestService,
@@ -109,7 +107,7 @@ export class ProductionOrderOrchestrationService {
     workshopId: string,
     text: string,
   ): Promise<ProductionOrder> {
-    const parsed = await this.productionRequestService.parse(text);
+    const parsed = await this.productionRequestService.parse(companyId, text);
 
     const product = await this.catalogService.findProductByName(companyId, parsed.modelName);
     if (!product) {
@@ -165,7 +163,7 @@ export class ProductionOrderOrchestrationService {
   // ("Цех: ...") или у компании ровно один активный цех — выбирается сам;
   // иначе перечисляется как проблема (AI не имеет права придумать цех).
   async buildPreview(companyId: string, text: string): Promise<ProductionRequestPreview> {
-    const parsed = await this.productionRequestService.parse(text);
+    const parsed = await this.productionRequestService.parse(companyId, text);
     const warnings: string[] = [];
 
     const product = await this.catalogService.findProductByName(companyId, parsed.modelName);
@@ -286,40 +284,6 @@ export class ProductionOrderOrchestrationService {
     return warnings;
   }
 
-  // Расход материала при подтверждении заказа — вызывается только если
-  // материалы предоставляет компания (production_orders.materials_provided_by_us,
-  // по умолчанию true — CLAUDE.md, глоссарий: цех шьёт из наших материалов).
-  // Недостаток на складе не блокирует уже подтверждённый заказ (он был
-  // видимым предупреждением ещё в предпросмотре) — записывается расход по
-  // тому, что реально есть, остальное просто не списывается, ошибка логируется.
-  private async consumeMaterialsForOrder(companyId: string, order: ProductionOrder): Promise<void> {
-    if (!order.materialsProvidedByUs) return;
-
-    const bom = await this.bomService.getApproved(companyId, { productId: order.productId });
-    if (!bom) return;
-
-    const warehouses = await this.warehouseService.listWarehouses(companyId);
-    const warehouse = warehouses.length === 1 ? warehouses[0] : undefined;
-    if (!warehouse) return;
-
-    const totalQuantity = order.variants.reduce((sum, variant) => sum + Number(variant.quantity), 0);
-    for (const bomItem of bom.items) {
-      const required = totalQuantity * Number(bomItem.quantityPerUnit) * (1 + Number(bomItem.wastePercent) / 100);
-      try {
-        await this.warehouseService.consumeMaterialStock(warehouse.id, bomItem.materialId, required, {
-          referenceType: "production_order",
-          referenceId: order.id,
-        });
-      } catch (error) {
-        if (error instanceof WarehouseDomainError) {
-          this.logger.warn(`Недостаточно материала ${bomItem.materialId} для заказа ${order.id}: ${error.message}`);
-          continue;
-        }
-        throw error;
-      }
-    }
-  }
-
   // Предпросмотр, адресованный конкретному разговорному каналу (Telegram-чат
   // и т.п.) — хранит состояние "ждёт подтверждения" отдельно на каждый канал,
   // не глобально на компанию (два чата одной компании не должны путать друг
@@ -354,10 +318,16 @@ export class ProductionOrderOrchestrationService {
   }
 
   // Вызывается после того, как человек ответил "Да" — только теперь система
-  // реально создаёт заказ, списывает расход материалов (consumeMaterialsForOrder,
-  // Итерация 9), формирует PDF и отправляет спецификацию цеху (требование
-  // владельца проекта 2026-07-26: подтверждение должно быть осмысленным, не
-  // просто Да/Нет "в никуда", и весь путь выполняется одним подтверждением).
+  // реально создаёт заказ, формирует PDF и отправляет спецификацию цеху
+  // (требование владельца проекта 2026-07-26: подтверждение должно быть
+  // осмысленным, не просто Да/Нет "в никуда", и весь путь выполняется одним
+  // подтверждением).
+  //
+  // Материал здесь НЕ списывается (владелец проекта, 2026-08-30): подтверждение
+  // заказа — это договорённость с цехом, а не расход ткани. Единственная точка
+  // фактического списания — внесение факта раскроя, где известно, сколько
+  // реально ушло. До этой правки списание висело здесь и срабатывало только на
+  // Telegram-пути: заказы из веб-интерфейса не списывали материал вообще.
   async confirmPendingRequest(
     channelKey: string,
     userId: string | null,
@@ -374,7 +344,6 @@ export class ProductionOrderOrchestrationService {
 
     const draft = await this.createFromText(pending.companyId, userId, pending.workshopId, pending.text);
     const order = await this.confirmProductionOrder(pending.companyId, draft.id, userId, "telegram");
-    await this.consumeMaterialsForOrder(pending.companyId, order);
     const document = await this.generateAndSendSpecification(pending.companyId, order.id, userId);
     return { order, document };
   }
