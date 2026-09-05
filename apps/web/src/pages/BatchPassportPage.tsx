@@ -125,6 +125,7 @@ export function BatchPassportPage() {
   const [error, setError] = useState(false);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isChangingStatus, setIsChangingStatus] = useState(false);
   const [confirmRegenerate, setConfirmRegenerate] = useState(false);
   const [tab, setTab] = useState<TabKey>("cost");
   const [uploadFiles, setUploadFiles] = useState<File[]>([]);
@@ -285,6 +286,24 @@ export function BatchPassportPage() {
     } finally {
       setIsGenerating(false);
       setConfirmRegenerate(false);
+    }
+  };
+
+  // P0-1 (владелец проекта, 2026-09-05) — переходы «Размещён» → «В работе» →
+  // «Готово к отгрузке», которые сегодня приходят только через Telegram-ответ
+  // цеха. Единственный способ провести партию дальше из интерфейса, пока
+  // Telegram не настроен ни для одного цеха на пилоте.
+  const changeOrderStatus = async (status: "in_progress" | "ready_for_pickup") => {
+    if (!id) return;
+    setIsChangingStatus(true);
+    try {
+      await apiRequest(`/production-orders/${id}/status`, { method: "POST", body: { status } });
+      load();
+      toast.success(status === "in_progress" ? "Заказ переведён «В работе»" : "Заказ переведён «Готово к отгрузке»");
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Не удалось сменить статус заказа");
+    } finally {
+      setIsChangingStatus(false);
     }
   };
 
@@ -1187,6 +1206,25 @@ export function BatchPassportPage() {
             <p className="t-secondary">Заказ отменён — партия вышла из производственной шкалы.</p>
           )}
         </div>
+        {/* P0-1: переход на следующий этап без Telegram — цех сегодня
+            сообщает об этом текстом, но канал не настроен ни для одного
+            цеха на пилоте. */}
+        {passport.status === "placed" || passport.status === "in_progress" ? (
+          <div className="mt-4 flex items-center gap-2 border-t border-border pt-4">
+            <span className="t-secondary">Цех сообщил:</span>
+            <Button
+              type="button"
+              size="sm"
+              variant="secondary"
+              loading={isChangingStatus}
+              onClick={() =>
+                void changeOrderStatus(passport.status === "placed" ? "in_progress" : "ready_for_pickup")
+              }
+            >
+              {passport.status === "placed" ? "Начали шить" : "Готово к отгрузке"}
+            </Button>
+          </div>
+        ) : null}
         <div className="mt-4">
           <EmptyState
             compact

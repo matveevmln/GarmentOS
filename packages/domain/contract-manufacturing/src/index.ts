@@ -41,6 +41,11 @@ export {
   type UpdateProductionOrderStatusFromWorkshopInput,
 } from "./application/update-production-order-status-from-workshop";
 export {
+  updateProductionOrderStatus,
+  type UpdateProductionOrderStatusDeps,
+  type UpdateProductionOrderStatusInput,
+} from "./application/update-production-order-status";
+export {
   receiveProductionOrder,
   type ReceiveProductionOrderDeps,
   type ReceiveProductionOrderInput,

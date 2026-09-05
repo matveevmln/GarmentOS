@@ -4,6 +4,7 @@ import {
   createProductionOrderDraft,
   createWorkshop,
   receiveProductionOrder as receiveProductionOrderUseCase,
+  updateProductionOrderStatus as updateProductionOrderStatusUseCase,
   updateProductionOrderStatusFromWorkshop,
   updateWorkshop,
   type BomApprovalPort,
@@ -259,6 +260,21 @@ export class ContractManufacturingService {
     return updateProductionOrderStatusFromWorkshop(
       { productionOrders: this.productionOrders },
       { companyId, workshopId, status },
+    );
+  }
+
+  // REST-путь смены статуса (P0-1, владелец проекта, 2026-09-05) — тот же
+  // инвариант, что у Telegram-пути выше, но по конкретному id заказа, не по
+  // цеху. Единственная точка входа в Web UI, пока Telegram-канал с цехом не
+  // настроен.
+  async updateProductionOrderStatus(
+    companyId: string,
+    productionOrderId: string,
+    status: "in_progress" | "ready_for_pickup",
+  ): Promise<ProductionOrder> {
+    return updateProductionOrderStatusUseCase(
+      { productionOrders: this.productionOrders },
+      { companyId, productionOrderId, status },
     );
   }
 

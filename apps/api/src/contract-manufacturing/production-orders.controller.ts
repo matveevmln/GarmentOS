@@ -8,6 +8,7 @@ import {
   previewProductionOrderVariantsSchema,
   productionOrderResponseSchema,
   receiveProductionOrderSchema,
+  updateProductionOrderStatusSchema,
   type PreviewProductionOrderVariantsResponseDto,
   type ProductionOrderResponseDto,
 } from "@garmentos/shared-types";
@@ -19,6 +20,7 @@ class CreateProductionOrderDto extends createZodDto(createProductionOrderSchema)
 class CreateProductionOrderFromQuantityDto extends createZodDto(createProductionOrderFromQuantitySchema) {}
 class ReceiveProductionOrderDto extends createZodDto(receiveProductionOrderSchema) {}
 class PreviewProductionOrderVariantsDto extends createZodDto(previewProductionOrderVariantsSchema) {}
+class UpdateProductionOrderStatusDto extends createZodDto(updateProductionOrderStatusSchema) {}
 
 @ApiTags("production-orders")
 @Controller("production-orders")
@@ -74,6 +76,28 @@ export class ProductionOrdersController {
   // которого сюда создал бы цикл модулей (тот модуль уже импортирует этот).
   // Эндпоинт — production-order-specification.controller.ts, тот же
   // "production-orders" префикс.
+
+  // REST-путь смены статуса (P0-1, владелец проекта, 2026-09-05) — переходы,
+  // которые сегодня приходят только через Telegram-ответ цеха
+  // (updateProductionOrderStatusFromWorkshop), но Telegram не настроен ни для
+  // одного цеха на пилоте: без этого эндпоинта партия физически не может
+  // дойти дальше "Размещён" через интерфейс. "received" сюда не входит —
+  // это отдельный эндпоинт ниже (receive), потому что зачисляет остаток на
+  // склад, а не просто меняет статус.
+  @RequirePermissions("contract_manufacturing.write")
+  @Post(":id/status")
+  async updateStatus(
+    @Param("id") id: string,
+    @Body() body: UpdateProductionOrderStatusDto,
+    @CurrentUser() currentUser: AuthenticatedRequestUser,
+  ): Promise<ProductionOrderResponseDto> {
+    const productionOrder = await this.contractManufacturingService.updateProductionOrderStatus(
+      currentUser.companyId,
+      id,
+      body.status,
+    );
+    return productionOrderResponseSchema.parse(productionOrder);
+  }
 
   // Приёмка партии на склад (Итерация 10) — доступна только когда цех
   // сообщил "готово к отгрузке" (assertCanReceive), склад выбирается тем, кто

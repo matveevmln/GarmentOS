@@ -236,6 +236,23 @@ export function ProductionOrdersPage() {
     }
   };
 
+  // P0-1 (владелец проекта, 2026-09-05) — переходы, которые сегодня приходят
+  // только через Telegram-ответ цеха. Единственный способ провести партию
+  // дальше «Размещён» из интерфейса, пока Telegram не настроен ни для
+  // одного цеха на пилоте.
+  const changeStatus = async (orderId: string, status: "in_progress" | "ready_for_pickup") => {
+    setPendingOrderAction(orderId);
+    try {
+      await apiRequest(`/production-orders/${orderId}/status`, { method: "POST", body: { status } });
+      await reload();
+      toast.success(status === "in_progress" ? "Заказ переведён «В работе»" : "Заказ переведён «Готово к отгрузке»");
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Не удалось сменить статус заказа");
+    } finally {
+      setPendingOrderAction(null);
+    }
+  };
+
   const receiveOrder = async (orderId: string) => {
     const warehouseId = receiveWarehouse[orderId];
     if (!warehouseId) {
@@ -640,9 +657,11 @@ export function ProductionOrdersPage() {
                       {formatQuantity(Number(row.plannedQuantity))}
                     </Td>
                     {/* Действия живут в колонке статуса: у черновика —
-                        «Подтвердить», у готового к отгрузке — выбор склада
-                        и «Принять партию». Клик по ним не открывает
-                        паспорт (stopPropagation), как и раньше. */}
+                        «Подтвердить», у размещённого/в работе — переход на
+                        следующий этап (P0-1, без Telegram), у готового к
+                        отгрузке — выбор склада и «Принять партию». Клик по
+                        ним не открывает паспорт (stopPropagation), как и
+                        раньше. */}
                     <Td>
                       <div className="flex items-center justify-start gap-2" onClick={(event) => event.stopPropagation()}>
                         {row.status === "draft" ? (
@@ -653,6 +672,26 @@ export function ProductionOrdersPage() {
                             onClick={() => void confirmOrder(row.id)}
                           >
                             Подтвердить
+                          </Button>
+                        ) : row.status === "placed" ? (
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="secondary"
+                            loading={pendingOrderAction === row.id}
+                            onClick={() => void changeStatus(row.id, "in_progress")}
+                          >
+                            Начали шить
+                          </Button>
+                        ) : row.status === "in_progress" ? (
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="secondary"
+                            loading={pendingOrderAction === row.id}
+                            onClick={() => void changeStatus(row.id, "ready_for_pickup")}
+                          >
+                            Готово к отгрузке
                           </Button>
                         ) : row.status === "ready_for_pickup" ? (
                           <>
@@ -718,7 +757,10 @@ export function ProductionOrdersPage() {
                   key={row.id}
                   onClick={() => void navigate(`/production-orders/${row.id}`)}
                   footer={
-                    row.status === "draft" || row.status === "ready_for_pickup" ? (
+                    row.status === "draft" ||
+                    row.status === "placed" ||
+                    row.status === "in_progress" ||
+                    row.status === "ready_for_pickup" ? (
                       <div className="mt-3 flex items-center gap-2 border-t border-border pt-3">
                         {row.status === "draft" ? (
                           <Button
@@ -728,6 +770,26 @@ export function ProductionOrdersPage() {
                             onClick={() => void confirmOrder(row.id)}
                           >
                             Подтвердить
+                          </Button>
+                        ) : row.status === "placed" ? (
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="secondary"
+                            loading={pendingOrderAction === row.id}
+                            onClick={() => void changeStatus(row.id, "in_progress")}
+                          >
+                            Начали шить
+                          </Button>
+                        ) : row.status === "in_progress" ? (
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="secondary"
+                            loading={pendingOrderAction === row.id}
+                            onClick={() => void changeStatus(row.id, "ready_for_pickup")}
+                          >
+                            Готово к отгрузке
                           </Button>
                         ) : (
                           <>

@@ -219,4 +219,130 @@ describe("Contract Manufacturing API (e2e)", () => {
       .send({ name: "Цех №2 (Бишкек)" })
       .expect(403);
   });
+
+  // P0-1 (владелец проекта, 2026-09-05) — REST-путь смены статуса заказа,
+  // единственная альтернатива неподключённому на пилоте Telegram-каналу с
+  // цехом.
+  describe("POST /production-orders/:id/status (P0-1)", () => {
+    async function createConfirmedOrder(accessToken: string, suffix: string) {
+      const productResponse = await request(httpServer)
+        .post("/v1/products")
+        .set(...authHeader(accessToken))
+        .send({ name: `Худи Статус ${suffix}`, code: `HOODIE-STATUS-${suffix}` })
+        .expect(201);
+      const product = productResponse.body as ProductResponseDto;
+
+      const variantResponse = await request(httpServer)
+        .post("/v1/product-variants")
+        .set(...authHeader(accessToken))
+        .send({ productId: product.id, size: "M", color: "Чёрный", skuCode: `HOODIE-STATUS-${suffix}-M` })
+        .expect(201);
+      const variant = variantResponse.body as ProductVariantResponseDto;
+
+      const materialResponse = await request(httpServer)
+        .post("/v1/materials")
+        .set(...authHeader(accessToken))
+        .send({ name: `Оксфорд ${suffix}`, type: "fabric", unit: "m" })
+        .expect(201);
+      const material = materialResponse.body as MaterialResponseDto;
+
+      const workshopResponse = await request(httpServer)
+        .post("/v1/workshops")
+        .set(...authHeader(accessToken))
+        .send({ name: `Цех статуса ${suffix}`, contractNumber: `Д-СТАТУС-${suffix}` })
+        .expect(201);
+      const workshop = workshopResponse.body as WorkshopResponseDto;
+
+      const draftBomResponse = await request(httpServer)
+        .post("/v1/boms")
+        .set(...authHeader(accessToken))
+        .send({ productId: product.id, items: [{ materialId: material.id, quantityPerUnit: 1, wastePercent: 0 }] })
+        .expect(201);
+      const draftBom = draftBomResponse.body as BomResponseDto;
+
+      const approvedBomResponse = await request(httpServer)
+        .post(`/v1/boms/${draftBom.id}/approve`)
+        .set(...authHeader(accessToken))
+        .expect(201);
+      const approvedBom = approvedBomResponse.body as BomResponseDto;
+
+      const orderResponse = await request(httpServer)
+        .post("/v1/production-orders")
+        .set(...authHeader(accessToken))
+        .send({
+          productId: product.id,
+          bomId: approvedBom.id,
+          workshopId: workshop.id,
+          plannedQuantity: 10,
+          agreedUnitPrice: 100,
+          variants: [{ productVariantId: variant.id, quantity: 10 }],
+        })
+        .expect(201);
+      const order = orderResponse.body as ProductionOrderResponseDto;
+
+      await request(httpServer)
+        .post(`/v1/production-orders/${order.id}/confirm`)
+        .set(...authHeader(accessToken))
+        .expect(201);
+
+      return order;
+    }
+
+    it("разрешает placed → in_progress → ready_for_pickup через REST, отклоняет недопустимый переход и неизвестный заказ", async () => {
+      const companyName = `E2E ContractManufacturing Status ${Date.now()}`;
+      createdCompanyNames.push(companyName);
+      const { accessToken } = await setupAuthenticatedCompany(db, httpServer, companyName, "owner");
+      const order = await createConfirmedOrder(accessToken, `${Date.now()}`);
+
+      const inProgressResponse = await request(httpServer)
+        .post(`/v1/production-orders/${order.id}/status`)
+        .set(...authHeader(accessToken))
+        .send({ status: "in_progress" })
+        .expect(201);
+      expect((inProgressResponse.body as ProductionOrderResponseDto).status).toBe("in_progress");
+
+      const readyResponse = await request(httpServer)
+        .post(`/v1/production-orders/${order.id}/status`)
+        .set(...authHeader(accessToken))
+        .send({ status: "ready_for_pickup" })
+        .expect(201);
+      expect((readyResponse.body as ProductionOrderResponseDto).status).toBe("ready_for_pickup");
+
+      // Откат назад из "готово к отгрузке" в "в работе" запрещён.
+      const invalidResponse = await request(httpServer)
+        .post(`/v1/production-orders/${order.id}/status`)
+        .set(...authHeader(accessToken))
+        .send({ status: "in_progress" })
+        .expect(409);
+      expect((invalidResponse.body as ErrorResponseBody).code).toBe("PRODUCTION_ORDER_INVALID_STATUS_TRANSITION");
+
+      // Неизвестный заказ — корректная ошибка, не 500.
+      const notFoundResponse = await request(httpServer)
+        .post("/v1/production-orders/00000000-0000-0000-0000-000000000000/status")
+        .set(...authHeader(accessToken))
+        .send({ status: "in_progress" })
+        .expect(404);
+      expect((notFoundResponse.body as ErrorResponseBody).code).toBe("PRODUCTION_ORDER_NOT_FOUND");
+    });
+
+    it("viewer без contract_manufacturing.write не может сменить статус — 403", async () => {
+      const ownerCompanyName = `E2E ContractManufacturing Status Owner ${Date.now()}`;
+      createdCompanyNames.push(ownerCompanyName);
+      const { accessToken: ownerToken } = await setupAuthenticatedCompany(db, httpServer, ownerCompanyName, "owner");
+      const order = await createConfirmedOrder(ownerToken, `V${Date.now()}`);
+
+      const { accessToken: viewerToken } = await setupAuthenticatedCompany(
+        db,
+        httpServer,
+        `E2E ContractManufacturing Status Viewer ${Date.now()}`,
+        "viewer",
+      );
+
+      await request(httpServer)
+        .post(`/v1/production-orders/${order.id}/status`)
+        .set(...authHeader(viewerToken))
+        .send({ status: "in_progress" })
+        .expect(403);
+    });
+  });
 });

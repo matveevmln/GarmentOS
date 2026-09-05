@@ -137,6 +137,17 @@ export const receiveProductionOrderSchema = z.object({
 });
 export type ReceiveProductionOrderDto = z.infer<typeof receiveProductionOrderSchema>;
 
+// REST-путь смены статуса заказа (владелец проекта, 2026-09-05) — тот же
+// узкий набор переходов, что цех сегодня сообщает через Telegram
+// (assertCanUpdateStatusFromWorkshop), но вызывается по конкретному id
+// заказа, не через "последний активный заказ цеха". "received" сюда не
+// входит — приёмка остаётся отдельным эндпоинтом (receiveProductionOrderSchema),
+// потому что зачисляет остаток на склад, а не просто меняет статус.
+export const updateProductionOrderStatusSchema = z.object({
+  status: z.enum(["in_progress", "ready_for_pickup"]),
+});
+export type UpdateProductionOrderStatusDto = z.infer<typeof updateProductionOrderStatusSchema>;
+
 export const productionOrderVariantResponseSchema = z.object({
   id: z.string().uuid(),
   productionOrderId: z.string().uuid(),

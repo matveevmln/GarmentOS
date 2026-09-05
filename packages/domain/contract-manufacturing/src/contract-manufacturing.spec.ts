@@ -20,6 +20,7 @@ import { createProductionOrderDraft } from "./application/create-production-orde
 import { createWorkshop } from "./application/create-workshop";
 import type { BomApprovalPort } from "./application/ports";
 import { receiveProductionOrder } from "./application/receive-production-order";
+import { updateProductionOrderStatus } from "./application/update-production-order-status";
 import { updateProductionOrderStatusFromWorkshop } from "./application/update-production-order-status-from-workshop";
 import { DomainError } from "./domain/errors";
 import {
@@ -291,6 +292,151 @@ describe("domain/contract-manufacturing", () => {
           { companyId: company.id, workshopId: workshop.id, status: "in_progress" },
         ),
       ).rejects.toThrow(DomainError);
+    });
+  });
+
+  // REST-путь смены статуса (P0-1) — по конкретному id заказа, не по "самому
+  // свежему заказу цеха". Переиспользует тот же инвариант перехода, что и
+  // Telegram-путь выше (assertCanUpdateStatusFromWorkshop), поэтому здесь
+  // проверяется только адресация по id и обёртка ошибок, не сами правила
+  // переходов — они уже покрыты тестом выше.
+  describe("updateProductionOrderStatus (REST, по id заказа)", () => {
+    it("разрешает placed → in_progress → ready_for_pickup по конкретному заказу", async () => {
+      await runInRolledBackTransaction(async (tx) => {
+        const { company, product, variant, boms, approvedBom, workshops, workshop } =
+          await seedApprovedBomAndVariant(tx);
+        const productionOrders = new DrizzleProductionOrderRepository(tx);
+        const bomApproval = makeBomApprovalPort(boms);
+
+        const draft = await createProductionOrderDraft(
+          { productionOrders, workshops, bomApproval },
+          {
+            companyId: company.id,
+            productId: product.id,
+            bomId: approvedBom.id,
+            workshopId: workshop.id,
+            plannedQuantity: 100,
+            agreedUnitPrice: 450,
+            variants: [{ productVariantId: variant.id, quantity: 100 }],
+          },
+        );
+        await confirmProductionOrder({ productionOrders }, { companyId: company.id, productionOrderId: draft.id });
+
+        const inProgress = await updateProductionOrderStatus(
+          { productionOrders },
+          { companyId: company.id, productionOrderId: draft.id, status: "in_progress" },
+        );
+        expect(inProgress.id).toBe(draft.id);
+        expect(inProgress.status).toBe("in_progress");
+
+        const readyForPickup = await updateProductionOrderStatus(
+          { productionOrders },
+          { companyId: company.id, productionOrderId: draft.id, status: "ready_for_pickup" },
+        );
+        expect(readyForPickup.status).toBe("ready_for_pickup");
+      });
+    });
+
+    it("бросает ошибку на недопустимый переход (черновик не подтверждён)", async () => {
+      await runInRolledBackTransaction(async (tx) => {
+        const { company, product, variant, boms, approvedBom, workshops, workshop } =
+          await seedApprovedBomAndVariant(tx);
+        const productionOrders = new DrizzleProductionOrderRepository(tx);
+        const bomApproval = makeBomApprovalPort(boms);
+
+        const draft = await createProductionOrderDraft(
+          { productionOrders, workshops, bomApproval },
+          {
+            companyId: company.id,
+            productId: product.id,
+            bomId: approvedBom.id,
+            workshopId: workshop.id,
+            plannedQuantity: 100,
+            agreedUnitPrice: 450,
+            variants: [{ productVariantId: variant.id, quantity: 100 }],
+          },
+        );
+
+        // Заказ ещё "draft" (не подтверждён) — переход в "в работе" запрещён.
+        await expect(
+          updateProductionOrderStatus(
+            { productionOrders },
+            { companyId: company.id, productionOrderId: draft.id, status: "in_progress" },
+          ),
+        ).rejects.toThrow(DomainError);
+      });
+    });
+
+    it("бросает PRODUCTION_ORDER_NOT_FOUND на неизвестный id заказа", async () => {
+      await runInRolledBackTransaction(async (tx) => {
+        const company = await createCompany(
+          { companies: new DrizzleCompanyRepository(tx) },
+          { name: "Бренд без заказа" },
+        );
+        const productionOrders = new DrizzleProductionOrderRepository(tx);
+
+        await expect(
+          updateProductionOrderStatus(
+            { productionOrders },
+            {
+              companyId: company.id,
+              productionOrderId: "00000000-0000-0000-0000-000000000000",
+              status: "in_progress",
+            },
+          ),
+        ).rejects.toMatchObject({ code: "PRODUCTION_ORDER_NOT_FOUND" });
+      });
+    });
+
+    it("не трогает другой, более свежий заказ того же цеха", async () => {
+      await runInRolledBackTransaction(async (tx) => {
+        const { company, product, variant, boms, approvedBom, workshops, workshop } =
+          await seedApprovedBomAndVariant(tx);
+        const productionOrders = new DrizzleProductionOrderRepository(tx);
+        const bomApproval = makeBomApprovalPort(boms);
+
+        const first = await createProductionOrderDraft(
+          { productionOrders, workshops, bomApproval },
+          {
+            companyId: company.id,
+            productId: product.id,
+            bomId: approvedBom.id,
+            workshopId: workshop.id,
+            plannedQuantity: 100,
+            agreedUnitPrice: 450,
+            variants: [{ productVariantId: variant.id, quantity: 100 }],
+          },
+        );
+        const second = await createProductionOrderDraft(
+          { productionOrders, workshops, bomApproval },
+          {
+            companyId: company.id,
+            productId: product.id,
+            bomId: approvedBom.id,
+            workshopId: workshop.id,
+            plannedQuantity: 50,
+            agreedUnitPrice: 450,
+            variants: [{ productVariantId: variant.id, quantity: 50 }],
+          },
+        );
+        await confirmProductionOrder({ productionOrders }, { companyId: company.id, productionOrderId: first.id });
+        await confirmProductionOrder({ productionOrders }, { companyId: company.id, productionOrderId: second.id });
+
+        // Меняем статус именно первого (более старого) заказа — второй,
+        // более свежий заказ того же цеха, не должен пострадать. Это ровно
+        // то отличие от updateProductionOrderStatusFromWorkshop (которая
+        // всегда берёт "последний активный заказ цеха"), ради которого этот
+        // use case адресуется по id, а не по цеху.
+        const updated = await updateProductionOrderStatus(
+          { productionOrders },
+          { companyId: company.id, productionOrderId: first.id, status: "in_progress" },
+        );
+        expect(updated.id).toBe(first.id);
+        expect(updated.status).toBe("in_progress");
+
+        const untouched = await productionOrders.findById(company.id, second.id);
+        expect(untouched?.status).toBe("placed");
+      });
     });
   });
 });
