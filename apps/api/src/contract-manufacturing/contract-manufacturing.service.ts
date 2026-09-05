@@ -1,5 +1,6 @@
 import { Inject, Injectable } from "@nestjs/common";
 import {
+  captureProductionOrderCostSnapshot,
   confirmProductionOrder,
   createProductionOrderDraft,
   createWorkshop,
@@ -237,11 +238,18 @@ export class ContractManufacturingService {
   // Фиксирует Snapshot партии (см. миграцию cost_snapshot) — вызывается
   // ровно один раз оркестрацией сразу после подтверждения заказа
   // (production-order-orchestration.service.ts, ProductionOrderOrchestrationService.confirmProductionOrder).
+  // P1-1: домен сам проверяет, что снимка ещё не было — второй вызов на тот
+  // же заказ бросит PRODUCTION_ORDER_COST_SNAPSHOT_ALREADY_SET, а не тихо
+  // перезапишет историю.
   async updateProductionOrderCostSnapshot(
+    companyId: string,
     id: string,
     costSnapshot: Record<string, unknown>,
   ): Promise<ProductionOrder> {
-    return this.productionOrders.updateCostSnapshot(id, costSnapshot);
+    return captureProductionOrderCostSnapshot(
+      { productionOrders: this.productionOrders },
+      { companyId, productionOrderId: id, costSnapshot },
+    );
   }
 
   async listProductionOrders(companyId: string): Promise<ProductionOrder[]> {

@@ -19,6 +19,7 @@ import { confirmProductionOrder } from "./application/confirm-production-order";
 import { createProductionOrderDraft } from "./application/create-production-order";
 import { createWorkshop } from "./application/create-workshop";
 import type { BomApprovalPort } from "./application/ports";
+import { captureProductionOrderCostSnapshot } from "./application/capture-production-order-cost-snapshot";
 import { receiveProductionOrder } from "./application/receive-production-order";
 import { updateProductionOrderStatus } from "./application/update-production-order-status";
 import { updateProductionOrderStatusFromWorkshop } from "./application/update-production-order-status-from-workshop";
@@ -436,6 +437,74 @@ describe("domain/contract-manufacturing", () => {
 
         const untouched = await productionOrders.findById(company.id, second.id);
         expect(untouched?.status).toBe("placed");
+      });
+    });
+  });
+
+  // P1-1 (владелец проекта, 2026-09-05) — снимок партии неизменяем не только
+  // по конвенции: повторная запись через доменный use case теперь запрещена
+  // явно, а не только "предполагается, что не будет".
+  describe("captureProductionOrderCostSnapshot (P1-1, неизменяемость снимка)", () => {
+    it("фиксирует снимок один раз и бросает ошибку на повторную попытку", async () => {
+      await runInRolledBackTransaction(async (tx) => {
+        const { company, product, variant, boms, approvedBom, workshops, workshop } =
+          await seedApprovedBomAndVariant(tx);
+        const productionOrders = new DrizzleProductionOrderRepository(tx);
+        const bomApproval = makeBomApprovalPort(boms);
+
+        const draft = await createProductionOrderDraft(
+          { productionOrders, workshops, bomApproval },
+          {
+            companyId: company.id,
+            productId: product.id,
+            bomId: approvedBom.id,
+            workshopId: workshop.id,
+            plannedQuantity: 100,
+            agreedUnitPrice: 450,
+            variants: [{ productVariantId: variant.id, quantity: 100 }],
+          },
+        );
+        await confirmProductionOrder({ productionOrders }, { companyId: company.id, productionOrderId: draft.id });
+
+        const withSnapshot = await captureProductionOrderCostSnapshot(
+          { productionOrders },
+          { companyId: company.id, productionOrderId: draft.id, costSnapshot: { materialNorms: [{ quantityPerUnit: 2.6 }] } },
+        );
+        expect(withSnapshot.costSnapshot).toEqual({ materialNorms: [{ quantityPerUnit: 2.6 }] });
+
+        // Повторная попытка — даже с другими данными — запрещена: снимок
+        // уже есть, перезаписывать его нельзя.
+        await expect(
+          captureProductionOrderCostSnapshot(
+            { productionOrders },
+            { companyId: company.id, productionOrderId: draft.id, costSnapshot: { materialNorms: [{ quantityPerUnit: 2.4 }] } },
+          ),
+        ).rejects.toMatchObject({ code: "PRODUCTION_ORDER_COST_SNAPSHOT_ALREADY_SET" });
+
+        // Снимок остался прежним — попытка его не тронула.
+        const reloaded = await productionOrders.findById(company.id, draft.id);
+        expect(reloaded?.costSnapshot).toEqual({ materialNorms: [{ quantityPerUnit: 2.6 }] });
+      });
+    });
+
+    it("бросает PRODUCTION_ORDER_NOT_FOUND на неизвестный заказ", async () => {
+      await runInRolledBackTransaction(async (tx) => {
+        const company = await createCompany(
+          { companies: new DrizzleCompanyRepository(tx) },
+          { name: "Бренд без заказа (снимок)" },
+        );
+        const productionOrders = new DrizzleProductionOrderRepository(tx);
+
+        await expect(
+          captureProductionOrderCostSnapshot(
+            { productionOrders },
+            {
+              companyId: company.id,
+              productionOrderId: "00000000-0000-0000-0000-000000000000",
+              costSnapshot: {},
+            },
+          ),
+        ).rejects.toMatchObject({ code: "PRODUCTION_ORDER_NOT_FOUND" });
       });
     });
   });

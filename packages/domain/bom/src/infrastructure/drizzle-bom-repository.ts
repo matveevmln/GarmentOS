@@ -1,5 +1,5 @@
 import { boms, bomItems, type DbOrTx } from "@garmentos/db-schema";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, ne } from "drizzle-orm";
 import type { Bom, BomItem, BomStatus } from "../domain/bom";
 import type { BomRepository, NewBomInput } from "../application/ports";
 
@@ -104,6 +104,20 @@ export class DrizzleBomRepository implements BomRepository {
 
     const itemRows = await this.db.select().from(bomItems).where(eq(bomItems.bomId, bomRow.id));
     return toBom(bomRow, itemRows);
+  }
+
+  async archiveOtherApproved(companyId: string, productId: string, exceptBomId: string): Promise<void> {
+    await this.db
+      .update(boms)
+      .set({ status: "archived", updatedAt: new Date() })
+      .where(
+        and(
+          eq(boms.companyId, companyId),
+          eq(boms.productId, productId),
+          eq(boms.status, "approved"),
+          ne(boms.id, exceptBomId),
+        ),
+      );
   }
 
   async listByProduct(companyId: string, productId: string): Promise<Bom[]> {

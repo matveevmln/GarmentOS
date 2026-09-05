@@ -410,6 +410,11 @@ export class ProductionOrderOrchestrationService {
       capturedAt: new Date().toISOString(),
       materialNorms,
       ...(materialNormsVersion !== null ? { materialNormsVersion } : {}),
+      // Согласованная цена пошива и её валюта (P1-1) — RUB зафиксирован как
+      // бизнес-правило (принцип 21), не введён отдельным полем ввода: смена
+      // валюты пошива — решение владельца, не техническое.
+      agreedUnitPrice: Number(draft.agreedUnitPrice),
+      agreedUnitPriceCurrency: "RUB",
       fabricCostPerUnit: pricing.fabricCostPerUnit,
       trimCostPerUnit: pricing.trimCostPerUnit,
       packagingCostPerUnit: pricing.packagingCostPerUnit,
@@ -431,7 +436,11 @@ export class ProductionOrderOrchestrationService {
     };
 
     const order = await this.contractManufacturingService.confirmProductionOrder(companyId, productionOrderId);
-    const confirmed = await this.contractManufacturingService.updateProductionOrderCostSnapshot(order.id, snapshot);
+    const confirmed = await this.contractManufacturingService.updateProductionOrderCostSnapshot(
+      companyId,
+      order.id,
+      snapshot,
+    );
 
     // Аудит партии (владелец проекта, 2026-08-04: "кто изменил партию, когда,
     // что изменил, старое/новое значение" — момент подтверждения заказа —

@@ -7,7 +7,7 @@ export type {
   ProductionOrderVariant,
   ProductionOrderVariantDraft,
 } from "./domain/production-order";
-export { assertVariantsMatchPlannedQuantity } from "./domain/production-order";
+export { assertVariantsMatchPlannedQuantity, assertCostSnapshotNotYetSet } from "./domain/production-order";
 export { DomainError } from "./domain/errors";
 
 export type {
@@ -45,6 +45,11 @@ export {
   type UpdateProductionOrderStatusDeps,
   type UpdateProductionOrderStatusInput,
 } from "./application/update-production-order-status";
+export {
+  captureProductionOrderCostSnapshot,
+  type CaptureProductionOrderCostSnapshotDeps,
+  type CaptureProductionOrderCostSnapshotInput,
+} from "./application/capture-production-order-cost-snapshot";
 export {
   receiveProductionOrder,
   type ReceiveProductionOrderDeps,

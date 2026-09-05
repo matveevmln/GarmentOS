@@ -215,6 +215,18 @@ export const productionOrderCostSnapshotSchema = z.object({
   // интерфейс честно показывает, что нормы для них не сохранялись.
   materialNormsVersion: z.number().optional(),
   materialNorms: z.array(productionOrderMaterialNormSchema).optional(),
+  // Согласованная цена пошива и её валюта (Pilot v1, этап P1-1,
+  // 2026-09-05) — дублируют production_orders.agreed_unit_price на момент
+  // подтверждения, чтобы снимок оставался самодостаточным историческим
+  // документом (не требовал обращения к родительскому заказу, чтобы понять,
+  // на каких коммерческих условиях он был посчитан). Валюта — не выбор
+  // пользователя, а зафиксированное правило бизнеса (RUB — пошив и
+  // спецификация, см. docs/PRINCIPLES.md, принцип 21); хранится явно, а не
+  // выводится, чтобы будущий код не унаследовал вопрос "а в чём это число"
+  // молча. Необязательны по той же причине, что и materialNorms выше —
+  // у партий, подтверждённых до этого этапа, их нет.
+  agreedUnitPrice: z.number().optional(),
+  agreedUnitPriceCurrency: z.literal("RUB").optional(),
 });
 export type ProductionOrderCostSnapshot = z.infer<typeof productionOrderCostSnapshotSchema>;
 

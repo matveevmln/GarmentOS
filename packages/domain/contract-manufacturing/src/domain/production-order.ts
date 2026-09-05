@@ -148,6 +148,22 @@ export function assertCanReceive(status: ProductionOrderStatus): void {
   }
 }
 
+// Снимок партии неизменяем по определению (docs/PRODUCTION_BATCH_LIFECYCLE_ARCHITECTURE.md,
+// «Snapshot партии») — раньше это была только договорённость в комментарии
+// порта, ничего не мешало вызвать запись дважды. P1-1 (владелец проекта,
+// 2026-09-05): явный инвариант, а не только конвенция. DB-триггер здесь не
+// нужен — единственная точка записи (captureProductionOrderCostSnapshot)
+// теперь сама гарантирует одноразовость, второй прямой SQL-писатель в
+// систему не заводился и не планируется.
+export function assertCostSnapshotNotYetSet(costSnapshot: Record<string, unknown> | null): void {
+  if (costSnapshot !== null) {
+    throw new DomainError(
+      "Снимок партии уже зафиксирован — повторная запись запрещена (снимок неизменяем)",
+      "PRODUCTION_ORDER_COST_SNAPSHOT_ALREADY_SET",
+    );
+  }
+}
+
 // Статус, который цех сообщает сам (простой текстовый ответ в Telegram,
 // docs/TELEGRAM_INTEGRATION_ARCHITECTURE.md, раздел 4) — узкий набор,
 // достаточный для Итерации 7: "начали шить"/"готово". "received" — это
