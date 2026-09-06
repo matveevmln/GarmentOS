@@ -1,4 +1,5 @@
-import { boolean, date, index, integer, jsonb, numeric, pgEnum, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
+import { type AnyPgColumn, boolean, check, date, index, integer, jsonb, numeric, pgEnum, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 import { auditColumns, id, softDelete } from "./_shared";
 import { companies, users } from "./identity";
 import { products, productVariants } from "./catalog";
@@ -84,6 +85,14 @@ export const productionOrders = pgTable(
     materialsProvidedByUs: boolean("materials_provided_by_us").notNull().default(true),
     status: productionOrderStatusEnum("status").notNull().default("placed"),
     dueDate: date("due_date"),
+    // Заказ на переделку брака ссылается на заказ, где этот брак был выявлен
+    // (владелец проекта, P5-1 — rework строками нового заказа, без отдельного
+    // production_batches/compensation-модуля). Nullable — обычный заказ без
+    // rework-строк это поле не заполняет. Исторические строки (QC/snapshot/BOM)
+    // заказа-источника этим полем не затрагиваются и не меняются.
+    sourceProductionOrderId: uuid("source_production_order_id").references(
+      (): AnyPgColumn => productionOrders.id,
+    ),
     // Фактическая дата завершения — без неё нельзя сравнить план (due_date) и
     // факт для рейтинга цеха и алертов о просрочке (USER_JOURNEY_AUDIT.md, пробел №5).
     receivedAt: timestamp("received_at", { withTimezone: true }),
@@ -107,17 +116,47 @@ export const productionOrders = pgTable(
     // (ARCHITECTURE_REVIEW.md, находка 4.1: отсутствовал в фактической
     // миграции, хотя был задокументирован как обязательный).
     index("production_orders_company_status_due_idx").on(table.companyId, table.status, table.dueDate),
+    // Защита на уровне БД (backstop, не основной путь проверки — основной это
+    // domain-инвариант assertSourceOrderNotSelf): заказ не может быть
+    // источником переделки для самого себя.
+    check(
+      "production_orders_source_not_self_check",
+      sql`${table.sourceProductionOrderId} is null or ${table.sourceProductionOrderId} != ${table.id}`,
+    ),
   ],
 );
 
-export const productionOrderVariants = pgTable("production_order_variants", {
-  id: id(),
-  productionOrderId: uuid("production_order_id")
-    .notNull()
-    .references(() => productionOrders.id),
-  productVariantId: uuid("product_variant_id")
-    .notNull()
-    .references(() => productVariants.id),
-  quantity: numeric("quantity", { precision: 12, scale: 3 }).notNull(),
-  ...auditColumns,
-});
+export const productionOrderVariantTypeEnum = pgEnum("production_order_variant_type", ["new", "rework"]);
+
+export const productionOrderVariants = pgTable(
+  "production_order_variants",
+  {
+    id: id(),
+    productionOrderId: uuid("production_order_id")
+      .notNull()
+      .references(() => productionOrders.id),
+    productVariantId: uuid("product_variant_id")
+      .notNull()
+      .references(() => productVariants.id),
+    quantity: numeric("quantity", { precision: 12, scale: 3 }).notNull(),
+    // P5-1 (rework строками заказа, без отдельного статуса/сущности партии):
+    // "new" — обычный оплачиваемый объём (цена берётся из
+    // production_orders.agreed_unit_price, как и раньше — DEFAULT сохраняет
+    // поведение всех существующих строк без изменений). "rework" — переделка
+    // брака, всегда бесплатна для селлера (unit_price = 0), т.к. один заказ
+    // может содержать одновременно rework-строки и обычные новые строки,
+    // которые единый agreed_unit_price заказа выразить не может.
+    variantType: productionOrderVariantTypeEnum("variant_type").notNull().default("new"),
+    // null для "new" (цена берётся из заказа, как и раньше); обязана быть
+    // ровно 0 для "rework" — проверяется в domain (assertReworkPriceIsZero),
+    // не только здесь.
+    unitPrice: numeric("unit_price", { precision: 14, scale: 2 }),
+    ...auditColumns,
+  },
+  (table) => [
+    check(
+      "production_order_variants_rework_price_zero_check",
+      sql`${table.variantType} != 'rework' or ${table.unitPrice} = 0`,
+    ),
+  ],
+);

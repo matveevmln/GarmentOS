@@ -89,9 +89,17 @@ export const productionOrderStatusSchema = z.enum([
   "cancelled",
 ]);
 
+// "new"/"rework" — P5-1/P5-2 (rework строками существующего заказа, владелец
+// проекта, 2026-09-06). variantType по умолчанию "new" (см. домен) — не
+// обязателен, все существующие вызывающие продолжают работать без изменений.
+// unitPrice обязателен и должен быть 0 только у "rework"-строк — проверяется
+// доменным инвариантом assertReworkPriceIsZero, не здесь: zod задаёт форму,
+// домен — бизнес-правило (docs/PRINCIPLES.md, принцип 2).
 export const productionOrderVariantDraftSchema = z.object({
   productVariantId: z.string().uuid(),
   quantity: z.number().positive(),
+  variantType: z.enum(["new", "rework"]).optional(),
+  unitPrice: z.number().optional(),
 });
 export type ProductionOrderVariantDraft = z.infer<typeof productionOrderVariantDraftSchema>;
 
@@ -107,6 +115,11 @@ export const createProductionOrderSchema = z.object({
     .array(productionOrderVariantDraftSchema)
     .min(1, "Заказ пошива должен содержать хотя бы одну строку разбивки по SKU"),
   createdBy: z.string().uuid().optional(),
+  // Заказ на переделку брака (P5-2) — nullable/optional, обычный заказ его не
+  // передаёт. Домен проверяет, что заказ-источник существует в этой же
+  // компании (assertSourceOrderExists) и требует его при наличии rework-строк
+  // (assertReworkRequiresSource).
+  sourceProductionOrderId: z.string().uuid().optional(),
 });
 export type CreateProductionOrderDto = z.infer<typeof createProductionOrderSchema>;
 
@@ -148,11 +161,15 @@ export const updateProductionOrderStatusSchema = z.object({
 });
 export type UpdateProductionOrderStatusDto = z.infer<typeof updateProductionOrderStatusSchema>;
 
+export const productionOrderVariantTypeSchema = z.enum(["new", "rework"]);
+
 export const productionOrderVariantResponseSchema = z.object({
   id: z.string().uuid(),
   productionOrderId: z.string().uuid(),
   productVariantId: z.string().uuid(),
   quantity: z.string(),
+  variantType: productionOrderVariantTypeSchema,
+  unitPrice: z.string().nullable(),
   createdAt: z.date(),
   updatedAt: z.date(),
 });
@@ -241,6 +258,9 @@ export const productionOrderResponseSchema = z.object({
   materialsProvidedByUs: z.boolean(),
   status: productionOrderStatusSchema,
   dueDate: z.string().nullable(),
+  // Заказ на переделку брака ссылается на заказ-источник (P5-1) — null у
+  // обычного заказа.
+  sourceProductionOrderId: z.string().uuid().nullable(),
   receivedAt: z.date().nullable(),
   costSnapshot: productionOrderCostSnapshotSchema.nullable(),
   createdBy: z.string().uuid().nullable(),

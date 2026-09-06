@@ -60,7 +60,16 @@ export class BatchPassportService {
     const orderVariants = order.variants.flatMap((row) => {
       const variant = variantById.get(row.productVariantId);
       if (!variant) return [];
-      return [{ productVariantId: row.productVariantId, size: variant.size, color: variant.color, quantity: row.quantity }];
+      return [
+        {
+          productVariantId: row.productVariantId,
+          size: variant.size,
+          color: variant.color,
+          quantity: row.quantity,
+          variantType: row.variantType,
+          unitPrice: row.unitPrice,
+        },
+      ];
     });
 
     // Хронология — только то, что система действительно фиксирует (создание,

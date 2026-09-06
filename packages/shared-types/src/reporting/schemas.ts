@@ -93,6 +93,11 @@ export const batchPassportVariantSchema = z.object({
   size: z.string(),
   color: z.string(),
   quantity: z.string(),
+  // P5-2 (владелец проекта, 2026-09-06) — нужны, чтобы паспорт партии считал
+  // сумму по строкам (rework бесплатен), а не единой agreedUnitPrice ×
+  // plannedQuantity, неверной для смешанных заказов.
+  variantType: z.enum(["new", "rework"]),
+  unitPrice: z.string().nullable(),
 });
 export type BatchPassportVariantDto = z.infer<typeof batchPassportVariantSchema>;
 

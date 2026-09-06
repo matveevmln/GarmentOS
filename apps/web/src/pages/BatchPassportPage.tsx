@@ -5,6 +5,8 @@ import type {
   CuttingFactResponseDto,
   CuttingOrderResponseDto,
   DocumentResponseDto,
+  ProductionOrderResponseDto,
+  ProductVariantResponseDto,
   QcResultResponseDto,
   WarehouseResponseDto,
 } from "@garmentos/shared-types";
@@ -39,11 +41,12 @@ import {
 import { Upload } from "../design-system/Upload/Upload";
 import { Field } from "../design-system/Form/Field";
 import { Input } from "../design-system/Input/Input";
-import { NumberInput } from "../design-system/Input/NumberInput";
+import { MoneyInput, NumberInput } from "../design-system/Input/NumberInput";
 import { DatePicker } from "../design-system/Form/DatePicker";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../design-system/Select/Select";
 import { statusMeta } from "../lib/status";
 import { formatDate, formatMoney, formatQuantity, materialTypeLabel, unitLabel } from "../lib/format";
+import { computeProductionOrderBatchSum } from "../lib/production-order-pricing";
 import { cn } from "../design-system/utils";
 import { toast } from "../design-system/Toast/Toast";
 
@@ -155,6 +158,24 @@ export function BatchPassportPage() {
   const [qcComment, setQcComment] = useState("");
   const [isSubmittingQc, setIsSubmittingQc] = useState(false);
 
+  // «Создать следующий заказ» (P5-2, владелец проекта, 2026-09-06) —
+  // переделка брака и/или новый пошив одним заказом-черновиком у того же
+  // цеха по той же модели, ссылающимся на этот принятый заказ как на
+  // источник. Модель/цех/BOM наследуются от источника — форма не даёт их
+  // сменить, это сознательное упрощение (см. отчёт по P5-2).
+  const [nextOrderOpen, setNextOrderOpen] = useState(false);
+  const [nextOrderVariants, setNextOrderVariants] = useState<ProductVariantResponseDto[]>([]);
+  const [nextOrderBomId, setNextOrderBomId] = useState<string | null>(null);
+  const [nextOrderLines, setNextOrderLines] = useState<
+    Array<{ productVariantId: string; quantity: number; variantType: "new" | "rework" }>
+  >([]);
+  const [nextOrderPendingVariantId, setNextOrderPendingVariantId] = useState("");
+  const [nextOrderPendingQuantity, setNextOrderPendingQuantity] = useState<number | undefined>(undefined);
+  const [nextOrderPendingType, setNextOrderPendingType] = useState<"new" | "rework">("rework");
+  const [nextOrderUnitPrice, setNextOrderUnitPrice] = useState<number | undefined>(undefined);
+  const [nextOrderDueDate, setNextOrderDueDate] = useState<Date | undefined>(undefined);
+  const [isSubmittingNextOrder, setIsSubmittingNextOrder] = useState(false);
+
   const load = () => {
     if (!id) return;
     setError(false);
@@ -197,6 +218,87 @@ export function BatchPassportPage() {
       toast.error(err instanceof ApiError ? err.message : "Не удалось зафиксировать результат ОТК");
     } finally {
       setIsSubmittingQc(false);
+    }
+  };
+
+  const openNextOrderDialog = async () => {
+    if (!passport) return;
+    try {
+      // bomId не входит в паспорт партии (Reporting/BI не хранит его в своём
+      // ответе) — берём из самого заказа, эндпоинт уже существует.
+      const [order, variantRows] = await Promise.all([
+        apiRequest<ProductionOrderResponseDto>(`/production-orders/${passport.id}`),
+        apiRequest<ProductVariantResponseDto[]>(`/product-variants?productId=${passport.product.id}`),
+      ]);
+      setNextOrderBomId(order.bomId);
+      setNextOrderVariants(variantRows);
+      setNextOrderUnitPrice(Number(passport.agreedUnitPrice));
+      setNextOrderLines([]);
+      setNextOrderPendingVariantId("");
+      setNextOrderPendingQuantity(undefined);
+      setNextOrderPendingType("rework");
+      setNextOrderDueDate(undefined);
+      setNextOrderOpen(true);
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Не удалось загрузить данные для нового заказа");
+    }
+  };
+
+  const addNextOrderLine = () => {
+    if (!nextOrderPendingVariantId || !nextOrderPendingQuantity) return;
+    setNextOrderLines((prev) => [
+      ...prev,
+      { productVariantId: nextOrderPendingVariantId, quantity: nextOrderPendingQuantity, variantType: nextOrderPendingType },
+    ]);
+    setNextOrderPendingVariantId("");
+    setNextOrderPendingQuantity(undefined);
+  };
+
+  const removeNextOrderLine = (index: number) => {
+    setNextOrderLines((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const nextOrderVariantLabel = (variantId: string) => {
+    const variant = nextOrderVariants.find((v) => v.id === variantId);
+    return variant ? `${variant.size} / ${variant.color}` : variantId;
+  };
+
+  const nextOrderTotalQuantity = nextOrderLines.reduce((sum, line) => sum + line.quantity, 0);
+  // Та же формула по строкам, что и в computeProductionOrderBatchSum — здесь
+  // считается по ещё не сохранённым строкам формы, а не по ответу сервера.
+  const nextOrderBatchSum = nextOrderLines.reduce(
+    (sum, line) => sum + (line.variantType === "rework" ? 0 : line.quantity * (nextOrderUnitPrice ?? 0)),
+    0,
+  );
+
+  const submitNextOrder = async () => {
+    if (!passport || !nextOrderBomId || nextOrderLines.length === 0 || nextOrderUnitPrice === undefined) return;
+    setIsSubmittingNextOrder(true);
+    try {
+      await apiRequest("/production-orders", {
+        method: "POST",
+        body: {
+          productId: passport.product.id,
+          bomId: nextOrderBomId,
+          workshopId: passport.workshop.id,
+          plannedQuantity: nextOrderTotalQuantity,
+          agreedUnitPrice: nextOrderUnitPrice,
+          sourceProductionOrderId: passport.id,
+          dueDate: nextOrderDueDate ? nextOrderDueDate.toISOString().slice(0, 10) : undefined,
+          variants: nextOrderLines.map((line) => ({
+            productVariantId: line.productVariantId,
+            quantity: line.quantity,
+            variantType: line.variantType,
+            unitPrice: line.variantType === "rework" ? 0 : undefined,
+          })),
+        },
+      });
+      setNextOrderOpen(false);
+      toast.success("Черновик следующего заказа создан", { description: "Найдёте его в списке заказов пошива" });
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Не удалось создать заказ");
+    } finally {
+      setIsSubmittingNextOrder(false);
     }
   };
 
@@ -435,13 +537,15 @@ export function BatchPassportPage() {
     return variant ? Math.round(Number(variant.quantity)) : null;
   };
 
-  // Сумма партии — по согласованной с цехом цене за единицу: ровно то число,
-  // которое печатается в спецификации и по которому цех выставляет счёт.
-  // Раньше здесь была specificationPricePerUnit (цена за вычетом 175);
-  // владелец проекта не подтвердил смысл этого вычета, поэтому построенные на
-  // нём показатели из интерфейса убраны, а не показаны «примерно верными».
+  // Сумма партии — по согласованной с цехом цене за единицу, посчитанная по
+  // строкам (P5-2): rework-строки (переделка брака) бесплатны, остальные — по
+  // цене строки или, если не задана, по цене заказа. Для заказа без rework
+  // результат не меняется ни на копейку. Раньше здесь была
+  // specificationPricePerUnit (цена за вычетом 175); владелец проекта не
+  // подтвердил смысл этого вычета, поэтому построенные на нём показатели из
+  // интерфейса убраны, а не показаны «примерно верными».
   const agreedUnitPrice = Number(passport.agreedUnitPrice);
-  const batchSum = agreedUnitPrice * plannedQuantity;
+  const batchSum = computeProductionOrderBatchSum(passport);
 
   // Состояние шага «Раскрой» на шкале выводится из раскройных заданий, а не из
   // статуса заказа: статус описывает отношения с цехом, раскрой — нашу работу.
@@ -1345,6 +1449,148 @@ export function BatchPassportPage() {
           </div>
         )}
       </Card>
+
+      {/* 4а. Следующий заказ (P5-2, владелец проекта, 2026-09-06) —
+          переделка брака и/или новый пошив одним заказом-черновиком,
+          доступно только для принятой партии. */}
+      {passport.status === "received" ? (
+        <Card className="mt-4 p-4 md:p-5">
+          <div className="flex items-center justify-between gap-3">
+            <CardTitle className="text-[16px]">Следующий заказ</CardTitle>
+          </div>
+          <p className="t-secondary mt-2">
+            Переделка брака этой партии и/или новый пошив — одним заказом-черновиком у того же цеха, по той же модели.
+          </p>
+          <div className="mt-4">
+            <Button type="button" size="sm" variant="secondary" onClick={() => void openNextOrderDialog()}>
+              Создать следующий заказ
+            </Button>
+          </div>
+        </Card>
+      ) : null}
+
+      <Dialog open={nextOrderOpen} onOpenChange={setNextOrderOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Следующий заказ</DialogTitle>
+            <DialogDescription>
+              Модель «{passport.product.name}», цех «{passport.workshop.name}» — наследуются от партии-источника.
+              Добавьте строки переделки и/или нового пошива.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            {nextOrderLines.length > 0 ? (
+              <div className="rounded-[10px] border border-border">
+                {nextOrderLines.map((line, index) => (
+                  <div
+                    key={`${line.productVariantId}-${line.variantType}-${index}`}
+                    className={cn(
+                      "flex items-center justify-between gap-3 px-3 py-2 text-[13px]",
+                      index > 0 && "border-t border-border",
+                    )}
+                  >
+                    <span className="flex items-center gap-2">
+                      <span
+                        className={cn(
+                          "eyebrow rounded-full px-2 py-0.5",
+                          line.variantType === "rework" ? "bg-danger/10 text-danger" : "bg-success/10 text-success",
+                        )}
+                      >
+                        {line.variantType === "rework" ? "Переделка" : "Новый пошив"}
+                      </span>
+                      <span>{nextOrderVariantLabel(line.productVariantId)}</span>
+                      <span className="text-muted-foreground">× {formatQuantity(line.quantity, "шт")}</span>
+                    </span>
+                    <button
+                      type="button"
+                      className="t-meta text-muted-foreground hover:text-danger"
+                      onClick={() => removeNextOrderLine(index)}
+                    >
+                      Убрать
+                    </button>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="t-secondary">Строк пока нет — добавьте хотя бы одну ниже.</p>
+            )}
+
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_1fr_auto_auto]">
+              <Field label="Размер / цвет">
+                <Select value={nextOrderPendingVariantId} onValueChange={setNextOrderPendingVariantId}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Выберите" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {nextOrderVariants.map((variant) => (
+                      <SelectItem key={variant.id} value={variant.id}>
+                        {variant.size} / {variant.color}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Field>
+              <Field label="Тип строки">
+                <Select
+                  value={nextOrderPendingType}
+                  onValueChange={(value) => setNextOrderPendingType(value as "new" | "rework")}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="rework">Переделка</SelectItem>
+                    <SelectItem value="new">Новый пошив</SelectItem>
+                  </SelectContent>
+                </Select>
+              </Field>
+              <Field label="Количество">
+                <NumberInput value={nextOrderPendingQuantity} onChange={setNextOrderPendingQuantity} min={0} />
+              </Field>
+              <div className="flex items-end">
+                <Button type="button" size="sm" variant="secondary" onClick={addNextOrderLine}>
+                  Добавить
+                </Button>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <Field label="Цена нового пошива, ₽">
+                <MoneyInput currency="₽" value={nextOrderUnitPrice} onChange={setNextOrderUnitPrice} />
+              </Field>
+              <Field label="Срок (необязательно)">
+                <DatePicker value={nextOrderDueDate} onChange={setNextOrderDueDate} />
+              </Field>
+            </div>
+
+            <dl className="num grid grid-cols-2 gap-px overflow-hidden rounded-[10px] bg-border">
+              <div className="bg-card p-3">
+                <dt className="eyebrow text-muted-foreground">Итого количество</dt>
+                <dd className="mt-1 text-[16px] font-medium">{formatQuantity(nextOrderTotalQuantity, "шт")}</dd>
+              </div>
+              <div className="bg-card p-3">
+                <dt className="eyebrow text-muted-foreground">Сумма партии</dt>
+                <dd className="mt-1 text-[16px] font-medium">{formatMoney(nextOrderBatchSum, "руб", 2)}</dd>
+              </div>
+            </dl>
+          </div>
+
+          <DialogFooter>
+            <Button type="button" variant="ghost" onClick={() => setNextOrderOpen(false)}>
+              Отмена
+            </Button>
+            <Button
+              type="button"
+              loading={isSubmittingNextOrder}
+              disabled={nextOrderLines.length === 0 || nextOrderUnitPrice === undefined}
+              onClick={() => void submitNextOrder()}
+            >
+              Создать черновик заказа
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* 5. Детали — табы на десктопе */}
       <div className="mt-4 hidden md:block">

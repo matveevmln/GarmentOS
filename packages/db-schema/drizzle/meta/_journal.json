@@ -155,6 +155,13 @@
       "when": 1788664925011,
       "tag": "0021_omniscient_sumo",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1788669490615,
+      "tag": "0022_sharp_sabretooth",
+      "breakpoints": true
     }
   ]
 }

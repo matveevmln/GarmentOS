@@ -8,11 +8,20 @@ export type ProductionOrderStatus =
   | "received"
   | "cancelled";
 
+// "new" — обычный оплачиваемый объём (цена берётся из agreedUnitPrice заказа,
+// как и раньше). "rework" — переделка брака, добавленная строкой в заказ,
+// который может одновременно содержать и rework, и новый оплачиваемый объём
+// (владелец проекта, P5-1) — единый agreed_unit_price заказа не может
+// выразить смешанный заказ, поэтому у rework-строки своя цена (всегда 0).
+export type ProductionOrderVariantType = "new" | "rework";
+
 export interface ProductionOrderVariant {
   id: string;
   productionOrderId: string;
   productVariantId: string;
   quantity: string;
+  variantType: ProductionOrderVariantType;
+  unitPrice: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -28,6 +37,10 @@ export interface ProductionOrder {
   materialsProvidedByUs: boolean;
   status: ProductionOrderStatus;
   dueDate: string | null;
+  // Заказ на переделку брака, выявленного в заказе-источнике — nullable,
+  // обычный заказ его не заполняет (P5-1). Исторические данные заказа-
+  // источника (QC/snapshot/BOM) этой ссылкой не затрагиваются.
+  sourceProductionOrderId: string | null;
   receivedAt: Date | null;
   // Snapshot партии, зафиксированный при подтверждении (см. миграцию
   // cost_snapshot) — намеренно нетипизирован в домене: точную форму
@@ -45,6 +58,13 @@ export interface ProductionOrder {
 export interface ProductionOrderVariantDraft {
   productVariantId: string;
   quantity: number;
+  // Необязательно — по умолчанию "new" (см. репозиторий: DEFAULT 'new' в БД),
+  // сохраняет поведение всех существующих вызывающих без изменений.
+  variantType?: ProductionOrderVariantType;
+  // Обязателен и должен быть равен 0 только для "rework" — проверяется
+  // assertReworkPriceIsZero. Для "new" не участвует в проверках: цена берётся
+  // из agreedUnitPrice заказа, как и до P5-1.
+  unitPrice?: number;
 }
 
 // Разбивка по SKU не может быть пустой — заказ пошива размещается на
@@ -86,6 +106,64 @@ export function assertVariantsMatchPlannedQuantity(
     throw new DomainError(
       `Сумма количеств по размерам и цветам (${sum}) не совпадает с плановым количеством заказа (${plannedQuantity})`,
       "PRODUCTION_ORDER_VARIANTS_SUM_MISMATCH",
+    );
+  }
+}
+
+// Rework всегда бесплатен для селлера — цех обязан переделать брак за свой
+// счёт (владелец проекта, P5-1). "new"-строки эту проверку не проходят: их
+// цена берётся из agreedUnitPrice заказа, а не из variant.unitPrice.
+export function assertReworkPriceIsZero(variant: ProductionOrderVariantDraft): void {
+  if (variant.variantType !== "rework") {
+    return;
+  }
+  const unitPrice = variant.unitPrice ?? 0;
+  if (Math.abs(unitPrice) > 0.0005) {
+    throw new DomainError(
+      `Строка переделки (rework) обязана быть бесплатной — цена должна быть 0 (получено ${unitPrice})`,
+      "PRODUCTION_ORDER_REWORK_PRICE_NOT_ZERO",
+    );
+  }
+}
+
+// Строка переделки не существует сама по себе — она всегда исправляет брак
+// конкретного заказа-источника (владелец проекта, P5-1: "rework строками
+// заказа", не отдельная сущность/статус).
+export function assertReworkRequiresSource(
+  variants: ProductionOrderVariantDraft[],
+  sourceProductionOrderId: string | null | undefined,
+): void {
+  const hasRework = variants.some((variant) => variant.variantType === "rework");
+  if (hasRework && !sourceProductionOrderId) {
+    throw new DomainError(
+      "Заказ содержит строки переделки (rework), но не указывает заказ-источник брака",
+      "PRODUCTION_ORDER_REWORK_REQUIRES_SOURCE",
+    );
+  }
+}
+
+// Заказ не может ссылаться сам на себя как на источник переделки. На
+// практике это структурно почти невозможно через обычный путь создания (id
+// нового заказа ещё не существует на момент валидации черновика) — проверка
+// здесь и DB CHECK (production_orders_source_not_self_check) — оба backstop
+// на случай будущих путей записи (например, обновление заказа после
+// создания), а не единственная линия защиты.
+export function assertSourceOrderIsNotSelf(orderId: string, sourceProductionOrderId: string | null): void {
+  if (sourceProductionOrderId !== null && sourceProductionOrderId === orderId) {
+    throw new DomainError(
+      "Заказ не может быть источником переделки для самого себя",
+      "PRODUCTION_ORDER_SOURCE_IS_SELF",
+    );
+  }
+}
+
+// Заказ-источник должен реально существовать в этой же компании — переиспользует
+// существующий порт findById (ProductionOrderRepository), новый порт не нужен.
+export function assertSourceOrderExists(sourceProductionOrderId: string, found: boolean): void {
+  if (!found) {
+    throw new DomainError(
+      `Заказ-источник переделки ${sourceProductionOrderId} не найден`,
+      "PRODUCTION_ORDER_SOURCE_NOT_FOUND",
     );
   }
 }

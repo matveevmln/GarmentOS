@@ -49,6 +49,8 @@ function toProductionOrderVariant(row: ProductionOrderVariantRow): ProductionOrd
     productionOrderId: row.productionOrderId,
     productVariantId: row.productVariantId,
     quantity: row.quantity,
+    variantType: row.variantType,
+    unitPrice: row.unitPrice,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -66,6 +68,7 @@ function toProductionOrder(row: ProductionOrderRow, variants: ProductionOrderVar
     materialsProvidedByUs: row.materialsProvidedByUs,
     status: row.status,
     dueDate: row.dueDate,
+    sourceProductionOrderId: row.sourceProductionOrderId,
     receivedAt: row.receivedAt,
     costSnapshot: row.costSnapshot as Record<string, unknown> | null,
     createdBy: row.createdBy,
@@ -165,6 +168,7 @@ export class DrizzleProductionOrderRepository implements ProductionOrderReposito
           status: input.status,
           dueDate: input.dueDate,
           createdBy: input.createdBy,
+          sourceProductionOrderId: input.sourceProductionOrderId,
         })
         .returning();
       if (!orderRow) throw new Error("INSERT production_orders не вернул строку");
@@ -176,6 +180,8 @@ export class DrizzleProductionOrderRepository implements ProductionOrderReposito
             productionOrderId: orderRow.id,
             productVariantId: variant.productVariantId,
             quantity: String(variant.quantity),
+            variantType: variant.variantType ?? "new",
+            unitPrice: variant.unitPrice !== undefined ? String(variant.unitPrice) : null,
           })),
         )
         .returning();

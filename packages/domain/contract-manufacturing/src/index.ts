@@ -6,8 +6,16 @@ export type {
   ProductionOrderStatus,
   ProductionOrderVariant,
   ProductionOrderVariantDraft,
+  ProductionOrderVariantType,
 } from "./domain/production-order";
-export { assertVariantsMatchPlannedQuantity, assertCostSnapshotNotYetSet } from "./domain/production-order";
+export {
+  assertVariantsMatchPlannedQuantity,
+  assertCostSnapshotNotYetSet,
+  assertReworkPriceIsZero,
+  assertReworkRequiresSource,
+  assertSourceOrderIsNotSelf,
+  assertSourceOrderExists,
+} from "./domain/production-order";
 export { DomainError } from "./domain/errors";
 
 export type {

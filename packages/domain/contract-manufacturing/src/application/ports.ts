@@ -69,6 +69,7 @@ export interface NewProductionOrderInput {
   dueDate: string | null;
   createdBy: string | null;
   variants: ProductionOrderVariantDraft[];
+  sourceProductionOrderId: string | null;
 }
 
 export interface ProductionOrderRepository {

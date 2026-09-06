@@ -17,6 +17,7 @@ import { TELEGRAM_CLIENT } from "../telegram/telegram.tokens";
 import { WarehouseService } from "../warehouse/warehouse.service";
 import { ProductionRequestService } from "./production-request.service";
 import { formatRuAmount, formatRuDate, formatRuQuantity } from "./ru-number-format";
+import { computeSpecificationLinePricing } from "./specification-pricing";
 
 // Стандартное условие оплаты компании (владелец проекта, 2026-08-03):
 // 70% предоплата после выставления счёта, 30% при отгрузке товара со склада
@@ -491,15 +492,13 @@ export class ProductionOrderOrchestrationService {
       throw new ProductionRequestOrchestrationError(`Модель ${order.productId} не найдена`, "PRODUCT_NOT_FOUND");
     }
 
-    const unitPrice = Number(order.agreedUnitPrice);
     const items: SpecificationLineItem[] = [];
     let totalQuantity = 0;
     let totalSum = 0;
     for (const variant of order.variants) {
       const productVariant = await this.catalogService.findProductVariantById(variant.productVariantId);
       if (!productVariant) continue;
-      const quantity = Number(variant.quantity);
-      const sum = quantity * unitPrice;
+      const { quantity, unitPrice, sum } = computeSpecificationLinePricing(order, variant);
       totalQuantity += quantity;
       totalSum += sum;
       items.push({

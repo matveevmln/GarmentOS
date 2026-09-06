@@ -22,6 +22,7 @@ import { SearchBar } from "../design-system/Search/SearchBar";
 import { EmptyState } from "../design-system/Feedback/EmptyState";
 import { DataTable, Td, MobileListItem } from "../design-system/Blocks";
 import { formatDate, formatMoney, formatQuantity, unitLabel } from "../lib/format";
+import { computeProductionOrderBatchSum } from "../lib/production-order-pricing";
 import { cn } from "../design-system/utils";
 import { Combobox } from "../design-system/Select/Combobox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../design-system/Select/Select";
@@ -283,12 +284,12 @@ export function ProductionOrdersPage() {
     );
   });
 
-  // «Сумма партии» — та же величина и по той же формуле, что показывает
-  // паспорт партии: согласованная с цехом цена за изделие × количество, в
-  // рублях. Раньше здесь была цена из снимка за вычетом 175 — смысл этого
-  // вычета владельцем проекта не подтверждён, показатели на нём не строятся.
-  const batchAmount = (row: ProductionOrderResponseDto): number =>
-    Number(row.agreedUnitPrice) * Number(row.plannedQuantity);
+  // «Сумма партии» — считается по строкам (P5-2): rework-строки бесплатны,
+  // new-строки — по согласованной с цехом цене. Для заказа без rework-строк
+  // результат тот же, что и раньше (agreedUnitPrice × plannedQuantity).
+  // Раньше здесь была цена из снимка за вычетом 175 — смысл этого вычета
+  // владельцем проекта не подтверждён, показатели на нём не строятся.
+  const batchAmount = (row: ProductionOrderResponseDto): number => computeProductionOrderBatchSum(row);
 
   // Просрочка считается на клиенте из dueDate по тому же правилу, что и в
   // apps/api/src/reporting/attention.service.ts: срок в прошлом и заказ не
