@@ -15,3 +15,4 @@ export * from "./ai-production-assistant";
 export * from "./document";
 export * from "./reporting";
 export * from "./cutting";
+export * from "./qc";

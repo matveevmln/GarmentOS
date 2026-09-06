@@ -148,6 +148,13 @@
       "when": 1788109042936,
       "tag": "0020_product_variant_size_color_unique",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1788664925011,
+      "tag": "0021_omniscient_sumo",
+      "breakpoints": true
     }
   ]
 }

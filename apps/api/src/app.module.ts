@@ -22,6 +22,7 @@ import { AiProductionAssistantModule } from "./ai-production-assistant/ai-produc
 import { DocumentModule } from "./document/document.module";
 import { ReportingModule } from "./reporting/reporting.module";
 import { CuttingModule } from "./cutting/cutting.module";
+import { QcModule } from "./qc/qc.module";
 
 // Presentation-слой (docs/ARCHITECTURE.md, п.2). Доменные модули
 // (packages/domain/*) подключаются сюда по мере реализации итераций
@@ -48,6 +49,7 @@ import { CuttingModule } from "./cutting/cutting.module";
     AiProductionAssistantModule,
     ReportingModule,
     CuttingModule,
+    QcModule,
   ],
   providers: [
     { provide: APP_PIPE, useClass: ZodValidationPipe },

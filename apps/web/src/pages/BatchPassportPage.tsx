@@ -5,6 +5,7 @@ import type {
   CuttingFactResponseDto,
   CuttingOrderResponseDto,
   DocumentResponseDto,
+  QcResultResponseDto,
   WarehouseResponseDto,
 } from "@garmentos/shared-types";
 import { apiDownload, apiRequest, apiUpload, ApiError } from "../api/client";
@@ -144,6 +145,15 @@ export function BatchPassportPage() {
   const [consumed, setConsumed] = useState<Record<string, number | undefined>>({});
   const [actuals, setActuals] = useState<Record<string, number | undefined>>({});
   const [shortages, setShortages] = useState<CuttingFactResponseDto["shortages"]>([]);
+  // ОТК (P4, владелец проекта, 2026-09-06) — отдельный результат, не статус
+  // заказа. null после загрузки значит «результата ещё нет» (не ошибка).
+  const [qcResult, setQcResult] = useState<QcResultResponseDto | null>(null);
+  const [qcLoaded, setQcLoaded] = useState(false);
+  const [qcReceived, setQcReceived] = useState<number | undefined>(undefined);
+  const [qcGood, setQcGood] = useState<number | undefined>(undefined);
+  const [qcDefect, setQcDefect] = useState<number | undefined>(undefined);
+  const [qcComment, setQcComment] = useState("");
+  const [isSubmittingQc, setIsSubmittingQc] = useState(false);
 
   const load = () => {
     if (!id) return;
@@ -160,8 +170,39 @@ export function BatchPassportPage() {
       .catch(() => setCuttingOrders([]));
   };
 
+  const loadQc = () => {
+    if (!id) return;
+    void apiRequest<QcResultResponseDto>(`/production-orders/${id}/qc`)
+      .then((result) => setQcResult(result))
+      .catch(() => setQcResult(null))
+      .finally(() => setQcLoaded(true));
+  };
+
+  const submitQc = async () => {
+    if (!id || qcReceived === undefined || qcGood === undefined || qcDefect === undefined) return;
+    setIsSubmittingQc(true);
+    try {
+      const result = await apiRequest<QcResultResponseDto>(`/production-orders/${id}/qc`, {
+        method: "POST",
+        body: {
+          receivedQuantity: qcReceived,
+          goodQuantity: qcGood,
+          defectQuantity: qcDefect,
+          comment: qcComment.trim() || null,
+        },
+      });
+      setQcResult(result);
+      toast.success("Результат ОТК зафиксирован");
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Не удалось зафиксировать результат ОТК");
+    } finally {
+      setIsSubmittingQc(false);
+    }
+  };
+
   useEffect(load, [id]);
   useEffect(loadCutting, [id]);
+  useEffect(loadQc, [id]);
   useEffect(() => {
     void apiRequest<WarehouseResponseDto[]>("/warehouses")
       .then((rows) => {
@@ -1232,6 +1273,77 @@ export function BatchPassportPage() {
             description="Проценты готовности, комментарии и фото от цеха — разделы 19-20 «Баланса производственной партии», ждёт реализации. Раскрой уже ведётся во вкладке «Раскрой»."
           />
         </div>
+      </Card>
+
+      {/* 4. ОТК (P4, владелец проекта, 2026-09-06) — отдельный результат
+          приёмочного контроля, статус заказа не меняет. Возможен только
+          после приёмки партии на склад. */}
+      <Card className="mt-4 p-4 md:p-5">
+        <div className="flex items-center justify-between gap-3">
+          <CardTitle className="text-[16px]">ОТК</CardTitle>
+        </div>
+        {passport.status !== "received" ? (
+          <div className="mt-4">
+            <EmptyState
+              compact
+              title="Результат ОТК появится после приёмки партии"
+              description="Внести получено/годных/брак можно, когда заказ перейдёт в статус «Принято»."
+            />
+          </div>
+        ) : !qcLoaded ? (
+          <div className="mt-4">
+            <SkeletonList rows={1} />
+          </div>
+        ) : qcResult ? (
+          <dl className="num mt-4 grid grid-cols-1 gap-px bg-border sm:grid-cols-3">
+            <div className="bg-card p-3">
+              <dt className="eyebrow text-muted-foreground">Получено</dt>
+              <dd className="mt-1 text-[18px] font-medium">{formatQuantity(qcResult.receivedQuantity, "шт")}</dd>
+            </div>
+            <div className="bg-card p-3">
+              <dt className="eyebrow text-muted-foreground">Годных</dt>
+              <dd className="mt-1 text-[18px] font-medium text-success">{formatQuantity(qcResult.goodQuantity, "шт")}</dd>
+            </div>
+            <div className="bg-card p-3">
+              <dt className="eyebrow text-muted-foreground">Брак</dt>
+              <dd className={cn("mt-1 text-[18px] font-medium", qcResult.defectQuantity > 0 && "text-danger")}>
+                {formatQuantity(qcResult.defectQuantity, "шт")}
+              </dd>
+            </div>
+            {qcResult.comment ? (
+              <div className="col-span-full bg-card p-3">
+                <dt className="eyebrow text-muted-foreground">Комментарий</dt>
+                <dd className="mt-1 text-[13px]">{qcResult.comment}</dd>
+              </div>
+            ) : null}
+          </dl>
+        ) : (
+          <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <Field label="Получено, шт">
+              <NumberInput value={qcReceived} onChange={setQcReceived} min={0} />
+            </Field>
+            <Field label="Годных, шт">
+              <NumberInput value={qcGood} onChange={setQcGood} min={0} />
+            </Field>
+            <Field label="Брак, шт">
+              <NumberInput value={qcDefect} onChange={setQcDefect} min={0} />
+            </Field>
+            <Field label="Комментарий" className="sm:col-span-3">
+              <Input value={qcComment} onChange={(event) => setQcComment(event.target.value)} placeholder="Необязательно" />
+            </Field>
+            <div className="sm:col-span-3">
+              <Button
+                type="button"
+                size="sm"
+                loading={isSubmittingQc}
+                disabled={qcReceived === undefined || qcGood === undefined || qcDefect === undefined}
+                onClick={() => void submitQc()}
+              >
+                Зафиксировать результат ОТК
+              </Button>
+            </div>
+          </div>
+        )}
       </Card>
 
       {/* 5. Детали — табы на десктопе */}
