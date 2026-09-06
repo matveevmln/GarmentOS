@@ -1470,7 +1470,7 @@ export function BatchPassportPage() {
       ) : null}
 
       <Dialog open={nextOrderOpen} onOpenChange={setNextOrderOpen}>
-        <DialogContent>
+        <DialogContent className="max-w-xl">
           <DialogHeader>
             <DialogTitle>Следующий заказ</DialogTitle>
             <DialogDescription>
@@ -1482,35 +1482,45 @@ export function BatchPassportPage() {
           <div className="space-y-4">
             {nextOrderLines.length > 0 ? (
               <div className="rounded-[10px] border border-border">
-                {nextOrderLines.map((line, index) => (
-                  <div
-                    key={`${line.productVariantId}-${line.variantType}-${index}`}
-                    className={cn(
-                      "flex items-center justify-between gap-3 px-3 py-2 text-[13px]",
-                      index > 0 && "border-t border-border",
-                    )}
-                  >
-                    <span className="flex items-center gap-2">
-                      <span
-                        className={cn(
-                          "eyebrow rounded-full px-2 py-0.5",
-                          line.variantType === "rework" ? "bg-danger/10 text-danger" : "bg-success/10 text-success",
-                        )}
-                      >
-                        {line.variantType === "rework" ? "Переделка" : "Новый пошив"}
-                      </span>
-                      <span>{nextOrderVariantLabel(line.productVariantId)}</span>
-                      <span className="text-muted-foreground">× {formatQuantity(line.quantity, "шт")}</span>
-                    </span>
-                    <button
-                      type="button"
-                      className="t-meta text-muted-foreground hover:text-danger"
-                      onClick={() => removeNextOrderLine(index)}
+                {nextOrderLines.map((line, index) => {
+                  // Та же формула построчной цены, что и в computeProductionOrderBatchSum
+                  // (../lib/production-order-pricing) — здесь только отображение уже
+                  // введённых пользователем строк, не новый расчёт.
+                  const linePrice = line.variantType === "rework" ? 0 : (nextOrderUnitPrice ?? 0);
+                  const lineSum = linePrice * line.quantity;
+                  return (
+                    <div
+                      key={`${line.productVariantId}-${line.variantType}-${index}`}
+                      className={cn(
+                        "flex flex-wrap items-center justify-between gap-3 px-3 py-2 text-[13px]",
+                        index > 0 && "border-t border-border",
+                      )}
                     >
-                      Убрать
-                    </button>
-                  </div>
-                ))}
+                      <span className="flex flex-wrap items-center gap-2">
+                        <span
+                          className={cn(
+                            "eyebrow rounded-full px-2 py-0.5",
+                            line.variantType === "rework" ? "bg-danger/10 text-danger" : "bg-success/10 text-success",
+                          )}
+                        >
+                          {line.variantType === "rework" ? "Переделка" : "Новый пошив"}
+                        </span>
+                        <span>{nextOrderVariantLabel(line.productVariantId)}</span>
+                        <span className="text-muted-foreground">× {formatQuantity(line.quantity, "шт")}</span>
+                      </span>
+                      <span className="flex items-center gap-3">
+                        <span className="num text-muted-foreground">
+                          {line.variantType === "rework"
+                            ? formatMoney(0, "₽", 2)
+                            : `${formatMoney(linePrice, "₽", 2)} × ${formatQuantity(line.quantity, "шт")} = ${formatMoney(lineSum, "₽", 2)}`}
+                        </span>
+                        <Button type="button" variant="ghost" size="sm" onClick={() => removeNextOrderLine(index)}>
+                          Убрать
+                        </Button>
+                      </span>
+                    </div>
+                  );
+                })}
               </div>
             ) : (
               <p className="t-secondary">Строк пока нет — добавьте хотя бы одну ниже.</p>
@@ -1556,7 +1566,7 @@ export function BatchPassportPage() {
             </div>
 
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <Field label="Цена нового пошива, ₽">
+              <Field label="Цена нового пошива">
                 <MoneyInput currency="₽" value={nextOrderUnitPrice} onChange={setNextOrderUnitPrice} />
               </Field>
               <Field label="Срок (необязательно)">
