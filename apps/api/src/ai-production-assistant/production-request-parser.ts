@@ -1,4 +1,4 @@
-import { distributeQuantityAcrossSizes } from "./size-distribution";
+import { distributeQuantityByRatio } from "@garmentos/domain-catalog";
 
 // Поля, извлекаемые AIClassifier'ом из текста/голоса производственного
 // запроса (docs/AI_PRODUCTION_ASSISTANT_ARCHITECTURE.md, раздел 2) —
@@ -34,17 +34,28 @@ export interface ParsedProductionRequest {
   items: ParsedProductionRequestItem[];
 }
 
-// Разворачивает извлечённые поля в объёмы по SKU (цвет × размер) — размерная
-// сетка применяется к каждому цвету одинаково, реальное распределение по
-// конкретным SKU каталога — задача Итерации 7 (пункт (2) сценария), не этого
-// шага.
-export function buildParsedProductionRequest(fields: ExtractedProductionRequestFields): ParsedProductionRequest {
+// Разворачивает извлечённые поля в объёмы по SKU (цвет × размер): раскладка
+// применяется к каждому цвету отдельно от его количества.
+//
+// sizeWeights — раскладка из карточки модели (владелец проекта, 2026-08-30).
+// Один и тот же механизм на всех входах системы: и веб-форма, и разбор
+// свободного текста считают через distributeQuantityByRatio. Размер, которого
+// нет в раскладке (или раскладка не задана вовсе), получает вес 1 — тогда
+// деление становится равномерным, и это единственное запасное поведение, а
+// не второе правило.
+export function buildParsedProductionRequest(
+  fields: ExtractedProductionRequestFields,
+  sizeWeights?: Map<string, number>,
+): ParsedProductionRequest {
   const items: ParsedProductionRequestItem[] = [];
 
   for (const color of fields.colors) {
-    const perSize = distributeQuantityAcrossSizes(color.quantity, fields.sizes.length);
-    fields.sizes.forEach((size, index) => {
-      items.push({ colorName: color.colorName, size, quantity: perSize[index] ?? 0 });
+    const perSize = distributeQuantityByRatio(
+      fields.sizes.map((size) => ({ size, weight: sizeWeights?.get(size) ?? 1 })),
+      color.quantity,
+    );
+    perSize.forEach((row) => {
+      items.push({ colorName: color.colorName, size: row.size, quantity: row.quantity });
     });
   }
 

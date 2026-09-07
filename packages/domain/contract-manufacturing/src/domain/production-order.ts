@@ -8,11 +8,30 @@ export type ProductionOrderStatus =
   | "received"
   | "cancelled";
 
+// "new" — обычный оплачиваемый объём (цена берётся из agreedUnitPrice заказа,
+// как и раньше). "rework" — переделка брака, добавленная строкой в заказ,
+// который может одновременно содержать и rework, и новый оплачиваемый объём
+// (владелец проекта, P5-1) — единый agreed_unit_price заказа не может
+// выразить смешанный заказ, поэтому у rework-строки своя цена (всегда 0).
+export type ProductionOrderVariantType = "new" | "rework";
+
+export interface ReceivedVariantInput {
+  productVariantId: string;
+  quantity: number;
+}
+
 export interface ProductionOrderVariant {
   id: string;
   productionOrderId: string;
   productVariantId: string;
   quantity: string;
+  variantType: ProductionOrderVariantType;
+  unitPrice: string | null;
+  // Факт приёмки (P0-1) — null, пока партия не принята; после markReceived
+  // хранится РЯДОМ с плановым quantity, никогда его не заменяя (Историческая
+  // память: "ordered ≠ received", plannedQuantity этой строки — навсегда то,
+  // что было заказано).
+  receivedQuantity: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -28,7 +47,18 @@ export interface ProductionOrder {
   materialsProvidedByUs: boolean;
   status: ProductionOrderStatus;
   dueDate: string | null;
+  // Заказ на переделку брака, выявленного в заказе-источнике — nullable,
+  // обычный заказ его не заполняет (P5-1). Исторические данные заказа-
+  // источника (QC/snapshot/BOM) этой ссылкой не затрагиваются.
+  sourceProductionOrderId: string | null;
   receivedAt: Date | null;
+  // Snapshot партии, зафиксированный при подтверждении (см. миграцию
+  // cost_snapshot) — намеренно нетипизирован в домене: точную форму
+  // (ProductionOrderCostSnapshot) знает только API-слой, который её же и
+  // заполняет через CostingService. Домен Contract Manufacturing не должен
+  // знать о ценах материалов/себестоимости — это чужая ответственность
+  // (docs/PRINCIPLES.md, принцип 2).
+  costSnapshot: Record<string, unknown> | null;
   createdBy: string | null;
   createdAt: Date;
   updatedAt: Date;
@@ -38,6 +68,13 @@ export interface ProductionOrder {
 export interface ProductionOrderVariantDraft {
   productVariantId: string;
   quantity: number;
+  // Необязательно — по умолчанию "new" (см. репозиторий: DEFAULT 'new' в БД),
+  // сохраняет поведение всех существующих вызывающих без изменений.
+  variantType?: ProductionOrderVariantType;
+  // Обязателен и должен быть равен 0 только для "rework" — проверяется
+  // assertReworkPriceIsZero. Для "new" не участвует в проверках: цена берётся
+  // из agreedUnitPrice заказа, как и до P5-1.
+  unitPrice?: number;
 }
 
 // Разбивка по SKU не может быть пустой — заказ пошива размещается на
@@ -57,6 +94,86 @@ export function assertValidVariant(variant: ProductionOrderVariantDraft): void {
     throw new DomainError(
       `Количество по SKU должно быть положительным (получено ${variant.quantity})`,
       "PRODUCTION_ORDER_VARIANT_QUANTITY_INVALID",
+    );
+  }
+}
+
+// Плановое количество партии обязано совпадать с суммой разбивки по размерам
+// и цветам (владелец проекта, 2026-08-30). До этой проверки числа могли
+// разойтись молча, и разные части системы считали по разным: паспорт партии
+// умножает нормы расхода на plannedQuantity, приёмка идёт по строкам
+// вариантов, а раскрой считает по ним же. Все существующие пути создания
+// заказа уже суммируют варианты, поэтому проверка ничего не ломает — она
+// закрывает дыру, а не меняет поведение.
+export function assertVariantsMatchPlannedQuantity(
+  variants: ProductionOrderVariantDraft[],
+  plannedQuantity: number,
+): void {
+  const sum = variants.reduce((total, variant) => total + variant.quantity, 0);
+  // Количества хранятся как numeric(12,3), поэтому сравнение с допуском, а не
+  // строгое равенство: 0.1 + 0.2 !== 0.3 в двоичной арифметике.
+  if (Math.abs(sum - plannedQuantity) > 0.0005) {
+    throw new DomainError(
+      `Сумма количеств по размерам и цветам (${sum}) не совпадает с плановым количеством заказа (${plannedQuantity})`,
+      "PRODUCTION_ORDER_VARIANTS_SUM_MISMATCH",
+    );
+  }
+}
+
+// Rework всегда бесплатен для селлера — цех обязан переделать брак за свой
+// счёт (владелец проекта, P5-1). "new"-строки эту проверку не проходят: их
+// цена берётся из agreedUnitPrice заказа, а не из variant.unitPrice.
+export function assertReworkPriceIsZero(variant: ProductionOrderVariantDraft): void {
+  if (variant.variantType !== "rework") {
+    return;
+  }
+  const unitPrice = variant.unitPrice ?? 0;
+  if (Math.abs(unitPrice) > 0.0005) {
+    throw new DomainError(
+      `Строка переделки (rework) обязана быть бесплатной — цена должна быть 0 (получено ${unitPrice})`,
+      "PRODUCTION_ORDER_REWORK_PRICE_NOT_ZERO",
+    );
+  }
+}
+
+// Строка переделки не существует сама по себе — она всегда исправляет брак
+// конкретного заказа-источника (владелец проекта, P5-1: "rework строками
+// заказа", не отдельная сущность/статус).
+export function assertReworkRequiresSource(
+  variants: ProductionOrderVariantDraft[],
+  sourceProductionOrderId: string | null | undefined,
+): void {
+  const hasRework = variants.some((variant) => variant.variantType === "rework");
+  if (hasRework && !sourceProductionOrderId) {
+    throw new DomainError(
+      "Заказ содержит строки переделки (rework), но не указывает заказ-источник брака",
+      "PRODUCTION_ORDER_REWORK_REQUIRES_SOURCE",
+    );
+  }
+}
+
+// Заказ не может ссылаться сам на себя как на источник переделки. На
+// практике это структурно почти невозможно через обычный путь создания (id
+// нового заказа ещё не существует на момент валидации черновика) — проверка
+// здесь и DB CHECK (production_orders_source_not_self_check) — оба backstop
+// на случай будущих путей записи (например, обновление заказа после
+// создания), а не единственная линия защиты.
+export function assertSourceOrderIsNotSelf(orderId: string, sourceProductionOrderId: string | null): void {
+  if (sourceProductionOrderId !== null && sourceProductionOrderId === orderId) {
+    throw new DomainError(
+      "Заказ не может быть источником переделки для самого себя",
+      "PRODUCTION_ORDER_SOURCE_IS_SELF",
+    );
+  }
+}
+
+// Заказ-источник должен реально существовать в этой же компании — переиспользует
+// существующий порт findById (ProductionOrderRepository), новый порт не нужен.
+export function assertSourceOrderExists(sourceProductionOrderId: string, found: boolean): void {
+  if (!found) {
+    throw new DomainError(
+      `Заказ-источник переделки ${sourceProductionOrderId} не найден`,
+      "PRODUCTION_ORDER_SOURCE_NOT_FOUND",
     );
   }
 }
@@ -115,6 +232,51 @@ export function assertCanReceive(status: ProductionOrderStatus): void {
     throw new DomainError(
       `Нельзя принять заказ пошива в статусе "${status}" — приёмка доступна только когда цех сообщил "готово к отгрузке"`,
       "PRODUCTION_ORDER_NOT_READY_FOR_PICKUP",
+    );
+  }
+}
+
+// Факт приёмки может отличаться от плана в любую сторону (P0-1, владелец
+// проекта, 2026-09-07 — "ordered ≠ received ≠ good ≠ defect"). Единственное,
+// что проверяется здесь — сами введённые числа корректны и относятся к
+// строкам ЭТОГО заказа; верхнего предела ("нельзя принять больше X% от
+// плана") сознательно нет — придумывать такое бизнес-правило молча запрещено
+// явным требованием задания. Если фактическая приёмка окажется больше
+// планового количества (over-receipt), система это разрешает — это
+// осознанно зафиксированное, а не забытое поведение.
+export function assertReceivedVariantsValid(
+  variants: ProductionOrderVariant[],
+  received: ReceivedVariantInput[],
+): void {
+  const knownVariantIds = new Set(variants.map((variant) => variant.productVariantId));
+  for (const line of received) {
+    if (!knownVariantIds.has(line.productVariantId)) {
+      throw new DomainError(
+        `Вариант ${line.productVariantId} не относится к этому заказу пошива`,
+        "PRODUCTION_ORDER_RECEIVED_VARIANT_NOT_FOUND",
+      );
+    }
+    if (!Number.isFinite(line.quantity) || line.quantity < 0) {
+      throw new DomainError(
+        `Фактически принятое количество не может быть отрицательным (получено ${line.quantity})`,
+        "PRODUCTION_ORDER_RECEIVED_QUANTITY_INVALID",
+      );
+    }
+  }
+}
+
+// Снимок партии неизменяем по определению (docs/PRODUCTION_BATCH_LIFECYCLE_ARCHITECTURE.md,
+// «Snapshot партии») — раньше это была только договорённость в комментарии
+// порта, ничего не мешало вызвать запись дважды. P1-1 (владелец проекта,
+// 2026-09-05): явный инвариант, а не только конвенция. DB-триггер здесь не
+// нужен — единственная точка записи (captureProductionOrderCostSnapshot)
+// теперь сама гарантирует одноразовость, второй прямой SQL-писатель в
+// систему не заводился и не планируется.
+export function assertCostSnapshotNotYetSet(costSnapshot: Record<string, unknown> | null): void {
+  if (costSnapshot !== null) {
+    throw new DomainError(
+      "Снимок партии уже зафиксирован — повторная запись запрещена (снимок неизменяем)",
+      "PRODUCTION_ORDER_COST_SNAPSHOT_ALREADY_SET",
     );
   }
 }

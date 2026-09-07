@@ -23,6 +23,7 @@ export type {
   NewDocumentInput,
   NewDocumentLinkInput,
   StorageAdapter,
+  StoredFile,
 } from "./application/ports";
 export {
   attachDocument,
@@ -32,10 +33,27 @@ export {
   type AttachDocumentResult,
 } from "./application/attach-document";
 export {
+  generateCuttingOrderDocument,
+  CUTTING_ORDER_DOC_TYPE,
+  type GenerateCuttingOrderDocumentDeps,
+  type GenerateCuttingOrderDocumentInput,
+} from "./application/generate-cutting-order-document";
+export {
+  buildCuttingOrderColumns,
+  type CuttingOrderDocumentData,
+  type TableColumn,
+} from "./domain/cutting-order-template";
+export {
   generateSpecificationDocument,
   type GenerateSpecificationDocumentDeps,
   type GenerateSpecificationDocumentInput,
 } from "./application/generate-specification-document";
+export {
+  uploadDocument,
+  resolveContentType,
+  type UploadDocumentDeps,
+  type UploadDocumentInput,
+} from "./application/upload-document";
 export {
   regenerateSpecificationDocument,
   type RegenerateSpecificationDocumentInput,

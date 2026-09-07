@@ -1,4 +1,4 @@
-import { Body, Controller, Post } from "@nestjs/common";
+import { Body, Controller, Get, Post } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
 import { createZodDto } from "nestjs-zod";
 import { createMaterialSchema, materialResponseSchema, type MaterialResponseDto } from "@garmentos/shared-types";
@@ -21,5 +21,12 @@ export class MaterialsController {
   ): Promise<MaterialResponseDto> {
     const material = await this.procurementService.createMaterial(currentUser.companyId, body);
     return materialResponseSchema.parse(material);
+  }
+
+  @RequirePermissions("procurement.read")
+  @Get()
+  async list(@CurrentUser() currentUser: AuthenticatedRequestUser): Promise<MaterialResponseDto[]> {
+    const materials = await this.procurementService.listMaterials(currentUser.companyId);
+    return materials.map((material) => materialResponseSchema.parse(material));
   }
 }

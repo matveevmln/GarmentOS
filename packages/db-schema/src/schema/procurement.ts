@@ -84,6 +84,13 @@ export const purchaseOrders = pgTable(
     // закупочных цен (docs/DATABASE_SCHEMA.md, раздел 0b/6).
     orderedAt: date("ordered_at").notNull(),
     expectedDate: date("expected_date"),
+    // Валюта закупки (принцип 21: ткань закупается в USD, фурнитура в KGS).
+    // Хранится рядом с суммой, а не выводится из типа материала: вывод —
+    // скрытое правило, которое молча сломается на первой упаковке,
+    // купленной за доллары. Nullable: у закупок, заведённых до появления
+    // поля, валюта неизвестна, и подставлять её задним числом нельзя —
+    // интерфейс честно показывает «валюта не указана».
+    currency: text("currency"),
     createdBy: uuid("created_by").references(() => users.id),
     ...auditColumns,
   },

@@ -1,4 +1,4 @@
-import { Body, Controller, Param, Post } from "@nestjs/common";
+import { Body, Controller, Get, Param, Post } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
 import { createZodDto } from "nestjs-zod";
 import {
@@ -27,6 +27,13 @@ export class PurchaseOrdersController {
   ): Promise<PurchaseOrderResponseDto> {
     const purchaseOrder = await this.procurementService.createPurchaseOrderDraft(currentUser.companyId, body);
     return purchaseOrderResponseSchema.parse(purchaseOrder);
+  }
+
+  @RequirePermissions("procurement.read")
+  @Get()
+  async list(@CurrentUser() currentUser: AuthenticatedRequestUser): Promise<PurchaseOrderResponseDto[]> {
+    const purchaseOrders = await this.procurementService.listPurchaseOrders(currentUser.companyId);
+    return purchaseOrders.map((order) => purchaseOrderResponseSchema.parse(order));
   }
 
   @RequirePermissions("procurement.write")

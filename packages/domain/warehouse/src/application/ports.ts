@@ -61,11 +61,20 @@ export interface MaterialStockMovementMeta {
 }
 
 // Материалы не резервируются (в отличие от готовых SKU) — только приёмка
-// (из закупки), расход (при подтверждении заказа пошива) и корректировка.
+// (из закупки), расход (по факту раскроя) и корректировка (исправление
+// ранее внесённого факта).
 export interface MaterialStockRepository {
   findMaterialStockItem(warehouseId: string, materialId: string): Promise<MaterialStockItem | null>;
+  // Остаток по складу (P0-3, владелец проекта, 2026-09-07) — "видимость
+  // остатков материалов". Источник истины — эта же денормализованная
+  // таблица (material_stock_items), обновляемая на каждое движение; новой
+  // таблицы/агрегата не заводим.
+  listByWarehouse(warehouseId: string): Promise<MaterialStockItem[]>;
   receive(warehouseId: string, materialId: string, quantity: number, meta: MaterialStockMovementMeta): Promise<MaterialStockItem>;
   consume(warehouseId: string, materialId: string, quantity: number, meta: MaterialStockMovementMeta): Promise<MaterialStockItem>;
+  // Корректировка на разницу: прошлое движение не переписывается, добавляется
+  // отдельная строка типа adjustment (владелец проекта, 2026-08-30).
+  adjust(warehouseId: string, materialId: string, delta: number, meta: MaterialStockMovementMeta): Promise<MaterialStockItem>;
 }
 
 export interface NewShipmentInput {

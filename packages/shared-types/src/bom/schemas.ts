@@ -10,6 +10,7 @@ export const bomItemDraftSchema = z.object({
   quantityPerUnit: z.number().positive(),
   wastePercent: z.number().min(0).optional(),
 });
+export type BomItemDraft = z.infer<typeof bomItemDraftSchema>;
 
 export const createBomDraftSchema = z.object({
   productId: z.string().uuid(),

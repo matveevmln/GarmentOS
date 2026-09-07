@@ -17,7 +17,15 @@ jobs:
         env:
           POSTGRES_USER: garmentos
           POSTGRES_PASSWORD: garmentos
-          POSTGRES_DB: garmentos
+          # apps/api/vitest.setup.ts (ARCHITECTURE_REVIEW.md, находка 2.3, P0)
+          # безусловно переписывает DATABASE_URL на базу с суффиксом "_test"
+          # для ЛЮБОГО vitest-прогона — это единственная база, к которой
+          # реально подключаются e2e-тесты apps/api в этом job'е. База здесь
+          # сразу называется "garmentos_test", чтобы редирект в vitest.setup.ts
+          # был no-op (dbName уже оканчивается на "_test"), а не пытался
+          # подключиться к несуществующей "garmentos_test_test" — и чтобы
+          # миграции ниже применялись именно к той базе, которую увидят тесты.
+          POSTGRES_DB: garmentos_test
         ports:
           - 5432:5432
         options: >-
@@ -26,7 +34,16 @@ jobs:
           --health-timeout 5s
           --health-retries 5
     env:
-      DATABASE_URL: postgres://garmentos:garmentos@localhost:5432/garmentos
+      DATABASE_URL: postgres://garmentos:garmentos@localhost:5432/garmentos_test
+      # apps/api/src/auth/token.service.ts бросает исключение, если секрет не
+      # задан (TokenService.signAccessToken/verifyAccessToken) — до этого
+      # изменения CI не задавал их вовсе, поэтому любой /v1/auth/login падал
+      # с 500 (JWT_ACCESS_SECRET is not set), что ломало почти все e2e-тесты,
+      # использующие setupAuthenticatedCompany. Значения — только для
+      # ephemeral CI-прогона, не совпадают ни с одним реальным окружением
+      # (см. .env.example).
+      JWT_ACCESS_SECRET: ci-test-access-secret
+      JWT_REFRESH_SECRET: ci-test-refresh-secret
     steps:
       - uses: actions/checkout@v4
 

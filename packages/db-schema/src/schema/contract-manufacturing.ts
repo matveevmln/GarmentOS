@@ -1,4 +1,5 @@
-import { boolean, date, integer, numeric, pgEnum, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
+import { type AnyPgColumn, boolean, check, date, index, integer, jsonb, numeric, pgEnum, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 import { auditColumns, id, softDelete } from "./_shared";
 import { companies, users } from "./identity";
 import { products, productVariants } from "./catalog";
@@ -63,40 +64,110 @@ export const workshops = pgTable("workshops", {
   ...softDelete,
 });
 
-export const productionOrders = pgTable("production_orders", {
-  id: id(),
-  companyId: uuid("company_id")
-    .notNull()
-    .references(() => companies.id),
-  productId: uuid("product_id")
-    .notNull()
-    .references(() => products.id),
-  bomId: uuid("bom_id")
-    .notNull()
-    .references(() => boms.id),
-  workshopId: uuid("workshop_id")
-    .notNull()
-    .references(() => workshops.id),
-  plannedQuantity: numeric("planned_quantity", { precision: 12, scale: 3 }).notNull(),
-  agreedUnitPrice: numeric("agreed_unit_price", { precision: 14, scale: 2 }).notNull(),
-  materialsProvidedByUs: boolean("materials_provided_by_us").notNull().default(true),
-  status: productionOrderStatusEnum("status").notNull().default("placed"),
-  dueDate: date("due_date"),
-  // Фактическая дата завершения — без неё нельзя сравнить план (due_date) и
-  // факт для рейтинга цеха и алертов о просрочке (USER_JOURNEY_AUDIT.md, пробел №5).
-  receivedAt: timestamp("received_at", { withTimezone: true }),
-  createdBy: uuid("created_by").references(() => users.id),
-  ...auditColumns,
-});
+export const productionOrders = pgTable(
+  "production_orders",
+  {
+    id: id(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id),
+    productId: uuid("product_id")
+      .notNull()
+      .references(() => products.id),
+    bomId: uuid("bom_id")
+      .notNull()
+      .references(() => boms.id),
+    workshopId: uuid("workshop_id")
+      .notNull()
+      .references(() => workshops.id),
+    plannedQuantity: numeric("planned_quantity", { precision: 12, scale: 3 }).notNull(),
+    agreedUnitPrice: numeric("agreed_unit_price", { precision: 14, scale: 2 }).notNull(),
+    materialsProvidedByUs: boolean("materials_provided_by_us").notNull().default(true),
+    status: productionOrderStatusEnum("status").notNull().default("placed"),
+    dueDate: date("due_date"),
+    // Заказ на переделку брака ссылается на заказ, где этот брак был выявлен
+    // (владелец проекта, P5-1 — rework строками нового заказа, без отдельного
+    // production_batches/compensation-модуля). Nullable — обычный заказ без
+    // rework-строк это поле не заполняет. Исторические строки (QC/snapshot/BOM)
+    // заказа-источника этим полем не затрагиваются и не меняются.
+    sourceProductionOrderId: uuid("source_production_order_id").references(
+      (): AnyPgColumn => productionOrders.id,
+    ),
+    // Фактическая дата завершения — без неё нельзя сравнить план (due_date) и
+    // факт для рейтинга цеха и алертов о просрочке (USER_JOURNEY_AUDIT.md, пробел №5).
+    receivedAt: timestamp("received_at", { withTimezone: true }),
+    // Snapshot партии (владелец проекта, 2026-08-03 — "Паспорт партии",
+    // docs/PRODUCTION_BATCH_LIFECYCLE_ARCHITECTURE.md, раздел "Snapshot
+    // партии"). Фиксируется ОДИН раз при подтверждении заказа (draft→placed):
+    // разбивка себестоимости на момент подтверждения (ткань/фурнитура/
+    // упаковка/пошив/прочее по текущим закупочным ценам), условия оплаты,
+    // реквизиты договора и подписантов, которые тогда действовали. После
+    // фиксации НИКОГДА не пересчитывается — даже если позже изменятся цены
+    // материалов, BOM модели или карточка цеха (ProductionOrderCostSnapshot,
+    // @garmentos/shared-types). null у заказов, подтверждённых до появления
+    // этого механизма — для них спецификация продолжает считать вживую
+    // (обратная совместимость, production-order-orchestration.service.ts).
+    costSnapshot: jsonb("cost_snapshot"),
+    createdBy: uuid("created_by").references(() => users.id),
+    ...auditColumns,
+  },
+  (table) => [
+    // docs/DATABASE_SCHEMA.md, раздел 17 — «заказы с риском просрочки»
+    // (ARCHITECTURE_REVIEW.md, находка 4.1: отсутствовал в фактической
+    // миграции, хотя был задокументирован как обязательный).
+    index("production_orders_company_status_due_idx").on(table.companyId, table.status, table.dueDate),
+    // Защита на уровне БД (backstop, не основной путь проверки — основной это
+    // domain-инвариант assertSourceOrderNotSelf): заказ не может быть
+    // источником переделки для самого себя.
+    check(
+      "production_orders_source_not_self_check",
+      sql`${table.sourceProductionOrderId} is null or ${table.sourceProductionOrderId} != ${table.id}`,
+    ),
+  ],
+);
 
-export const productionOrderVariants = pgTable("production_order_variants", {
-  id: id(),
-  productionOrderId: uuid("production_order_id")
-    .notNull()
-    .references(() => productionOrders.id),
-  productVariantId: uuid("product_variant_id")
-    .notNull()
-    .references(() => productVariants.id),
-  quantity: numeric("quantity", { precision: 12, scale: 3 }).notNull(),
-  ...auditColumns,
-});
+export const productionOrderVariantTypeEnum = pgEnum("production_order_variant_type", ["new", "rework"]);
+
+export const productionOrderVariants = pgTable(
+  "production_order_variants",
+  {
+    id: id(),
+    productionOrderId: uuid("production_order_id")
+      .notNull()
+      .references(() => productionOrders.id),
+    productVariantId: uuid("product_variant_id")
+      .notNull()
+      .references(() => productVariants.id),
+    quantity: numeric("quantity", { precision: 12, scale: 3 }).notNull(),
+    // P5-1 (rework строками заказа, без отдельного статуса/сущности партии):
+    // "new" — обычный оплачиваемый объём (цена берётся из
+    // production_orders.agreed_unit_price, как и раньше — DEFAULT сохраняет
+    // поведение всех существующих строк без изменений). "rework" — переделка
+    // брака, всегда бесплатна для селлера (unit_price = 0), т.к. один заказ
+    // может содержать одновременно rework-строки и обычные новые строки,
+    // которые единый agreed_unit_price заказа выразить не может.
+    variantType: productionOrderVariantTypeEnum("variant_type").notNull().default("new"),
+    // null для "new" (цена берётся из заказа, как и раньше); обязана быть
+    // ровно 0 для "rework" — проверяется в domain (assertReworkPriceIsZero),
+    // не только здесь.
+    unitPrice: numeric("unit_price", { precision: 14, scale: 2 }),
+    // Факт приёмки (P0-1, владелец проекта, 2026-09-07) — null, пока партия
+    // не принята. Тот же принцип, что и cutting_order_results.actual_quantity:
+    // план (quantity выше) никогда не переписывается фактом, оба числа
+    // сосуществуют. Заполняется ровно один раз, вместе со статусом
+    // "received" (см. markReceived) — повторная приёмка невозможна, потому
+    // что assertCanReceive пускает только из "ready_for_pickup".
+    receivedQuantity: numeric("received_quantity", { precision: 12, scale: 3 }),
+    ...auditColumns,
+  },
+  (table) => [
+    check(
+      "production_order_variants_rework_price_zero_check",
+      sql`${table.variantType} != 'rework' or ${table.unitPrice} = 0`,
+    ),
+    check(
+      "production_order_variants_received_quantity_non_negative_check",
+      sql`${table.receivedQuantity} is null or ${table.receivedQuantity} >= 0`,
+    ),
+  ],
+);

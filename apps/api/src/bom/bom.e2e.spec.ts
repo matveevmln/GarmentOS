@@ -127,6 +127,15 @@ describe("BOM API (e2e)", () => {
       .expect(409);
     const conflictBody = conflictResponse.body as ErrorResponseBody;
     expect(conflictBody.code).toBe("BOM_NOT_DRAFT");
+
+    // Список всех версий BOM модели (Итерация 11, apps/web) — не только
+    // утверждённая, чтобы черновик можно было утвердить прямо из списка.
+    const listResponse = await request(httpServer)
+      .get("/v1/boms")
+      .set(...authHeader(accessToken))
+      .query({ productId: product.id })
+      .expect(200);
+    expect((listResponse.body as BomResponseDto[]).map((b) => b.id)).toContain(draft.id);
   });
 
   it("POST /v1/boms без позиций — 400; procurement_manager без bom.approve — 403", async () => {

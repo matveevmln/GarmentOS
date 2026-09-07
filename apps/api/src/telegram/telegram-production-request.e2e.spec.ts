@@ -319,13 +319,36 @@ describe("Telegram: текст → предпросмотр → подтверж
     const specLinks = await db.select().from(documentLinks).where(eq(documentLinks.entityId, orderId ?? ""));
     expect(specLinks).toHaveLength(1);
 
-    // Расход материала при подтверждении: 100 шт × 1.1 м/шт = 110 м списано
-    // со склада (150 - 110 = 40) — владелец проекта, 2026-08-02.
+    // Аудит (владелец проекта, 2026-08-04: "кто изменил партию, когда, что
+    // изменил, старое/новое значение") — подтверждение через Telegram
+    // происходит от имени компании, не конкретного человека (userId=null —
+    // тот же принцип, что и остальной обмен с компанией через общий чат),
+    // но источник действия зафиксирован.
+    const confirmAuditEntries = await db
+      .select()
+      .from(auditLog)
+      .where(and(eq(auditLog.entityId, orderId ?? ""), eq(auditLog.action, "production_order.confirmed")));
+    expect(confirmAuditEntries).toHaveLength(1);
+    expect(confirmAuditEntries[0]?.source).toBe("telegram");
+    expect(confirmAuditEntries[0]?.userId).toBeNull();
+    expect((confirmAuditEntries[0]?.afterJson as { status?: string } | null)?.status).toBe("placed");
+
+    const specAuditEntries = await db
+      .select()
+      .from(auditLog)
+      .where(and(eq(auditLog.entityId, orderId ?? ""), eq(auditLog.action, "document.specification_generated")));
+    expect(specAuditEntries).toHaveLength(1);
+
+    // Подтверждение заказа остаток НЕ меняет (владелец проекта, 2026-08-30):
+    // это договорённость с цехом, а не расход ткани. Единственная точка
+    // фактического списания — внесение факта раскроя, где известно, сколько
+    // реально ушло. До этого решения здесь ожидалось 40 (150 − 110 по нормам),
+    // причём только на Telegram-пути: веб-подтверждение не списывало вообще.
     const [stockAfterConfirm] = await db
       .select()
       .from(materialStockItems)
       .where(and(eq(materialStockItems.warehouseId, warehouse.id), eq(materialStockItems.materialId, material.id)));
-    expect(Number(stockAfterConfirm?.quantityOnHand)).toBe(40);
+    expect(Number(stockAfterConfirm?.quantityOnHand)).toBe(150);
 
     // Шаг 3: цех отвечает "Готово" — компания должна узнать об этом в своём
     // Telegram-чате, а не только запросив статус напрямую через API (владелец
@@ -376,6 +399,13 @@ describe("Telegram: текст → предпросмотр → подтверж
       stockOnHandAcrossVariants += Number(stockItem?.quantityOnHand ?? 0);
     }
     expect(stockOnHandAcrossVariants).toBe(100);
+
+    const receiveAuditEntries = await db
+      .select()
+      .from(auditLog)
+      .where(and(eq(auditLog.entityId, orderId ?? ""), eq(auditLog.action, "production_order.received")));
+    expect(receiveAuditEntries).toHaveLength(1);
+    expect(receiveAuditEntries[0]?.source).toBe("http_api");
 
     // Повторная приёмка уже принятой партии запрещена.
     const repeatReceiveResponse = await request(httpServer)
@@ -428,7 +458,9 @@ describe("Telegram: текст → предпросмотр → подтверж
     await request(httpServer)
       .post("/v1/workshops")
       .set(...authHeader(accessToken))
-      .send({ name: "Цех Кнопки" })
+      // contractNumber обязателен для подтверждения заказа (Snapshot партии,
+      // owner 2026-08-03 — без него спецификация не может быть выпущена).
+      .send({ name: "Цех Кнопки", contractNumber: "Д-2" })
       .expect(201);
 
     const inviteResponse = await request(httpServer)

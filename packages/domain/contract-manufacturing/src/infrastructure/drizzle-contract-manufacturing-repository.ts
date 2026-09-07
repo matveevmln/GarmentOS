@@ -6,11 +6,17 @@ import {
 } from "@garmentos/db-schema";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import type { Workshop } from "../domain/workshop";
-import type { ProductionOrder, ProductionOrderStatus, ProductionOrderVariant } from "../domain/production-order";
+import type {
+  ProductionOrder,
+  ProductionOrderStatus,
+  ProductionOrderVariant,
+  ReceivedVariantInput,
+} from "../domain/production-order";
 import type {
   NewProductionOrderInput,
   NewWorkshopInput,
   ProductionOrderRepository,
+  WorkshopPatch,
   WorkshopRepository,
 } from "../application/ports";
 
@@ -48,6 +54,9 @@ function toProductionOrderVariant(row: ProductionOrderVariantRow): ProductionOrd
     productionOrderId: row.productionOrderId,
     productVariantId: row.productVariantId,
     quantity: row.quantity,
+    variantType: row.variantType,
+    unitPrice: row.unitPrice,
+    receivedQuantity: row.receivedQuantity,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -65,7 +74,9 @@ function toProductionOrder(row: ProductionOrderRow, variants: ProductionOrderVar
     materialsProvidedByUs: row.materialsProvidedByUs,
     status: row.status,
     dueDate: row.dueDate,
+    sourceProductionOrderId: row.sourceProductionOrderId,
     receivedAt: row.receivedAt,
+    costSnapshot: row.costSnapshot as Record<string, unknown> | null,
     createdBy: row.createdBy,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
@@ -79,6 +90,23 @@ export class DrizzleWorkshopRepository implements WorkshopRepository {
   async create(input: NewWorkshopInput): Promise<Workshop> {
     const [row] = await this.db.insert(workshops).values(input).returning();
     if (!row) throw new Error("INSERT workshops не вернул строку");
+    return toWorkshop(row);
+  }
+
+  async update(id: string, patch: WorkshopPatch): Promise<Workshop> {
+    // Ключи со значением undefined отбрасываются явно, а не полагаясь на
+    // поведение драйвера: undefined означает «поле не передано» и не должно
+    // попасть в SET, тогда как null означает «очистить» и попасть обязан.
+    const values = Object.fromEntries(
+      Object.entries(patch).filter(([, value]) => value !== undefined),
+    ) as Record<string, unknown>;
+
+    const [row] = await this.db
+      .update(workshops)
+      .set({ ...values, updatedAt: new Date() })
+      .where(eq(workshops.id, id))
+      .returning();
+    if (!row) throw new Error(`UPDATE workshops не нашёл строку id=${id}`);
     return toWorkshop(row);
   }
 
@@ -146,6 +174,7 @@ export class DrizzleProductionOrderRepository implements ProductionOrderReposito
           status: input.status,
           dueDate: input.dueDate,
           createdBy: input.createdBy,
+          sourceProductionOrderId: input.sourceProductionOrderId,
         })
         .returning();
       if (!orderRow) throw new Error("INSERT production_orders не вернул строку");
@@ -157,6 +186,8 @@ export class DrizzleProductionOrderRepository implements ProductionOrderReposito
             productionOrderId: orderRow.id,
             productVariantId: variant.productVariantId,
             quantity: String(variant.quantity),
+            variantType: variant.variantType ?? "new",
+            unitPrice: variant.unitPrice !== undefined ? String(variant.unitPrice) : null,
           })),
         )
         .returning();
@@ -197,10 +228,10 @@ export class DrizzleProductionOrderRepository implements ProductionOrderReposito
     return toProductionOrder(orderRow, variantRows);
   }
 
-  async markReceived(id: string): Promise<ProductionOrder> {
+  async updateCostSnapshot(id: string, costSnapshot: Record<string, unknown>): Promise<ProductionOrder> {
     const [orderRow] = await this.db
       .update(productionOrders)
-      .set({ status: "received", receivedAt: new Date(), updatedAt: new Date() })
+      .set({ costSnapshot, updatedAt: new Date() })
       .where(eq(productionOrders.id, id))
       .returning();
     if (!orderRow) throw new Error(`UPDATE production_orders не нашёл строку id=${id}`);
@@ -211,6 +242,41 @@ export class DrizzleProductionOrderRepository implements ProductionOrderReposito
       .where(eq(productionOrderVariants.productionOrderId, orderRow.id));
 
     return toProductionOrder(orderRow, variantRows);
+  }
+
+  // Факт по варианту (P0-1) пишется в той же транзакции, что и перевод
+  // статуса в "received" — атомарно, чтобы не оказалось заказа, уже
+  // принятого по статусу, но ещё без зафиксированного факта по строкам.
+  async markReceived(id: string, received: ReceivedVariantInput[]): Promise<ProductionOrder> {
+    return this.db.transaction(async (tx) => {
+      const [orderRow] = await tx
+        .update(productionOrders)
+        .set({ status: "received", receivedAt: new Date(), updatedAt: new Date() })
+        .where(eq(productionOrders.id, id))
+        .returning();
+      if (!orderRow) throw new Error(`UPDATE production_orders не нашёл строку id=${id}`);
+
+      await Promise.all(
+        received.map((line) =>
+          tx
+            .update(productionOrderVariants)
+            .set({ receivedQuantity: String(line.quantity), updatedAt: new Date() })
+            .where(
+              and(
+                eq(productionOrderVariants.productionOrderId, orderRow.id),
+                eq(productionOrderVariants.productVariantId, line.productVariantId),
+              ),
+            ),
+        ),
+      );
+
+      const variantRows = await tx
+        .select()
+        .from(productionOrderVariants)
+        .where(eq(productionOrderVariants.productionOrderId, orderRow.id));
+
+      return toProductionOrder(orderRow, variantRows);
+    });
   }
 
   async findLatestActiveByWorkshop(companyId: string, workshopId: string): Promise<ProductionOrder | null> {
@@ -234,5 +300,31 @@ export class DrizzleProductionOrderRepository implements ProductionOrderReposito
       .where(eq(productionOrderVariants.productionOrderId, orderRow.id));
 
     return toProductionOrder(orderRow, variantRows);
+  }
+
+  async listByCompany(companyId: string): Promise<ProductionOrder[]> {
+    const orderRows = await this.db
+      .select()
+      .from(productionOrders)
+      .where(eq(productionOrders.companyId, companyId))
+      .orderBy(desc(productionOrders.createdAt));
+    if (orderRows.length === 0) return [];
+
+    const variantRows = await this.db
+      .select()
+      .from(productionOrderVariants)
+      .where(
+        inArray(
+          productionOrderVariants.productionOrderId,
+          orderRows.map((row) => row.id),
+        ),
+      );
+
+    return orderRows.map((orderRow) =>
+      toProductionOrder(
+        orderRow,
+        variantRows.filter((variant) => variant.productionOrderId === orderRow.id),
+      ),
+    );
   }
 }

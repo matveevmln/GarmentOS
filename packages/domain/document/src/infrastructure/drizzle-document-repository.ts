@@ -74,6 +74,13 @@ export class DrizzleDocumentRepository implements DocumentRepository {
       .limit(1);
     return row ? toDocument(row) : null;
   }
+
+  async markSuperseded(companyId: string, id: string): Promise<void> {
+    await this.db
+      .update(documents)
+      .set({ isCurrentVersion: false, updatedAt: new Date() })
+      .where(and(eq(documents.companyId, companyId), eq(documents.id, id)));
+  }
 }
 
 export class DrizzleDocumentLinkRepository implements DocumentLinkRepository {

@@ -38,6 +38,18 @@ export const stockItemResponseSchema = z.object({
 });
 export type StockItemResponseDto = z.infer<typeof stockItemResponseSchema>;
 
+// Остаток материала по складу (P0-3, владелец проекта, 2026-09-07) — "видимость
+// остатков материалов": material_stock_items как есть, без нового агрегата.
+export const materialStockItemResponseSchema = z.object({
+  id: z.string().uuid(),
+  warehouseId: z.string().uuid(),
+  materialId: z.string().uuid(),
+  quantityOnHand: z.string(),
+  createdAt: z.date(),
+  updatedAt: z.date(),
+});
+export type MaterialStockItemResponseDto = z.infer<typeof materialStockItemResponseSchema>;
+
 export const receiveStockSchema = z.object({
   warehouseId: z.string().uuid(),
   productVariantId: z.string().uuid(),

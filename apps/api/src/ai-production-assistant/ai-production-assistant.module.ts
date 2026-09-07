@@ -5,6 +5,7 @@ import { ContractManufacturingModule } from "../contract-manufacturing/contract-
 import { DocumentModule } from "../document/document.module";
 import { IdentityModule } from "../identity/identity.module";
 import { ProcurementModule } from "../procurement/procurement.module";
+import { ReportingModule } from "../reporting/reporting.module";
 import { TelegramClientModule } from "../telegram/telegram-client.module";
 import { WarehouseModule } from "../warehouse/warehouse.module";
 import { AnthropicAIClassifier, RuleBasedAIClassifier } from "./ai-classifier";
@@ -17,9 +18,11 @@ import { ProductionRequestService } from "./production-request.service";
 // Тот же паттерн DI-фабрики, что TelegramClientModule — без ANTHROPIC_API_KEY
 // используется детерминированный fallback вместо фиктивного/захардкоженного
 // ключа. Модуль импортирует Catalog/BOM/ContractManufacturing/Document/
-// Identity не потому что это его домен, а потому что оркестрация
+// Identity/Reporting не потому что это его домен, а потому что оркестрация
 // вертикального сценария (Итерация 7) вызывает их уже существующие
 // application-сервисы — сама оркестрация не содержит доменной логики.
+// ReportingModule (CostingService) добавлен для фиксации Snapshot партии при
+// подтверждении заказа (owner, 2026-08-03 — «Паспорт партии»).
 // Импортирует только TelegramClientModule (не полный TelegramModule) —
 // TelegramModule сам импортирует этот модуль для сценария "текст →
 // подтверждение → заказ" (Telegram — тонкий интерфейс над этой
@@ -34,6 +37,7 @@ import { ProductionRequestService } from "./production-request.service";
     IdentityModule,
     ProcurementModule,
     WarehouseModule,
+    ReportingModule,
   ],
   controllers: [ProductionRequestController, ProductionOrderSpecificationController],
   providers: [
@@ -49,6 +53,9 @@ import { ProductionRequestService } from "./production-request.service";
   ],
   // ProductionOrderOrchestrationService нужен TelegramModule (сценарий
   // "текст → подтверждение → заказ") — переиспользуется, не дублируется.
-  exports: [ProductionOrderOrchestrationService],
+  // AI_CLASSIFIER экспортирован дополнительно для DocumentIntelligenceModule
+  // (P6, 2026-09-06) — тот же классификатор/конфигурация Anthropic, не
+  // второй AI-клиент (document-intelligence.module.ts).
+  exports: [ProductionOrderOrchestrationService, AI_CLASSIFIER],
 })
 export class AiProductionAssistantModule {}

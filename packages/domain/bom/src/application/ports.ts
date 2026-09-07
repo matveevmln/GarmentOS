@@ -19,4 +19,14 @@ export interface BomRepository {
   // (docs/ROADMAP.md, Итерация 3), в т.ч. другими модулями через публичный
   // getApprovedBom (см. index.ts), не прямым доступом к этой таблице.
   findLatestApproved(companyId: string, productId: string): Promise<Bom | null>;
+  listByProduct(companyId: string, productId: string): Promise<Bom[]>;
+  // Убирает неоднозначность "какая версия действует" (P1-1, владелец
+  // проекта, 2026-09-05): при утверждении новой версии все прежние approved
+  // версии той же модели переводятся в archived, кроме исключённой (только
+  // что утверждённой). Не трогает draft/archived строки — только approved.
+  // Уже созданные заказы это не затрагивает: их bomId и снимок себестоимости
+  // ссылаются на конкретную строку, чей status здесь меняется, но не
+  // содержимое (items/quantityPerUnit) — заказ читает нормы из cost_snapshot,
+  // не из живого bom.
+  archiveOtherApproved(companyId: string, productId: string, exceptBomId: string): Promise<void>;
 }

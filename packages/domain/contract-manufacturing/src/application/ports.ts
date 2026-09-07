@@ -3,6 +3,7 @@ import type {
   ProductionOrder,
   ProductionOrderStatus,
   ProductionOrderVariantDraft,
+  ReceivedVariantInput,
 } from "../domain/production-order";
 
 export interface NewWorkshopInput {
@@ -21,8 +22,27 @@ export interface NewWorkshopInput {
   createdBy: string | null;
 }
 
+// Правка карточки цеха: заданы только те поля, которые действительно
+// меняются (undefined — «не трогать», null — «очистить»). Отдельный тип от
+// NewWorkshopInput, потому что у него другая семантика: там отсутствие
+// значения означает null, здесь — сохранение прежнего.
+export interface WorkshopPatch {
+  name?: string;
+  inn?: string | null;
+  contactInfo?: string | null;
+  specialization?: string | null;
+  status?: WorkshopStatus;
+  contractNumber?: string | null;
+  contractDate?: string | null;
+  paymentTerms?: string | null;
+  deliveryMethod?: string | null;
+  signerRole?: string | null;
+  signerName?: string | null;
+}
+
 export interface WorkshopRepository {
   create(input: NewWorkshopInput): Promise<Workshop>;
+  update(id: string, patch: WorkshopPatch): Promise<Workshop>;
   findById(companyId: string, id: string): Promise<Workshop | null>;
   findByTelegramChatId(chatId: string): Promise<Workshop | null>;
   setTelegramChatId(id: string, chatId: string): Promise<Workshop>;
@@ -50,21 +70,33 @@ export interface NewProductionOrderInput {
   dueDate: string | null;
   createdBy: string | null;
   variants: ProductionOrderVariantDraft[];
+  sourceProductionOrderId: string | null;
 }
 
 export interface ProductionOrderRepository {
   create(input: NewProductionOrderInput): Promise<ProductionOrder>;
   findById(companyId: string, id: string): Promise<ProductionOrder | null>;
   updateStatus(id: string, status: ProductionOrderStatus): Promise<ProductionOrder>;
-  // Приёмка партии (Итерация 10) — статус и receivedAt устанавливаются
-  // одной атомарной операцией, в отличие от updateStatus, который не знает
-  // о receivedAt.
-  markReceived(id: string): Promise<ProductionOrder>;
+  // Приёмка партии (Итерация 10, факт — P0-1) — статус, receivedAt и
+  // фактическое количество по каждому варианту устанавливаются одной
+  // атомарной операцией, в отличие от updateStatus, который не знает о них.
+  // received — фактическое количество по productVariantId; строки заказа,
+  // для которых явно не передано значение, получают receivedQuantity, равный
+  // плановому quantity (обратная совместимость: приёмка без указания факта
+  // ведёт себя ровно как раньше).
+  markReceived(id: string, received: ReceivedVariantInput[]): Promise<ProductionOrder>;
+  // Безусловная запись — сама по себе НЕ проверяет, есть ли уже снимок.
+  // Единственный корректный вызывающий — application/capture-production-order-cost-snapshot.ts
+  // (P1-1), которая сначала проверяет assertCostSnapshotNotYetSet. Прямой
+  // вызов этого метода в обход неё воспроизведёт старую дыру — перезапишет
+  // существующий снимок молча.
+  updateCostSnapshot(id: string, costSnapshot: Record<string, unknown>): Promise<ProductionOrder>;
   // Нужен для обработки входящего статус-обновления от цеха через Telegram
   // (Итерация 7) — сообщение не ссылается на конкретный productionOrderId
   // (простой текстовый ответ, не структурированная команда), поэтому
   // обновляется самый свежий незавершённый заказ этого цеха.
   findLatestActiveByWorkshop(companyId: string, workshopId: string): Promise<ProductionOrder | null>;
+  listByCompany(companyId: string): Promise<ProductionOrder[]>;
 }
 
 // Порт в модуль BOM — узкий срез, структурно совместимый с

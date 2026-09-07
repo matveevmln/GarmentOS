@@ -86,6 +86,43 @@ describe("domain/bom", () => {
     });
   });
 
+  // P1-1 (владелец проекта, 2026-09-05) — не должно быть неоднозначности
+  // "какая версия действует": в отличие от теста выше (approve второй раз
+  // того же BOM запрещён), здесь approve НОВОЙ версии — обязан архивировать
+  // старую approved, а не оставлять их обе approved одновременно.
+  it("утверждение новой версии BOM архивирует прежнюю approved-версию той же модели", async () => {
+    await runInRolledBackTransaction(async (tx) => {
+      const { company, product, material } = await seedProduct(tx);
+      const boms = new DrizzleBomRepository(tx);
+
+      const v1 = await createBomDraft(
+        { boms },
+        { companyId: company.id, productId: product.id, items: [{ materialId: material.id, quantityPerUnit: 2.6 }] },
+      );
+      const approvedV1 = await approveBom({ boms }, { companyId: company.id, bomId: v1.id });
+      expect(approvedV1.status).toBe("approved");
+
+      const v2 = await createBomDraft(
+        { boms },
+        { companyId: company.id, productId: product.id, items: [{ materialId: material.id, quantityPerUnit: 2.4 }] },
+      );
+      const approvedV2 = await approveBom({ boms }, { companyId: company.id, bomId: v2.id });
+      expect(approvedV2.status).toBe("approved");
+
+      // v1 больше не approved — иначе findLatestApproved мог бы стать
+      // неоднозначным при равенстве условий сортировки.
+      const reloadedV1 = await boms.findById(company.id, v1.id);
+      expect(reloadedV1?.status).toBe("archived");
+
+      const found = await getApprovedBom({ boms }, { companyId: company.id, productId: product.id });
+      expect(found?.id).toBe(v2.id);
+
+      // Ровно одна approved-версия — не две.
+      const all = await boms.listByProduct(company.id, product.id);
+      expect(all.filter((bom) => bom.status === "approved")).toHaveLength(1);
+    });
+  });
+
   it("отклоняет BOM без позиций материалов", async () => {
     await runInRolledBackTransaction(async (tx) => {
       const { company, product } = await seedProduct(tx);

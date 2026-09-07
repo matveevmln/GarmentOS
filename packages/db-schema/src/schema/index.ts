@@ -12,3 +12,5 @@ export * from "./finance";
 export * from "./common";
 export * from "./inbox";
 export * from "./telegram";
+export * from "./cutting";
+export * from "./quality-control";

@@ -1,6 +1,7 @@
 import type { Collection, CollectionSeason } from "../domain/collection";
 import type { Product, ProductStatus } from "../domain/product";
 import type { ProductVariant } from "../domain/product-variant";
+import type { ProductSize, ProductSizeDraft } from "../domain/product-size";
 
 export interface NewCollectionInput {
   companyId: string;
@@ -26,8 +27,16 @@ export interface NewProductInput {
   createdBy: string | null;
 }
 
+export interface ProductCostsInput {
+  standardSewingCost: string | null;
+  standardSewingCostCurrency: string | null;
+  otherProductionCost: string | null;
+  otherProductionCostCurrency: string | null;
+}
+
 export interface ProductRepository {
   create(input: NewProductInput): Promise<Product>;
+  updateCosts(companyId: string, id: string, input: ProductCostsInput): Promise<Product>;
   findByCode(companyId: string, code: string): Promise<Product | null>;
   findById(companyId: string, id: string): Promise<Product | null>;
   // Регистронезависимый поиск по названию модели — нужен для разбора
@@ -39,6 +48,7 @@ export interface ProductRepository {
   // найдено (Итерация 7: предпросмотр текстового запроса перед созданием
   // заказа, не гадаем — предлагаем варианты человеку на подтверждение).
   findSimilarByName(companyId: string, name: string, limit: number): Promise<Product[]>;
+  listByCompany(companyId: string): Promise<Product[]>;
 }
 
 export interface NewProductVariantInput {
@@ -50,6 +60,13 @@ export interface NewProductVariantInput {
   createdBy: string | null;
 }
 
+// Размерный ряд заменяется целиком: порядок и веса меняются вместе, поэтому
+// частичного обновления нет — иначе ряд мог бы остаться противоречивым.
+export interface ProductSizeRepository {
+  listByProduct(productId: string): Promise<ProductSize[]>;
+  replaceForProduct(productId: string, sizes: ProductSizeDraft[]): Promise<ProductSize[]>;
+}
+
 export interface ProductVariantRepository {
   create(input: NewProductVariantInput): Promise<ProductVariant>;
   findBySkuCode(skuCode: string): Promise<ProductVariant | null>;
@@ -58,4 +75,5 @@ export interface ProductVariantRepository {
   // size/color для заполнения строк спецификации (Итерация 7, Document
   // Template Engine).
   findById(id: string): Promise<ProductVariant | null>;
+  listByProduct(productId: string): Promise<ProductVariant[]>;
 }

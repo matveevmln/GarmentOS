@@ -1,13 +1,23 @@
 import { Inject, Injectable } from "@nestjs/common";
 import {
+  CUTTING_ORDER_DOC_TYPE,
+  generateCuttingOrderDocument,
   generateSpecificationDocument,
+  type CuttingOrderDocumentData,
   listDocumentsForEntity,
+  uploadDocument,
   type AttachDocumentResult,
+  type StoredFile,
+  type UploadDocumentInput,
+  type DocumentDerivativeEntity,
   type DocumentDerivativeRepository,
   type DocumentEntity,
+  type DocumentLink,
   type DocumentLinkRepository,
   type DocumentRenderAdapter,
   type DocumentRepository,
+  type NewDocumentDerivativeInput,
+  type NewDocumentLinkInput,
   type SpecificationDocumentData,
   type StorageAdapter,
 } from "@garmentos/domain-document";
@@ -32,15 +42,50 @@ export class DocumentService {
     @Inject(DOCUMENT_RENDERER) private readonly renderer: DocumentRenderAdapter,
   ) {}
 
+  // Владелец проекта, требование до пилота 2026-08-04: "в системе
+  // одновременно не может существовать несколько актуальных версий одной
+  // спецификации" — прежде чем генерировать новую, находит все документы,
+  // которые сейчас считаются текущими для этого заказа, и передаёт их как
+  // supersedesDocumentIds (generateSpecificationDocument помечает их
+  // isCurrentVersion=false и связывает новый документ через
+  // supersedesDocumentId — Immutable Original, docs/PRINCIPLES.md принцип 19,
+  // старые версии не удаляются). Инкапсулировано здесь, а не в вызывающем
+  // коде — версионность документов принадлежит Document Engine.
   async generateSpecification(
     companyId: string,
     productionOrderId: string,
     uploadedBy: string | null,
     data: SpecificationDocumentData,
   ): Promise<AttachDocumentResult> {
+    const existing = await this.listForEntity(companyId, "production_order", productionOrderId);
+    // docType="specification" — у заказа со временем появятся и другие
+    // привязанные документы (счета, акты), их версионность эта генерация не
+    // затрагивает.
+    const supersedesDocumentIds = existing.filter((doc) => doc.isCurrentVersion && doc.docType === "specification").map((doc) => doc.id);
     return generateSpecificationDocument(
       { documents: this.documents, documentLinks: this.documentLinks, documentDerivatives: this.documentDerivatives, storage: this.storage, renderer: this.renderer },
-      { companyId, productionOrderId, uploadedBy, data },
+      { companyId, productionOrderId, uploadedBy, data, supersedesDocumentIds },
+    );
+  }
+
+  // Раскройное задание — тот же механизм версий, но по собственной связи:
+  // прежние редакции ищутся среди документов этого задания, а не всей партии,
+  // иначе докрой гасил бы документ первого кроя.
+  async generateCuttingOrderDocument(
+    companyId: string,
+    cuttingOrderId: string,
+    productionOrderId: string,
+    number: number,
+    uploadedBy: string | null,
+    data: CuttingOrderDocumentData,
+  ): Promise<AttachDocumentResult> {
+    const existing = await this.listForEntity(companyId, "cutting_order", cuttingOrderId);
+    const supersedesDocumentIds = existing
+      .filter((doc) => doc.isCurrentVersion && doc.docType === CUTTING_ORDER_DOC_TYPE)
+      .map((doc) => doc.id);
+    return generateCuttingOrderDocument(
+      { documents: this.documents, documentLinks: this.documentLinks, documentDerivatives: this.documentDerivatives, storage: this.storage, renderer: this.renderer },
+      { companyId, cuttingOrderId, productionOrderId, number, uploadedBy, data, supersedesDocumentIds },
     );
   }
 
@@ -51,5 +96,52 @@ export class DocumentService {
     const links = await listDocumentsForEntity({ documentLinks: this.documentLinks }, { companyId, entityType, entityId });
     const docs = await Promise.all(links.map((link) => this.documents.findById(companyId, link.documentId)));
     return docs.filter((doc): doc is DocumentEntity => doc !== null);
+  }
+
+  async findById(companyId: string, id: string): Promise<DocumentEntity | null> {
+    return this.documents.findById(companyId, id);
+  }
+
+  // Загрузка документа, пришедшего извне. Тот же Document Engine, что и у
+  // сформированных системой документов: те же таблицы, та же версионность,
+  // то же хранилище. Отличие одно — источник связи `manual` вместо `ai`.
+  async upload(input: UploadDocumentInput): Promise<AttachDocumentResult> {
+    return uploadDocument(
+      { documents: this.documents, documentLinks: this.documentLinks, storage: this.storage },
+      input,
+    );
+  }
+
+  // Байты документа отдаются через API, а не редиректом на адрес хранилища:
+  // бакет приватный, и права проверяются до выдачи файла.
+  async readFile(companyId: string, id: string): Promise<{ document: DocumentEntity; file: StoredFile } | null> {
+    const document = await this.documents.findById(companyId, id);
+    if (!document) return null;
+    const file = await this.storage.download(document.fileUrl);
+    return file ? { document, file } : null;
+  }
+
+  // Ниже — три тонких метода для DocumentIntelligenceModule (P6, владелец
+  // проекта, 2026-09-06). Тот же Document Engine, что и generateSpecification/
+  // upload выше: ни новой таблицы, ни нового репозитория, просто доступ к уже
+  // внедрённым document_derivatives/document_links оттуда, где раньше они
+  // были приватными деталями генерации документов.
+
+  // document_derivatives — insert-only (у DocumentDerivativeRepository нет
+  // update): повторное извлечение создаёт новую запись, не переписывая
+  // прежнюю (Immutable Original, docs/PRINCIPLES.md принцип 19).
+  async createDerivative(input: NewDocumentDerivativeInput): Promise<DocumentDerivativeEntity> {
+    return this.documentDerivatives.create(input);
+  }
+
+  async findLatestDerivative(documentId: string, type: string): Promise<DocumentDerivativeEntity | null> {
+    return this.documentDerivatives.findLatestByDocumentId(documentId, type);
+  }
+
+  // Добавляет связь к уже существующему документу (материал, закупка) —
+  // отдельно от uploadDocument/generateSpecification, которые создают
+  // документ и его первую связь одним шагом.
+  async link(input: NewDocumentLinkInput): Promise<DocumentLink> {
+    return this.documentLinks.create(input);
   }
 }

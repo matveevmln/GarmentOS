@@ -1,19 +1,31 @@
-import { Inject, Injectable, Logger } from "@nestjs/common";
+import { Inject, Injectable } from "@nestjs/common";
 import type { BomItem } from "@garmentos/domain-bom";
 import type { ProductionOrder } from "@garmentos/domain-contract-manufacturing";
+import type { AuditSource } from "@garmentos/domain-audit";
 import type { DocumentEntity, SpecificationDocumentData, SpecificationLineItem } from "@garmentos/domain-document";
-import { DomainError as WarehouseDomainError } from "@garmentos/domain-warehouse";
+import type { ProductionOrderCostSnapshot } from "@garmentos/shared-types";
+import { AuditService } from "../audit/audit.service";
 import { BomService } from "../bom/bom.service";
 import { CatalogService } from "../catalog/catalog.service";
 import { ContractManufacturingService } from "../contract-manufacturing/contract-manufacturing.service";
 import { DocumentService } from "../document/document.service";
 import { IdentityService } from "../identity/identity.service";
 import { ProcurementService } from "../procurement/procurement.service";
+import { CostingService } from "../reporting/costing.service";
 import type { TelegramClient } from "../telegram/telegram-client";
 import { TELEGRAM_CLIENT } from "../telegram/telegram.tokens";
 import { WarehouseService } from "../warehouse/warehouse.service";
 import { ProductionRequestService } from "./production-request.service";
-import { formatRuAmount, formatRuQuantity } from "./ru-number-format";
+import { formatRuAmount, formatRuDate, formatRuQuantity } from "./ru-number-format";
+import { computeSpecificationLinePricing } from "./specification-pricing";
+
+// Стандартное условие оплаты компании (владелец проекта, 2026-08-03):
+// 70% предоплата после выставления счёта, 30% при отгрузке товара со склада
+// цеха — используется, только если у конкретного цеха (workshop.paymentTerms)
+// ещё не настроено собственное условие.
+const DEFAULT_PAYMENT_TERMS =
+  "70% стоимости товара, указанной в спецификации, оплачиваются Заказчиком в течение 3 (трёх) рабочих дней после " +
+  "получения счёта от Исполнителя. Остальные 30% оплачиваются Заказчиком в момент отгрузки Товара со склада Исполнителя.";
 
 // Форма {message, code} — распознаётся DomainExceptionFilter по duck typing
 // (apps/api/src/common/domain-exception.filter.ts), тот же паттерн, что
@@ -75,7 +87,6 @@ export class ProductionOrderOrchestrationService {
   // использовали тот же механизм (требование владельца проекта 2026-07-26:
   // "Telegram — только интерфейс, вся логика должна жить в GarmentOS").
   private readonly pendingByChannel = new Map<string, PendingProductionRequest>();
-  private readonly logger = new Logger(ProductionOrderOrchestrationService.name);
 
   constructor(
     private readonly productionRequestService: ProductionRequestService,
@@ -86,6 +97,8 @@ export class ProductionOrderOrchestrationService {
     private readonly identityService: IdentityService,
     private readonly procurementService: ProcurementService,
     private readonly warehouseService: WarehouseService,
+    private readonly costingService: CostingService,
+    private readonly auditService: AuditService,
     @Inject(TELEGRAM_CLIENT) private readonly telegramClient: TelegramClient,
   ) {}
 
@@ -95,7 +108,7 @@ export class ProductionOrderOrchestrationService {
     workshopId: string,
     text: string,
   ): Promise<ProductionOrder> {
-    const parsed = await this.productionRequestService.parse(text);
+    const parsed = await this.productionRequestService.parse(companyId, text);
 
     const product = await this.catalogService.findProductByName(companyId, parsed.modelName);
     if (!product) {
@@ -151,7 +164,7 @@ export class ProductionOrderOrchestrationService {
   // ("Цех: ...") или у компании ровно один активный цех — выбирается сам;
   // иначе перечисляется как проблема (AI не имеет права придумать цех).
   async buildPreview(companyId: string, text: string): Promise<ProductionRequestPreview> {
-    const parsed = await this.productionRequestService.parse(text);
+    const parsed = await this.productionRequestService.parse(companyId, text);
     const warnings: string[] = [];
 
     const product = await this.catalogService.findProductByName(companyId, parsed.modelName);
@@ -272,40 +285,6 @@ export class ProductionOrderOrchestrationService {
     return warnings;
   }
 
-  // Расход материала при подтверждении заказа — вызывается только если
-  // материалы предоставляет компания (production_orders.materials_provided_by_us,
-  // по умолчанию true — CLAUDE.md, глоссарий: цех шьёт из наших материалов).
-  // Недостаток на складе не блокирует уже подтверждённый заказ (он был
-  // видимым предупреждением ещё в предпросмотре) — записывается расход по
-  // тому, что реально есть, остальное просто не списывается, ошибка логируется.
-  private async consumeMaterialsForOrder(companyId: string, order: ProductionOrder): Promise<void> {
-    if (!order.materialsProvidedByUs) return;
-
-    const bom = await this.bomService.getApproved(companyId, { productId: order.productId });
-    if (!bom) return;
-
-    const warehouses = await this.warehouseService.listWarehouses(companyId);
-    const warehouse = warehouses.length === 1 ? warehouses[0] : undefined;
-    if (!warehouse) return;
-
-    const totalQuantity = order.variants.reduce((sum, variant) => sum + Number(variant.quantity), 0);
-    for (const bomItem of bom.items) {
-      const required = totalQuantity * Number(bomItem.quantityPerUnit) * (1 + Number(bomItem.wastePercent) / 100);
-      try {
-        await this.warehouseService.consumeMaterialStock(warehouse.id, bomItem.materialId, required, {
-          referenceType: "production_order",
-          referenceId: order.id,
-        });
-      } catch (error) {
-        if (error instanceof WarehouseDomainError) {
-          this.logger.warn(`Недостаточно материала ${bomItem.materialId} для заказа ${order.id}: ${error.message}`);
-          continue;
-        }
-        throw error;
-      }
-    }
-  }
-
   // Предпросмотр, адресованный конкретному разговорному каналу (Telegram-чат
   // и т.п.) — хранит состояние "ждёт подтверждения" отдельно на каждый канал,
   // не глобально на компанию (два чата одной компании не должны путать друг
@@ -340,10 +319,16 @@ export class ProductionOrderOrchestrationService {
   }
 
   // Вызывается после того, как человек ответил "Да" — только теперь система
-  // реально создаёт заказ, списывает расход материалов (consumeMaterialsForOrder,
-  // Итерация 9), формирует PDF и отправляет спецификацию цеху (требование
-  // владельца проекта 2026-07-26: подтверждение должно быть осмысленным, не
-  // просто Да/Нет "в никуда", и весь путь выполняется одним подтверждением).
+  // реально создаёт заказ, формирует PDF и отправляет спецификацию цеху
+  // (требование владельца проекта 2026-07-26: подтверждение должно быть
+  // осмысленным, не просто Да/Нет "в никуда", и весь путь выполняется одним
+  // подтверждением).
+  //
+  // Материал здесь НЕ списывается (владелец проекта, 2026-08-30): подтверждение
+  // заказа — это договорённость с цехом, а не расход ткани. Единственная точка
+  // фактического списания — внесение факта раскроя, где известно, сколько
+  // реально ушло. До этой правки списание висело здесь и срабатывало только на
+  // Telegram-пути: заказы из веб-интерфейса не списывали материал вообще.
   async confirmPendingRequest(
     channelKey: string,
     userId: string | null,
@@ -359,10 +344,121 @@ export class ProductionOrderOrchestrationService {
     this.pendingByChannel.delete(channelKey);
 
     const draft = await this.createFromText(pending.companyId, userId, pending.workshopId, pending.text);
-    const order = await this.contractManufacturingService.confirmProductionOrder(pending.companyId, draft.id);
-    await this.consumeMaterialsForOrder(pending.companyId, order);
+    const order = await this.confirmProductionOrder(pending.companyId, draft.id, userId, "telegram");
     const document = await this.generateAndSendSpecification(pending.companyId, order.id, userId);
     return { order, document };
+  }
+
+  // Подтверждение заказа (draft→placed) + фиксация Snapshot партии одним
+  // шагом (владелец проекта, 2026-08-03 — «Паспорт партии»,
+  // docs/PRODUCTION_BATCH_LIFECYCLE_ARCHITECTURE.md, раздел «Snapshot
+  // партии»): себестоимость по текущим закупочным ценам, условия оплаты и
+  // реквизиты договора цеха фиксируются РОВНО в этот момент и больше
+  // никогда не пересчитываются — даже если позже изменятся цены материалов
+  // или карточка цеха. Это единственный путь подтверждения заказа в API
+  // (production-orders.controller.ts вызывает этот метод, не
+  // ContractManufacturingService.confirmProductionOrder напрямую) — иначе
+  // часть заказов осталась бы без снимка.
+  async confirmProductionOrder(
+    companyId: string,
+    productionOrderId: string,
+    userId: string | null,
+    source: AuditSource = "http_api",
+  ): Promise<ProductionOrder> {
+    const draft = await this.contractManufacturingService.findProductionOrderById(companyId, productionOrderId);
+    if (!draft) {
+      throw new ProductionRequestOrchestrationError(
+        `Заказ пошива ${productionOrderId} не найден`,
+        "PRODUCTION_ORDER_NOT_FOUND",
+      );
+    }
+    const [workshop, company] = await Promise.all([
+      this.contractManufacturingService.findWorkshopById(companyId, draft.workshopId),
+      this.identityService.findCompanyById(companyId),
+    ]);
+    if (!workshop) {
+      throw new ProductionRequestOrchestrationError(`Цех ${draft.workshopId} не найден`, "WORKSHOP_NOT_FOUND");
+    }
+    if (!company) {
+      throw new ProductionRequestOrchestrationError(`Компания ${companyId} не найдена`, "COMPANY_NOT_FOUND");
+    }
+    // Основание генерации (owner, 2026-08-03 — «Паспорт партии», раздел 5):
+    // без номера договора спецификация физически не может быть выпущена
+    // ("Спецификация №N к договору № ___") — а раз он фиксируется в Snapshot
+    // именно сейчас и больше не меняется, проверить его нужно ДО перевода
+    // заказа в "placed", а не после: иначе при отказе заказ навсегда
+    // остаётся подтверждённым, но без снимка (assertCanConfirm разрешает
+    // подтверждение только из "draft" — повторно не подтвердить).
+    if (!workshop.contractNumber) {
+      throw new ProductionRequestOrchestrationError(
+        `У цеха "${workshop.name}" не указан номер договора — заполните его в карточке цеха перед подтверждением заказа`,
+        "WORKSHOP_CONTRACT_NUMBER_MISSING",
+      );
+    }
+
+    // computeSpecificationPricing тоже валидирует "основание генерации" —
+    // бросает 404, если у модели нет утверждённого BOM — тоже до перевода
+    // статуса, по той же причине.
+    const pricing = await this.costingService.computeSpecificationPricing(companyId, draft.productId);
+    // Нормы расхода замораживаются вместе с ценами (Pilot v1, этап 4).
+    // Требование исторической памяти: партия хранит ту норму, по которой
+    // была запущена, и изменение карточки модели её не меняет.
+    const [materialNorms, materialNormsVersion] = await Promise.all([
+      this.costingService.captureMaterialNorms(companyId, draft.productId),
+      this.costingService.findApprovedBomVersion(companyId, draft.productId),
+    ]);
+    const snapshot: ProductionOrderCostSnapshot = {
+      capturedAt: new Date().toISOString(),
+      materialNorms,
+      ...(materialNormsVersion !== null ? { materialNormsVersion } : {}),
+      // Согласованная цена пошива и её валюта (P1-1) — RUB зафиксирован как
+      // бизнес-правило (принцип 21), не введён отдельным полем ввода: смена
+      // валюты пошива — решение владельца, не техническое.
+      agreedUnitPrice: Number(draft.agreedUnitPrice),
+      agreedUnitPriceCurrency: "RUB",
+      fabricCostPerUnit: pricing.fabricCostPerUnit,
+      trimCostPerUnit: pricing.trimCostPerUnit,
+      packagingCostPerUnit: pricing.packagingCostPerUnit,
+      sewingCostPerUnit: pricing.sewingCostPerUnit,
+      otherCostPerUnit: pricing.otherCostPerUnit,
+      materialCostsByCurrency: pricing.materialCostsByCurrency,
+      actualCostPerUnit: pricing.actualCostPerUnit,
+      actualCostCurrency: pricing.actualCostCurrency,
+      currencyWarning: pricing.currencyWarning,
+      deductionPerUnit: pricing.deductionPerUnit,
+      specificationPricePerUnit: pricing.specificationPricePerUnit,
+      materialsWithoutPriceHistory: pricing.materialsWithoutPriceHistory,
+      paymentTerms: workshop.paymentTerms ?? DEFAULT_PAYMENT_TERMS,
+      deliveryMethod: workshop.deliveryMethod ?? "",
+      contractNumber: workshop.contractNumber,
+      contractDate: workshop.contractDate ?? "",
+      contractorName: workshop.name,
+      customerName: company.legalName ?? company.name,
+      contractorSignerRole: workshop.signerRole ?? "",
+      contractorSignerName: workshop.signerName ?? "",
+      customerSignerName: company.signerName ?? "",
+    };
+
+    const order = await this.contractManufacturingService.confirmProductionOrder(companyId, productionOrderId);
+    const confirmed = await this.contractManufacturingService.updateProductionOrderCostSnapshot(
+      companyId,
+      order.id,
+      snapshot,
+    );
+
+    // Аудит партии (владелец проекта, 2026-08-04: "кто изменил партию, когда,
+    // что изменил, старое/новое значение" — момент подтверждения заказа —
+    // самое важное событие в жизни партии, здесь фиксируется Snapshot
+    // себестоимости, который больше никогда не пересчитывается).
+    await this.auditService.record(companyId, userId, source, {
+      entityType: "production_order",
+      entityId: confirmed.id,
+      action: "production_order.confirmed",
+      beforeJson: { status: draft.status },
+      afterJson: { status: confirmed.status, costSnapshot: snapshot },
+    });
+
+    return confirmed;
   }
 
   async generateAndSendSpecification(
@@ -399,15 +495,13 @@ export class ProductionOrderOrchestrationService {
       throw new ProductionRequestOrchestrationError(`Модель ${order.productId} не найдена`, "PRODUCT_NOT_FOUND");
     }
 
-    const unitPrice = Number(order.agreedUnitPrice);
     const items: SpecificationLineItem[] = [];
     let totalQuantity = 0;
     let totalSum = 0;
     for (const variant of order.variants) {
       const productVariant = await this.catalogService.findProductVariantById(variant.productVariantId);
       if (!productVariant) continue;
-      const quantity = Number(variant.quantity);
-      const sum = quantity * unitPrice;
+      const { quantity, unitPrice, sum } = computeSpecificationLinePricing(order, variant);
       totalQuantity += quantity;
       totalSum += sum;
       items.push({
@@ -426,29 +520,43 @@ export class ProductionOrderOrchestrationService {
     // нумерация и даты", требование владельца проекта 2026-07-26).
     const specNumber = await this.contractManufacturingService.reserveNextSpecificationNumber(workshop.id);
 
-    // Условия оплаты/способ доставки/подписанты — постоянные поля,
-    // настраиваются один раз в настройках цеха/компании (workshop.paymentTerms
-    // и т.д., владелец проекта 2026-08-02) и подставляются автоматически в
-    // каждую сгенерированную спецификацию; пусто, только если ещё не заданы.
+    // Условия оплаты/способ доставки/реквизиты договора/подписанты
+    // подставляются из Snapshot партии (owner, 2026-08-03 — «Паспорт
+    // партии»), зафиксированного при подтверждении заказа
+    // (confirmProductionOrder выше) — не из живой карточки цеха/компании.
+    // Это гарантирует, что спецификация №2, сгенерированная повторно через
+    // месяц для того же заказа, покажет ТЕ ЖЕ условия, что и спецификация
+    // №1, даже если цех успел сменить условия оплаты или реквизиты договора
+    // в своих настройках. order.costSnapshot === null только у заказов,
+    // подтверждённых до появления этого механизма — для них сохраняется
+    // прежнее поведение (живые данные), а не отказ в генерации.
+    const snapshot = order.costSnapshot as ProductionOrderCostSnapshot | null;
     const data: SpecificationDocumentData = {
       fields: {
-        contractNumber: workshop.contractNumber ?? "",
-        contractDate: workshop.contractDate ?? "",
-        customerName: company.legalName ?? company.name,
-        contractorName: workshop.name,
+        contractNumber: snapshot?.contractNumber ?? workshop.contractNumber ?? "",
+        contractDate: formatRuDate(snapshot?.contractDate ?? workshop.contractDate),
+        customerName: snapshot?.customerName ?? company.legalName ?? company.name,
+        contractorName: snapshot?.contractorName ?? workshop.name,
         specNumber: String(specNumber),
-        paymentTerms: workshop.paymentTerms ?? "",
-        deliveryDeadline: order.dueDate ?? "",
-        deliveryMethod: workshop.deliveryMethod ?? "",
-        contractorSignerRole: workshop.signerRole ?? "",
-        contractorSignerName: workshop.signerName ?? "",
-        customerSignerName: company.signerName ?? "",
+        paymentTerms: snapshot?.paymentTerms ?? workshop.paymentTerms ?? DEFAULT_PAYMENT_TERMS,
+        deliveryDeadline: formatRuDate(order.dueDate),
+        deliveryMethod: snapshot?.deliveryMethod ?? workshop.deliveryMethod ?? "",
+        contractorSignerRole: snapshot?.contractorSignerRole ?? workshop.signerRole ?? "",
+        contractorSignerName: snapshot?.contractorSignerName ?? workshop.signerName ?? "",
+        customerSignerName: snapshot?.customerSignerName ?? company.signerName ?? "",
       },
       items,
       totals: { quantity: formatRuQuantity(totalQuantity), sum: formatRuAmount(totalSum) },
     };
 
     const result = await this.documentService.generateSpecification(companyId, productionOrderId, uploadedBy, data);
+
+    await this.auditService.record(companyId, uploadedBy, "http_api", {
+      entityType: "production_order",
+      entityId: productionOrderId,
+      action: "document.specification_generated",
+      afterJson: { documentId: result.document.id, specNumber: data.fields.specNumber },
+    });
 
     if (workshop.telegramChatId) {
       await this.telegramClient.sendDocument(

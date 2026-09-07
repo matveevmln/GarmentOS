@@ -1,14 +1,17 @@
-import { collections, products, productVariants, type DbOrTx } from "@garmentos/db-schema";
-import { and, eq, ilike } from "drizzle-orm";
+import { collections, productSizes, products, productVariants, type DbOrTx } from "@garmentos/db-schema";
+import { and, asc, eq, ilike } from "drizzle-orm";
 import type { Collection } from "../domain/collection";
 import type { Product } from "../domain/product";
 import type { ProductVariant } from "../domain/product-variant";
+import type { ProductSize, ProductSizeDraft } from "../domain/product-size";
 import type {
   CollectionRepository,
   NewCollectionInput,
   NewProductInput,
   NewProductVariantInput,
+  ProductCostsInput,
   ProductRepository,
+  ProductSizeRepository,
   ProductVariantRepository,
 } from "../application/ports";
 
@@ -41,6 +44,10 @@ function toProduct(row: ProductRow): Product {
     season: row.season,
     status: row.status,
     techPackUrl: row.techPackUrl,
+    standardSewingCost: row.standardSewingCost,
+    standardSewingCostCurrency: row.standardSewingCostCurrency,
+    otherProductionCost: row.otherProductionCost,
+    otherProductionCostCurrency: row.otherProductionCostCurrency,
     createdBy: row.createdBy,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
@@ -91,6 +98,21 @@ export class DrizzleProductRepository implements ProductRepository {
     return toProduct(row);
   }
 
+  async updateCosts(companyId: string, id: string, input: ProductCostsInput): Promise<Product> {
+    const [row] = await this.db
+      .update(products)
+      .set({
+        standardSewingCost: input.standardSewingCost,
+        standardSewingCostCurrency: input.standardSewingCostCurrency,
+        otherProductionCost: input.otherProductionCost,
+        otherProductionCostCurrency: input.otherProductionCostCurrency,
+      })
+      .where(and(eq(products.companyId, companyId), eq(products.id, id)))
+      .returning();
+    if (!row) throw new Error(`UPDATE products не вернул строку для id=${id}`);
+    return toProduct(row);
+  }
+
   async findByCode(companyId: string, code: string): Promise<Product | null> {
     const [row] = await this.db
       .select()
@@ -130,6 +152,11 @@ export class DrizzleProductRepository implements ProductRepository {
     });
     return matches.slice(0, limit).map(toProduct);
   }
+
+  async listByCompany(companyId: string): Promise<Product[]> {
+    const rows = await this.db.select().from(products).where(eq(products.companyId, companyId));
+    return rows.map(toProduct);
+  }
 }
 
 export class DrizzleProductVariantRepository implements ProductVariantRepository {
@@ -164,5 +191,56 @@ export class DrizzleProductVariantRepository implements ProductVariantRepository
   async findById(id: string): Promise<ProductVariant | null> {
     const [row] = await this.db.select().from(productVariants).where(eq(productVariants.id, id)).limit(1);
     return row ? toProductVariant(row) : null;
+  }
+
+  async listByProduct(productId: string): Promise<ProductVariant[]> {
+    const rows = await this.db.select().from(productVariants).where(eq(productVariants.productId, productId));
+    return rows.map(toProductVariant);
+  }
+}
+
+function toProductSize(row: typeof productSizes.$inferSelect): ProductSize {
+  return {
+    id: row.id,
+    productId: row.productId,
+    size: row.size,
+    sortOrder: row.sortOrder,
+    ratioWeight: row.ratioWeight,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  };
+}
+
+export class DrizzleProductSizeRepository implements ProductSizeRepository {
+  constructor(private readonly db: DbOrTx) {}
+
+  async listByProduct(productId: string): Promise<ProductSize[]> {
+    const rows = await this.db
+      .select()
+      .from(productSizes)
+      .where(eq(productSizes.productId, productId))
+      .orderBy(asc(productSizes.sortOrder));
+    return rows.map(toProductSize);
+  }
+
+  // Ряд заменяется целиком в одной транзакции: порядок и веса меняются
+  // вместе, и промежуточное состояние (часть старых размеров, часть новых)
+  // не должно быть видно ни одному читателю.
+  async replaceForProduct(productId: string, sizes: ProductSizeDraft[]): Promise<ProductSize[]> {
+    return this.db.transaction(async (tx) => {
+      await tx.delete(productSizes).where(eq(productSizes.productId, productId));
+      const rows = await tx
+        .insert(productSizes)
+        .values(
+          sizes.map((row, index) => ({
+            productId,
+            size: row.size,
+            sortOrder: index,
+            ratioWeight: String(row.ratioWeight),
+          })),
+        )
+        .returning();
+      return rows.map(toProductSize);
+    });
   }
 }

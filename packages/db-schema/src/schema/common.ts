@@ -24,24 +24,35 @@ import { inboxSuggestions } from "./inbox";
 // (Итерация 9) или подтверждённое через Inbox предложение AI.
 export const auditSourceEnum = pgEnum("audit_source", ["http_api", "cli", "telegram", "ai"]);
 
-export const auditLog = pgTable("audit_log", {
-  id: id(),
-  companyId: uuid("company_id")
-    .notNull()
-    .references(() => companies.id),
-  userId: uuid("user_id").references(() => users.id),
-  source: auditSourceEnum("source").notNull().default("http_api"),
-  entityType: text("entity_type").notNull(),
-  entityId: uuid("entity_id").notNull(),
-  action: text("action").notNull(),
-  beforeJson: jsonb("before_json"),
-  afterJson: jsonb("after_json"),
-  // Nullable-ссылка на предложение AI, которое подтвердил userId выше — не
-  // заполняется для обычных ручных операций (docs/AUTH_ARCHITECTURE.md,
-  // раздел 13, пункт (2) "что именно предложил AI").
-  inboxSuggestionId: uuid("inbox_suggestion_id").references(() => inboxSuggestions.id),
-  occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull().defaultNow(),
-});
+export const auditLog = pgTable(
+  "audit_log",
+  {
+    id: id(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id),
+    userId: uuid("user_id").references(() => users.id),
+    source: auditSourceEnum("source").notNull().default("http_api"),
+    entityType: text("entity_type").notNull(),
+    entityId: uuid("entity_id").notNull(),
+    action: text("action").notNull(),
+    beforeJson: jsonb("before_json"),
+    afterJson: jsonb("after_json"),
+    // Nullable-ссылка на предложение AI, которое подтвердил userId выше — не
+    // заполняется для обычных ручных операций (docs/AUTH_ARCHITECTURE.md,
+    // раздел 13, пункт (2) "что именно предложил AI").
+    inboxSuggestionId: uuid("inbox_suggestion_id").references(() => inboxSuggestions.id),
+    occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    // Самая быстрорастущая таблица системы (по строке на каждую мутацию,
+    // append-only, без TTL) — до этой миграции не имела ни одного индекса,
+    // включая индекс под собственный главный запрос «история этой сущности»
+    // (ARCHITECTURE_REVIEW.md, находка 4.1).
+    index("audit_log_entity_idx").on(table.entityType, table.entityId),
+    index("audit_log_company_occurred_idx").on(table.companyId, table.occurredAt),
+  ],
+);
 
 export const notifications = pgTable("notifications", {
   id: id(),

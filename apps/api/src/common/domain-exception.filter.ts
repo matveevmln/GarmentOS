@@ -46,6 +46,7 @@ function statusForCode(code: string): number {
     code.endsWith("_NOT_PLANNED") ||
     code.endsWith("_NOT_IN_PROGRESS") ||
     code.endsWith("_NOT_READY_FOR_PICKUP") ||
+    code.endsWith("_NOT_RECEIVED") ||
     code.endsWith("_INVALID_STATUS_TRANSITION")
   ) {
     return HttpStatus.CONFLICT;

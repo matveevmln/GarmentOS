@@ -1,0 +1,7 @@
+CREATE TYPE "public"."production_order_variant_type" AS ENUM('new', 'rework');--> statement-breakpoint
+ALTER TABLE "production_order_variants" ADD COLUMN "variant_type" "production_order_variant_type" DEFAULT 'new' NOT NULL;--> statement-breakpoint
+ALTER TABLE "production_order_variants" ADD COLUMN "unit_price" numeric(14, 2);--> statement-breakpoint
+ALTER TABLE "production_orders" ADD COLUMN "source_production_order_id" uuid;--> statement-breakpoint
+ALTER TABLE "production_orders" ADD CONSTRAINT "production_orders_source_production_order_id_production_orders_id_fk" FOREIGN KEY ("source_production_order_id") REFERENCES "public"."production_orders"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "production_order_variants" ADD CONSTRAINT "production_order_variants_rework_price_zero_check" CHECK ("production_order_variants"."variant_type" != 'rework' or "production_order_variants"."unit_price" = 0);--> statement-breakpoint
+ALTER TABLE "production_orders" ADD CONSTRAINT "production_orders_source_not_self_check" CHECK ("production_orders"."source_production_order_id" is null or "production_orders"."source_production_order_id" != "production_orders"."id");

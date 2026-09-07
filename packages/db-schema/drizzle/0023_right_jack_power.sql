@@ -1,0 +1,2 @@
+ALTER TABLE "production_order_variants" ADD COLUMN "received_quantity" numeric(12, 3);--> statement-breakpoint
+ALTER TABLE "production_order_variants" ADD CONSTRAINT "production_order_variants_received_quantity_non_negative_check" CHECK ("production_order_variants"."received_quantity" is null or "production_order_variants"."received_quantity" >= 0);

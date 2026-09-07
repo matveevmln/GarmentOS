@@ -4,6 +4,11 @@ import fontkit from "@pdf-lib/fontkit";
 import { PDFDocument, PDFFont, PDFPage, rgb } from "pdf-lib";
 import { applyPlaceholders, type SpecificationDocumentData, type SpecificationTemplateDefinition } from "../domain/specification-template";
 import type { DocumentRenderAdapter } from "../application/ports";
+import {
+  buildCuttingOrderColumns,
+  type CuttingOrderDocumentData,
+  type TableColumn,
+} from "../domain/cutting-order-template";
 
 // pdf-lib — программная раскладка без headless-браузера (docs/TECH_STACK.md,
 // раздел "Document Engine — генерация PDF"). Document Template Engine
@@ -20,8 +25,11 @@ import type { DocumentRenderAdapter } from "../application/ports";
 // кириллицу (SIL Open Font License 1.1, свободно распространяется) — тот же
 // шрифт, что и в эталонном образце документа (2026-07-26).
 const FONTS_DIR = join(__dirname, "..", "..", "assets", "fonts");
-const PAGE_WIDTH = 595.28; // A4
-const PAGE_HEIGHT = 841.89;
+// Размер страницы измерен напрямую по эталонному документу (владелец
+// проекта, 2026-08-03, спецификация №1 к договору №П-22-04) — 612×842pt,
+// не стандартный A4 (595.28×841.89): подтверждено PDF MediaBox эталона.
+const PAGE_WIDTH = 612;
+const PAGE_HEIGHT = 842;
 const MARGIN = 45;
 const CONTENT_WIDTH = PAGE_WIDTH - MARGIN * 2;
 
@@ -33,22 +41,24 @@ interface DrawContext {
   y: number;
 }
 
-function wrapText(font: PDFFont, text: string, size: number, maxWidth: number): string[] {
+// Разбивает ОДИН абзац (без \n внутри) на строки по ширине — вызывающий код
+// (drawParagraph) сам разбивает текст по \n на абзацы, чтобы знать, какая
+// строка последняя в своём абзаце (нужно для выравнивания по ширине —
+// последняя строка абзаца никогда не растягивается, см. drawJustifiedLine).
+function wrapParagraphLines(font: PDFFont, paragraph: string, size: number, maxWidth: number): string[] {
+  const words = paragraph.split(" ");
   const lines: string[] = [];
-  for (const paragraph of text.split("\n")) {
-    const words = paragraph.split(" ");
-    let current = "";
-    for (const word of words) {
-      const candidate = current ? `${current} ${word}` : word;
-      if (font.widthOfTextAtSize(candidate, size) > maxWidth && current) {
-        lines.push(current);
-        current = word;
-      } else {
-        current = candidate;
-      }
+  let current = "";
+  for (const word of words) {
+    const candidate = current ? `${current} ${word}` : word;
+    if (font.widthOfTextAtSize(candidate, size) > maxWidth && current) {
+      lines.push(current);
+      current = word;
+    } else {
+      current = candidate;
     }
-    lines.push(current);
   }
+  lines.push(current);
   return lines;
 }
 
@@ -59,36 +69,95 @@ function ensureSpace(ctx: DrawContext, needed: number): void {
   }
 }
 
-function drawParagraph(ctx: DrawContext, text: string, options: { bold?: boolean; size?: number; align?: "left" | "right" | "center"; gapAfter?: number } = {}): void {
+// Выравнивание по ширине (justify) — эталонный документ растягивает
+// межсловные пробелы так, что каждая строка абзаца, кроме последней,
+// доходит точно до правого края (владелец проекта, 2026-08-03: сверено
+// визуально с присланным оригиналом — правый край первой строки пункта 1 и
+// пункта 2 совпадает с правой границей таблицы, последняя строка каждого
+// абзаца остаётся обычной, нерастянутой длины).
+function drawJustifiedLine(ctx: DrawContext, line: string, font: PDFFont, size: number, x0: number, targetWidth: number): void {
+  const words = line.split(" ");
+  if (words.length <= 1) {
+    ctx.page.drawText(line, { x: x0, y: ctx.y, size, font, color: rgb(0, 0, 0) });
+    return;
+  }
+  const naturalWidth = font.widthOfTextAtSize(line, size);
+  const spaceWidth = font.widthOfTextAtSize(" ", size);
+  const extraPerGap = (targetWidth - naturalWidth) / (words.length - 1);
+  let x = x0;
+  for (const word of words) {
+    ctx.page.drawText(word, { x, y: ctx.y, size, font, color: rgb(0, 0, 0) });
+    x += font.widthOfTextAtSize(word, size) + spaceWidth + extraPerGap;
+  }
+}
+
+function drawParagraph(
+  ctx: DrawContext,
+  text: string,
+  options: { bold?: boolean; size?: number; align?: "left" | "right" | "center"; justify?: boolean; gapAfter?: number } = {},
+): void {
   const size = options.size ?? 10.5;
   const font = options.bold ? ctx.boldFont : ctx.font;
-  const lineHeight = size + 4;
-  const lines = wrapText(font, text, size, CONTENT_WIDTH);
+  // Межстрочный интервал в основном тексте измерен по эталону (владелец
+  // проекта, 2026-08-03) — около 12pt для 10.5pt текста (было +4pt, что
+  // визуально заметно просторнее оригинала).
+  const lineHeight = size + 1.5;
 
-  for (const line of lines) {
-    ensureSpace(ctx, lineHeight);
-    const width = font.widthOfTextAtSize(line, size);
-    const x = options.align === "center" ? MARGIN + (CONTENT_WIDTH - width) / 2 : options.align === "right" ? MARGIN + CONTENT_WIDTH - width : MARGIN;
-    ctx.page.drawText(line, { x, y: ctx.y, size, font, color: rgb(0, 0, 0) });
-    ctx.y -= lineHeight;
+  for (const paragraph of text.split("\n")) {
+    const lines = wrapParagraphLines(font, paragraph, size, CONTENT_WIDTH);
+    lines.forEach((line, index) => {
+      ensureSpace(ctx, lineHeight);
+      const isLastLineOfParagraph = index === lines.length - 1;
+      if (options.justify && !isLastLineOfParagraph && !options.align) {
+        drawJustifiedLine(ctx, line, font, size, MARGIN, CONTENT_WIDTH);
+      } else {
+        const width = font.widthOfTextAtSize(line, size);
+        const x =
+          options.align === "center"
+            ? MARGIN + (CONTENT_WIDTH - width) / 2
+            : options.align === "right"
+              ? MARGIN + CONTENT_WIDTH - width
+              : MARGIN;
+        ctx.page.drawText(line, { x, y: ctx.y, size, font, color: rgb(0, 0, 0) });
+      }
+      ctx.y -= lineHeight;
+    });
   }
   ctx.y -= options.gapAfter ?? 4;
 }
 
-function drawTable(ctx: DrawContext, template: SpecificationTemplateDefinition, data: SpecificationDocumentData): void {
-  const { columns } = template.table;
-  const headerHeight = 26;
-  const rowHeight = 24;
+// Обобщённая отрисовка таблицы: колонки и готовые строки. Раньше функция
+// знала форму данных спецификации (жёсткий маппинг семи ключей и строка
+// «Итого»); теперь она рисует любую таблицу, а «что это за колонки» решает
+// вызывающий — так раскройное задание с колонкой на каждый цвет использует
+// тот же код, а не второй генератор.
+//
+// Шапка перерисовывается на каждой новой странице: до этого при переносе
+// таблица продолжалась без заголовков.
+function drawTableRows(
+  ctx: DrawContext,
+  columns: readonly TableColumn[],
+  rows: ReadonlyArray<Record<string, string>>,
+  totalRow?: Record<string, string>,
+): void {
+  // Высоты строк измерены по эталону автоматическим детектированием
+  // горизонтальных границ (владелец проекта, 2026-08-03, вторая проверка):
+  // ряд данных ~15pt (подтверждено), шапка ~25.2pt (не 22pt — двухстрочные
+  // заголовки "Ед.\nизмер." и т.д. не помещаются в 22pt).
+  const headerHeight = 25;
+  const rowHeight = 15;
   const fontSize = 9;
 
   const drawHeaderRow = (): void => {
-    ensureSpace(ctx, headerHeight);
     let x = MARGIN;
     const top = ctx.y;
     for (const column of columns) {
       ctx.page.drawRectangle({ x, y: top - headerHeight, width: column.width, height: headerHeight, borderWidth: 0.75, borderColor: rgb(0, 0, 0) });
-      const lines = wrapText(ctx.boldFont, column.label, fontSize, column.width - 6);
-      let textY = top - 12;
+      // Заголовок может содержать буквальный перенос строки (эталон
+      // 2026-08-03: "Ед.\nизмер.", "Цена\n(руб)", "Сумма\n(руб)" набраны в
+      // оригинале как два ручных абзаца, не автоперенос по ширине).
+      const lines = column.label.split("\n").flatMap((part) => wrapParagraphLines(ctx.boldFont, part, fontSize, column.width - 6));
+      let textY = top - 9;
       for (const line of lines) {
         const width = ctx.boldFont.widthOfTextAtSize(line, fontSize);
         const textX = column.align === "center" ? x + (column.width - width) / 2 : column.align === "right" ? x + column.width - width - 3 : x + 3;
@@ -101,15 +170,20 @@ function drawTable(ctx: DrawContext, template: SpecificationTemplateDefinition, 
   };
 
   const drawDataRow = (values: Record<string, string>, bold = false): void => {
-    ensureSpace(ctx, rowHeight);
+    // Не влезает — новая страница И повтор шапки, иначе продолжение таблицы
+    // читается как набор чисел без названий колонок.
+    if (ctx.y - rowHeight < MARGIN) {
+      ensureSpace(ctx, rowHeight);
+      drawHeaderRow();
+    }
     let x = MARGIN;
     const top = ctx.y;
     const font = bold ? ctx.boldFont : ctx.font;
     for (const column of columns) {
       ctx.page.drawRectangle({ x, y: top - rowHeight, width: column.width, height: rowHeight, borderWidth: 0.75, borderColor: rgb(0, 0, 0) });
       const value = values[column.key] ?? "";
-      const lines = wrapText(font, value, fontSize, column.width - 6);
-      let textY = top - 12;
+      const lines = wrapParagraphLines(font, value, fontSize, column.width - 6);
+      let textY = top - 10;
       for (const line of lines.slice(0, 2)) {
         const width = font.widthOfTextAtSize(line, fontSize);
         const textX = column.align === "center" ? x + (column.width - width) / 2 : column.align === "right" ? x + column.width - width - 3 : x + 3;
@@ -121,9 +195,20 @@ function drawTable(ctx: DrawContext, template: SpecificationTemplateDefinition, 
     ctx.y = top - rowHeight;
   };
 
+  ensureSpace(ctx, headerHeight);
   drawHeaderRow();
-  data.items.forEach((item, index) => {
-    drawDataRow({
+  for (const row of rows) drawDataRow(row);
+  if (totalRow) drawDataRow(totalRow, true);
+  ctx.y -= 12;
+}
+
+// Таблица спецификации — тонкая обёртка над обобщённой отрисовкой: форма
+// данных спецификации остаётся её собственным знанием.
+function drawTable(ctx: DrawContext, template: SpecificationTemplateDefinition, data: SpecificationDocumentData): void {
+  drawTableRows(
+    ctx,
+    template.table.columns,
+    data.items.map((item, index) => ({
       index: String(index + 1),
       name: item.name,
       unit: item.unit,
@@ -131,13 +216,56 @@ function drawTable(ctx: DrawContext, template: SpecificationTemplateDefinition, 
       quantity: item.quantity,
       unitPrice: item.unitPrice,
       sum: item.sum,
-    });
-  });
-  drawDataRow({ name: "Итого", quantity: data.totals.quantity, sum: data.totals.sum }, true);
-  ctx.y -= 12;
+    })),
+    { name: "Итого", quantity: data.totals.quantity, sum: data.totals.sum },
+  );
 }
 
 export class PdfLibTemplateRenderer implements DocumentRenderAdapter {
+  // Раскройное задание: тот же движок, что и спецификация — те же шрифты с
+  // кириллицей, та же геометрия, та же отрисовка таблицы. Отличие одно:
+  // колонки матрицы строятся по числу цветов партии.
+  async renderCuttingOrder(data: CuttingOrderDocumentData): Promise<Uint8Array> {
+    const pdfDoc = await PDFDocument.create();
+    pdfDoc.registerFontkit(fontkit);
+    const font = await pdfDoc.embedFont(readFileSync(join(FONTS_DIR, "LiberationSerif-Regular.ttf")), { subset: true });
+    const boldFont = await pdfDoc.embedFont(readFileSync(join(FONTS_DIR, "LiberationSerif-Bold.ttf")), { subset: true });
+
+    const ctx: DrawContext = { pdfDoc, font, boldFont, page: pdfDoc.addPage([PAGE_WIDTH, PAGE_HEIGHT]), y: PAGE_HEIGHT - MARGIN };
+
+    drawParagraph(ctx, data.title, { bold: true, size: 13, align: "center", gapAfter: 6 });
+    for (const line of data.subtitleLines) {
+      drawParagraph(ctx, line, { size: 10, align: "center", gapAfter: 2 });
+    }
+    ctx.y -= 10;
+
+    const columns: TableColumn[] = buildCuttingOrderColumns(data.colors);
+    drawTableRows(
+      ctx,
+      columns,
+      data.rows.map((row) => {
+        const values: Record<string, string> = { size: row.size };
+        row.quantities.forEach((quantity, index) => {
+          values[`c${index}`] = quantity;
+        });
+        return values;
+      }),
+      (() => {
+        const totals: Record<string, string> = { size: "ИТОГО" };
+        data.totals.forEach((total, index) => {
+          totals[`c${index}`] = total;
+        });
+        return totals;
+      })(),
+    );
+
+    for (const line of data.footerLines) {
+      drawParagraph(ctx, line, { size: 10, gapAfter: 4 });
+    }
+
+    return pdfDoc.save();
+  }
+
   async renderSpecification(template: SpecificationTemplateDefinition, data: SpecificationDocumentData): Promise<Uint8Array> {
     const pdfDoc = await PDFDocument.create();
     pdfDoc.registerFontkit(fontkit);
@@ -151,13 +279,16 @@ export class PdfLibTemplateRenderer implements DocumentRenderAdapter {
     for (const line of template.titleLines) {
       drawParagraph(ctx, applyPlaceholders(line, data.fields), { bold: true, size: 12, align: "center", gapAfter: 2 });
     }
-    ctx.y -= 10;
-    drawParagraph(ctx, applyPlaceholders(template.introParagraph, data.fields), { gapAfter: 16 });
+    ctx.y -= 4;
+    // justify: true — эталон растягивает межсловные пробелы во вводном
+    // пункте и в пунктах 2-6 так, что все строки, кроме последней в каждом
+    // абзаце, доходят до правого края (см. drawJustifiedLine).
+    drawParagraph(ctx, applyPlaceholders(template.introParagraph, data.fields), { justify: true, gapAfter: 16 });
 
     drawTable(ctx, template, data);
 
     for (const line of template.footerLines) {
-      drawParagraph(ctx, applyPlaceholders(line, data.fields), { gapAfter: 6 });
+      drawParagraph(ctx, applyPlaceholders(line, data.fields), { justify: true, gapAfter: 6 });
     }
     ctx.y -= 20;
 

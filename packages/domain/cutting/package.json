@@ -1,0 +1,24 @@
+{
+  "name": "@garmentos/domain-cutting",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Раскрой — раскройное задание партии: план, выделено, факт (см. docs/ARCHITECTURE.md)",
+  "type": "commonjs",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "lint": "eslint \"src/**/*.ts\"",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@garmentos/db-schema": "workspace:*",
+    "drizzle-orm": "^0.45.2"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.1",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.10"
+  }
+}

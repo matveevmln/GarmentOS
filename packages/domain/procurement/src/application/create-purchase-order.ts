@@ -8,6 +8,7 @@ export interface CreatePurchaseOrderInput {
   items: PurchaseOrderItemDraft[];
   orderedAt?: string;
   expectedDate?: string;
+  currency?: string;
   createdBy?: string;
 }
 
@@ -42,6 +43,7 @@ export async function createPurchaseOrderDraft(
     status: "draft",
     orderedAt: input.orderedAt ?? today(),
     expectedDate: input.expectedDate ?? null,
+    currency: input.currency ?? null,
     createdBy: input.createdBy ?? null,
     items: input.items,
   });

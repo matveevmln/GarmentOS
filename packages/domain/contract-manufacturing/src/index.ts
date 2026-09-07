@@ -6,6 +6,15 @@ export type {
   ProductionOrderStatus,
   ProductionOrderVariant,
   ProductionOrderVariantDraft,
+  ProductionOrderVariantType,
+} from "./domain/production-order";
+export {
+  assertVariantsMatchPlannedQuantity,
+  assertCostSnapshotNotYetSet,
+  assertReworkPriceIsZero,
+  assertReworkRequiresSource,
+  assertSourceOrderIsNotSelf,
+  assertSourceOrderExists,
 } from "./domain/production-order";
 export { DomainError } from "./domain/errors";
 
@@ -14,9 +23,11 @@ export type {
   NewProductionOrderInput,
   NewWorkshopInput,
   ProductionOrderRepository,
+  WorkshopPatch,
   WorkshopRepository,
 } from "./application/ports";
 export { createWorkshop, type CreateWorkshopDeps, type CreateWorkshopInput } from "./application/create-workshop";
+export { updateWorkshop, type UpdateWorkshopDeps, type UpdateWorkshopInput } from "./application/update-workshop";
 export {
   createProductionOrderDraft,
   type CreateProductionOrderDeps,
@@ -37,6 +48,16 @@ export {
   type UpdateProductionOrderStatusFromWorkshopDeps,
   type UpdateProductionOrderStatusFromWorkshopInput,
 } from "./application/update-production-order-status-from-workshop";
+export {
+  updateProductionOrderStatus,
+  type UpdateProductionOrderStatusDeps,
+  type UpdateProductionOrderStatusInput,
+} from "./application/update-production-order-status";
+export {
+  captureProductionOrderCostSnapshot,
+  type CaptureProductionOrderCostSnapshotDeps,
+  type CaptureProductionOrderCostSnapshotInput,
+} from "./application/capture-production-order-cost-snapshot";
 export {
   receiveProductionOrder,
   type ReceiveProductionOrderDeps,

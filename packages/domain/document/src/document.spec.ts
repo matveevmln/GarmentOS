@@ -38,15 +38,28 @@ async function runInRolledBackTransaction(fn: (tx: DbOrTx) => Promise<void>): Pr
 // паттерн, что plainTextVerifier в packages/domain/identity/src/rbac-auth.spec.ts).
 class FakeStorageAdapter implements StorageAdapter {
   public readonly uploaded: Array<{ key: string; contentType: string }> = [];
+  private readonly files = new Map<string, { data: Uint8Array; contentType: string }>();
 
-  upload(key: string, _data: Uint8Array, contentType: string): Promise<{ url: string }> {
+  upload(key: string, data: Uint8Array, contentType: string): Promise<{ url: string }> {
     this.uploaded.push({ key, contentType });
-    return Promise.resolve({ url: `https://fake-storage.local/${key}` });
+    const url = `https://fake-storage.local/${key}`;
+    this.files.set(url, { data, contentType });
+    return Promise.resolve({ url });
+  }
+
+  download(fileUrl: string): Promise<{ data: Uint8Array; contentType: string } | null> {
+    return Promise.resolve(this.files.get(fileUrl) ?? null);
   }
 }
 
 class FakeRenderer implements DocumentRenderAdapter {
   public readonly calls: Array<{ template: SpecificationTemplateDefinition; data: SpecificationDocumentData }> = [];
+
+  // Раскройное задание в этих тестах не проверяется — тестовый двойник
+  // реализует метод заглушкой, чтобы удовлетворить порт.
+  renderCuttingOrder(): Promise<Uint8Array> {
+    return Promise.resolve(new Uint8Array([1, 2, 3]));
+  }
 
   renderSpecification(template: SpecificationTemplateDefinition, data: SpecificationDocumentData): Promise<Uint8Array> {
     this.calls.push({ template, data });
@@ -187,6 +200,49 @@ describe("domain/document", () => {
       expect(regenerated.document.id).not.toBe(result.document.id);
       expect(renderer.calls).toHaveLength(2);
       expect(renderer.calls[1]?.data.items).toEqual(data.items);
+    });
+  });
+
+  // Владелец проекта, требование до пилота 2026-08-04: "в системе
+  // одновременно не может существовать несколько актуальных версий одной
+  // спецификации".
+  it("generateSpecificationDocument с supersedesDocumentIds снимает isCurrentVersion со старой версии", async () => {
+    await runInRolledBackTransaction(async (tx) => {
+      const company = await createCompany({ companies: new DrizzleCompanyRepository(tx) }, { name: "Бренд документов 4" });
+      const documents = new DrizzleDocumentRepository(tx);
+      const documentLinks = new DrizzleDocumentLinkRepository(tx);
+      const documentDerivatives = new FakeDocumentDerivativeRepository();
+      const storage = new FakeStorageAdapter();
+      const renderer = new FakeRenderer();
+      const deps = { documents, documentLinks, documentDerivatives, storage, renderer };
+
+      const productionOrderId = "44444444-4444-4444-4444-444444444444";
+      const data = buildSpecificationData();
+
+      const v1 = await generateSpecificationDocument(deps, { companyId: company.id, productionOrderId, uploadedBy: null, data });
+      expect(v1.document.isCurrentVersion).toBe(true);
+      expect(v1.document.supersedesDocumentId).toBeNull();
+
+      const v2 = await generateSpecificationDocument(deps, {
+        companyId: company.id,
+        productionOrderId,
+        uploadedBy: null,
+        data,
+        supersedesDocumentIds: [v1.document.id],
+      });
+      expect(v2.document.isCurrentVersion).toBe(true);
+      expect(v2.document.supersedesDocumentId).toBe(v1.document.id);
+
+      const v1Reloaded = await documents.findById(company.id, v1.document.id);
+      expect(v1Reloaded?.isCurrentVersion).toBe(false);
+
+      // Ровно один документ этого заказа считается текущей версией.
+      const linked = await listDocumentsForEntity(
+        { documentLinks },
+        { companyId: company.id, entityType: "production_order", entityId: productionOrderId },
+      );
+      const current = await Promise.all(linked.map((link) => documents.findById(company.id, link.documentId)));
+      expect(current.filter((doc) => doc?.isCurrentVersion).map((doc) => doc?.id)).toEqual([v2.document.id]);
     });
   });
 });

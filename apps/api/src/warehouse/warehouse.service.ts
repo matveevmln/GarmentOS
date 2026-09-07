@@ -1,6 +1,7 @@
-import { Inject, Injectable } from "@nestjs/common";
+import { Inject, Injectable, NotFoundException } from "@nestjs/common";
 import {
   completeInventoryCount,
+  adjustMaterialStock as adjustMaterialStockUseCase,
   consumeMaterialStock as consumeMaterialStockUseCase,
   createInventoryCount,
   createShipment,
@@ -89,6 +90,19 @@ export class WarehouseService {
     return this.materialStock.findMaterialStockItem(warehouseId, materialId);
   }
 
+  // Остаток материалов по складу (P0-3, владелец проекта, 2026-09-07) —
+  // "видимость остатков материалов": до этого метода в системе не было ни
+  // одного способа узнать текущий остаток, кроме прямого запроса к БД.
+  // Источник истины — уже существующая material_stock_items, обновляемая
+  // на каждое движение; новой таблицы/агрегата это не заводит.
+  async listMaterialStock(companyId: string, warehouseId: string): Promise<MaterialStockItem[]> {
+    const warehouse = await this.warehouses.findById(companyId, warehouseId);
+    if (!warehouse) {
+      throw new NotFoundException({ statusCode: 404, code: "WAREHOUSE_NOT_FOUND", message: `Склад ${warehouseId} не найден` });
+    }
+    return this.materialStock.listByWarehouse(warehouseId);
+  }
+
   async receiveMaterialStock(
     currentUser: AuthenticatedRequestUser,
     warehouseId: string,
@@ -115,13 +129,33 @@ export class WarehouseService {
   // ProductionOrderOrchestrationService (Telegram — тонкий интерфейс, эта
   // операция не имеет отдельного HTTP-эндпоинта и аутентифицированного
   // currentUser, тот же принцип, что и обновление статуса заказа от цеха).
+  // allowOverdraft — для факта раскроя (владелец проекта, 2026-08-30): крой
+  // уже произошёл физически, и запрет его записать хуже, чем расхождение с
+  // учётом. По умолчанию выключено, поэтому приёмка закупки и прочие
+  // вызывающие сохраняют строгую проверку остатка.
   async consumeMaterialStock(
     warehouseId: string,
     materialId: string,
     quantity: number,
     meta: MaterialStockMovementMeta = {},
+    allowOverdraft = false,
   ): Promise<MaterialStockItem> {
-    return consumeMaterialStockUseCase({ materialStock: this.materialStock }, { warehouseId, materialId, quantity, meta });
+    return consumeMaterialStockUseCase(
+      { materialStock: this.materialStock },
+      { warehouseId, materialId, quantity, meta, allowOverdraft },
+    );
+  }
+
+  // Корректировка остатка на разницу — исправление ранее внесённого факта
+  // кроя. Прежнее движение не переписывается, добавляется отдельное типа
+  // adjustment (владелец проекта, 2026-08-30).
+  async adjustMaterialStock(
+    warehouseId: string,
+    materialId: string,
+    delta: number,
+    meta: MaterialStockMovementMeta = {},
+  ): Promise<MaterialStockItem> {
+    return adjustMaterialStockUseCase({ materialStock: this.materialStock }, { warehouseId, materialId, delta, meta });
   }
 
   async receiveStock(currentUser: AuthenticatedRequestUser, input: ReceiveStockDto): Promise<StockItem> {

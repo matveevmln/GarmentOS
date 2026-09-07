@@ -11,7 +11,8 @@ import {
   DrizzleProductRepository,
   DrizzleProductVariantRepository,
 } from "@garmentos/domain-catalog";
-import { createDb, type DbOrTx } from "@garmentos/db-schema";
+import { createDb, productionOrders as productionOrdersTable, type DbOrTx } from "@garmentos/db-schema";
+import { sql } from "drizzle-orm";
 import { createCompany, DrizzleCompanyRepository } from "@garmentos/domain-identity";
 import { createMaterial, DrizzleMaterialRepository } from "@garmentos/domain-procurement";
 import { describe, expect, it } from "vitest";
@@ -19,9 +20,12 @@ import { confirmProductionOrder } from "./application/confirm-production-order";
 import { createProductionOrderDraft } from "./application/create-production-order";
 import { createWorkshop } from "./application/create-workshop";
 import type { BomApprovalPort } from "./application/ports";
+import { captureProductionOrderCostSnapshot } from "./application/capture-production-order-cost-snapshot";
 import { receiveProductionOrder } from "./application/receive-production-order";
+import { updateProductionOrderStatus } from "./application/update-production-order-status";
 import { updateProductionOrderStatusFromWorkshop } from "./application/update-production-order-status-from-workshop";
 import { DomainError } from "./domain/errors";
+import { assertSourceOrderIsNotSelf } from "./domain/production-order";
 import {
   DrizzleProductionOrderRepository,
   DrizzleWorkshopRepository,
@@ -278,6 +282,104 @@ describe("domain/contract-manufacturing", () => {
     });
   });
 
+  // P0-1 (владелец проекта, 2026-09-07): "ordered ≠ received" — фактическое
+  // количество может отличаться от планового в любую сторону, план при этом
+  // остаётся неизменным.
+  it("принимает партию по фактическому количеству, отличному от планового, не изменяя план", async () => {
+    await runInRolledBackTransaction(async (tx) => {
+      const { company, product, variant, boms, approvedBom, workshops, workshop } = await seedApprovedBomAndVariant(tx);
+      const productionOrders = new DrizzleProductionOrderRepository(tx);
+      const bomApproval = makeBomApprovalPort(boms);
+
+      const draft = await createProductionOrderDraft(
+        { productionOrders, workshops, bomApproval },
+        {
+          companyId: company.id,
+          productId: product.id,
+          bomId: approvedBom.id,
+          workshopId: workshop.id,
+          plannedQuantity: 4000,
+          agreedUnitPrice: 450,
+          variants: [{ productVariantId: variant.id, quantity: 4000 }],
+        },
+      );
+      await confirmProductionOrder({ productionOrders }, { companyId: company.id, productionOrderId: draft.id });
+      await updateProductionOrderStatusFromWorkshop(
+        { productionOrders },
+        { companyId: company.id, workshopId: workshop.id, status: "in_progress" },
+      );
+      await updateProductionOrderStatusFromWorkshop(
+        { productionOrders },
+        { companyId: company.id, workshopId: workshop.id, status: "ready_for_pickup" },
+      );
+
+      const received = await receiveProductionOrder(
+        { productionOrders },
+        {
+          companyId: company.id,
+          productionOrderId: draft.id,
+          receivedVariants: [{ productVariantId: variant.id, quantity: 3993 }],
+        },
+      );
+
+      const receivedVariant = received.variants.find((v) => v.productVariantId === variant.id);
+      expect(receivedVariant?.quantity).toBe("4000.000"); // план не изменился
+      expect(Number(receivedVariant?.receivedQuantity)).toBe(3993); // факт хранится отдельно
+    });
+  });
+
+  it("отклоняет отрицательное фактическое количество и variantId не из этого заказа", async () => {
+    await runInRolledBackTransaction(async (tx) => {
+      const { company, product, variant, boms, approvedBom, workshops, workshop } = await seedApprovedBomAndVariant(tx);
+      const productionOrders = new DrizzleProductionOrderRepository(tx);
+      const bomApproval = makeBomApprovalPort(boms);
+
+      const draft = await createProductionOrderDraft(
+        { productionOrders, workshops, bomApproval },
+        {
+          companyId: company.id,
+          productId: product.id,
+          bomId: approvedBom.id,
+          workshopId: workshop.id,
+          plannedQuantity: 100,
+          agreedUnitPrice: 450,
+          variants: [{ productVariantId: variant.id, quantity: 100 }],
+        },
+      );
+      await confirmProductionOrder({ productionOrders }, { companyId: company.id, productionOrderId: draft.id });
+      await updateProductionOrderStatusFromWorkshop(
+        { productionOrders },
+        { companyId: company.id, workshopId: workshop.id, status: "in_progress" },
+      );
+      await updateProductionOrderStatusFromWorkshop(
+        { productionOrders },
+        { companyId: company.id, workshopId: workshop.id, status: "ready_for_pickup" },
+      );
+
+      await expect(
+        receiveProductionOrder(
+          { productionOrders },
+          {
+            companyId: company.id,
+            productionOrderId: draft.id,
+            receivedVariants: [{ productVariantId: variant.id, quantity: -1 }],
+          },
+        ),
+      ).rejects.toThrow(/отрицательным/);
+
+      await expect(
+        receiveProductionOrder(
+          { productionOrders },
+          {
+            companyId: company.id,
+            productionOrderId: draft.id,
+            receivedVariants: [{ productVariantId: "00000000-0000-4000-8000-000000000000", quantity: 10 }],
+          },
+        ),
+      ).rejects.toThrow(/не относится к этому заказу/);
+    });
+  });
+
   it("бросает ошибку, если у цеха нет ни одного активного заказа", async () => {
     await runInRolledBackTransaction(async (tx) => {
       const company = await createCompany({ companies: new DrizzleCompanyRepository(tx) }, { name: "Бренд без заказов" });
@@ -291,6 +393,411 @@ describe("domain/contract-manufacturing", () => {
           { companyId: company.id, workshopId: workshop.id, status: "in_progress" },
         ),
       ).rejects.toThrow(DomainError);
+    });
+  });
+
+  // REST-путь смены статуса (P0-1) — по конкретному id заказа, не по "самому
+  // свежему заказу цеха". Переиспользует тот же инвариант перехода, что и
+  // Telegram-путь выше (assertCanUpdateStatusFromWorkshop), поэтому здесь
+  // проверяется только адресация по id и обёртка ошибок, не сами правила
+  // переходов — они уже покрыты тестом выше.
+  describe("updateProductionOrderStatus (REST, по id заказа)", () => {
+    it("разрешает placed → in_progress → ready_for_pickup по конкретному заказу", async () => {
+      await runInRolledBackTransaction(async (tx) => {
+        const { company, product, variant, boms, approvedBom, workshops, workshop } =
+          await seedApprovedBomAndVariant(tx);
+        const productionOrders = new DrizzleProductionOrderRepository(tx);
+        const bomApproval = makeBomApprovalPort(boms);
+
+        const draft = await createProductionOrderDraft(
+          { productionOrders, workshops, bomApproval },
+          {
+            companyId: company.id,
+            productId: product.id,
+            bomId: approvedBom.id,
+            workshopId: workshop.id,
+            plannedQuantity: 100,
+            agreedUnitPrice: 450,
+            variants: [{ productVariantId: variant.id, quantity: 100 }],
+          },
+        );
+        await confirmProductionOrder({ productionOrders }, { companyId: company.id, productionOrderId: draft.id });
+
+        const inProgress = await updateProductionOrderStatus(
+          { productionOrders },
+          { companyId: company.id, productionOrderId: draft.id, status: "in_progress" },
+        );
+        expect(inProgress.id).toBe(draft.id);
+        expect(inProgress.status).toBe("in_progress");
+
+        const readyForPickup = await updateProductionOrderStatus(
+          { productionOrders },
+          { companyId: company.id, productionOrderId: draft.id, status: "ready_for_pickup" },
+        );
+        expect(readyForPickup.status).toBe("ready_for_pickup");
+      });
+    });
+
+    it("бросает ошибку на недопустимый переход (черновик не подтверждён)", async () => {
+      await runInRolledBackTransaction(async (tx) => {
+        const { company, product, variant, boms, approvedBom, workshops, workshop } =
+          await seedApprovedBomAndVariant(tx);
+        const productionOrders = new DrizzleProductionOrderRepository(tx);
+        const bomApproval = makeBomApprovalPort(boms);
+
+        const draft = await createProductionOrderDraft(
+          { productionOrders, workshops, bomApproval },
+          {
+            companyId: company.id,
+            productId: product.id,
+            bomId: approvedBom.id,
+            workshopId: workshop.id,
+            plannedQuantity: 100,
+            agreedUnitPrice: 450,
+            variants: [{ productVariantId: variant.id, quantity: 100 }],
+          },
+        );
+
+        // Заказ ещё "draft" (не подтверждён) — переход в "в работе" запрещён.
+        await expect(
+          updateProductionOrderStatus(
+            { productionOrders },
+            { companyId: company.id, productionOrderId: draft.id, status: "in_progress" },
+          ),
+        ).rejects.toThrow(DomainError);
+      });
+    });
+
+    it("бросает PRODUCTION_ORDER_NOT_FOUND на неизвестный id заказа", async () => {
+      await runInRolledBackTransaction(async (tx) => {
+        const company = await createCompany(
+          { companies: new DrizzleCompanyRepository(tx) },
+          { name: "Бренд без заказа" },
+        );
+        const productionOrders = new DrizzleProductionOrderRepository(tx);
+
+        await expect(
+          updateProductionOrderStatus(
+            { productionOrders },
+            {
+              companyId: company.id,
+              productionOrderId: "00000000-0000-0000-0000-000000000000",
+              status: "in_progress",
+            },
+          ),
+        ).rejects.toMatchObject({ code: "PRODUCTION_ORDER_NOT_FOUND" });
+      });
+    });
+
+    it("не трогает другой, более свежий заказ того же цеха", async () => {
+      await runInRolledBackTransaction(async (tx) => {
+        const { company, product, variant, boms, approvedBom, workshops, workshop } =
+          await seedApprovedBomAndVariant(tx);
+        const productionOrders = new DrizzleProductionOrderRepository(tx);
+        const bomApproval = makeBomApprovalPort(boms);
+
+        const first = await createProductionOrderDraft(
+          { productionOrders, workshops, bomApproval },
+          {
+            companyId: company.id,
+            productId: product.id,
+            bomId: approvedBom.id,
+            workshopId: workshop.id,
+            plannedQuantity: 100,
+            agreedUnitPrice: 450,
+            variants: [{ productVariantId: variant.id, quantity: 100 }],
+          },
+        );
+        const second = await createProductionOrderDraft(
+          { productionOrders, workshops, bomApproval },
+          {
+            companyId: company.id,
+            productId: product.id,
+            bomId: approvedBom.id,
+            workshopId: workshop.id,
+            plannedQuantity: 50,
+            agreedUnitPrice: 450,
+            variants: [{ productVariantId: variant.id, quantity: 50 }],
+          },
+        );
+        await confirmProductionOrder({ productionOrders }, { companyId: company.id, productionOrderId: first.id });
+        await confirmProductionOrder({ productionOrders }, { companyId: company.id, productionOrderId: second.id });
+
+        // Меняем статус именно первого (более старого) заказа — второй,
+        // более свежий заказ того же цеха, не должен пострадать. Это ровно
+        // то отличие от updateProductionOrderStatusFromWorkshop (которая
+        // всегда берёт "последний активный заказ цеха"), ради которого этот
+        // use case адресуется по id, а не по цеху.
+        const updated = await updateProductionOrderStatus(
+          { productionOrders },
+          { companyId: company.id, productionOrderId: first.id, status: "in_progress" },
+        );
+        expect(updated.id).toBe(first.id);
+        expect(updated.status).toBe("in_progress");
+
+        const untouched = await productionOrders.findById(company.id, second.id);
+        expect(untouched?.status).toBe("placed");
+      });
+    });
+  });
+
+  // P1-1 (владелец проекта, 2026-09-05) — снимок партии неизменяем не только
+  // по конвенции: повторная запись через доменный use case теперь запрещена
+  // явно, а не только "предполагается, что не будет".
+  describe("captureProductionOrderCostSnapshot (P1-1, неизменяемость снимка)", () => {
+    it("фиксирует снимок один раз и бросает ошибку на повторную попытку", async () => {
+      await runInRolledBackTransaction(async (tx) => {
+        const { company, product, variant, boms, approvedBom, workshops, workshop } =
+          await seedApprovedBomAndVariant(tx);
+        const productionOrders = new DrizzleProductionOrderRepository(tx);
+        const bomApproval = makeBomApprovalPort(boms);
+
+        const draft = await createProductionOrderDraft(
+          { productionOrders, workshops, bomApproval },
+          {
+            companyId: company.id,
+            productId: product.id,
+            bomId: approvedBom.id,
+            workshopId: workshop.id,
+            plannedQuantity: 100,
+            agreedUnitPrice: 450,
+            variants: [{ productVariantId: variant.id, quantity: 100 }],
+          },
+        );
+        await confirmProductionOrder({ productionOrders }, { companyId: company.id, productionOrderId: draft.id });
+
+        const withSnapshot = await captureProductionOrderCostSnapshot(
+          { productionOrders },
+          { companyId: company.id, productionOrderId: draft.id, costSnapshot: { materialNorms: [{ quantityPerUnit: 2.6 }] } },
+        );
+        expect(withSnapshot.costSnapshot).toEqual({ materialNorms: [{ quantityPerUnit: 2.6 }] });
+
+        // Повторная попытка — даже с другими данными — запрещена: снимок
+        // уже есть, перезаписывать его нельзя.
+        await expect(
+          captureProductionOrderCostSnapshot(
+            { productionOrders },
+            { companyId: company.id, productionOrderId: draft.id, costSnapshot: { materialNorms: [{ quantityPerUnit: 2.4 }] } },
+          ),
+        ).rejects.toMatchObject({ code: "PRODUCTION_ORDER_COST_SNAPSHOT_ALREADY_SET" });
+
+        // Снимок остался прежним — попытка его не тронула.
+        const reloaded = await productionOrders.findById(company.id, draft.id);
+        expect(reloaded?.costSnapshot).toEqual({ materialNorms: [{ quantityPerUnit: 2.6 }] });
+      });
+    });
+
+    it("бросает PRODUCTION_ORDER_NOT_FOUND на неизвестный заказ", async () => {
+      await runInRolledBackTransaction(async (tx) => {
+        const company = await createCompany(
+          { companies: new DrizzleCompanyRepository(tx) },
+          { name: "Бренд без заказа (снимок)" },
+        );
+        const productionOrders = new DrizzleProductionOrderRepository(tx);
+
+        await expect(
+          captureProductionOrderCostSnapshot(
+            { productionOrders },
+            {
+              companyId: company.id,
+              productionOrderId: "00000000-0000-0000-0000-000000000000",
+              costSnapshot: {},
+            },
+          ),
+        ).rejects.toMatchObject({ code: "PRODUCTION_ORDER_NOT_FOUND" });
+      });
+    });
+  });
+
+  // P5-1 (владелец проекта, 2026-09-06): rework строками существующей модели
+  // production_orders/production_order_variants, без production_batches и
+  // без нового статуса. Здесь проверяется только доменная основа — не
+  // рабочий процесс "создать следующий заказ" целиком (P5-2).
+  describe("REWORK (P5-1)", () => {
+    // Чистая функция, не задействованная в обычном пути createProductionOrderDraft
+    // (id нового заказа не существует до INSERT, поэтому self-reference там
+    // структурно недостижим) — но инвариант явно требуется заданием и должен
+    // остаться проверяемым напрямую, а не полагаться только на DB CHECK.
+    it("assertSourceOrderIsNotSelf: заказ не может быть источником переделки для самого себя", () => {
+      expect(() => assertSourceOrderIsNotSelf("order-1", "order-1")).toThrow(DomainError);
+      expect(() => assertSourceOrderIsNotSelf("order-1", "order-2")).not.toThrow();
+      expect(() => assertSourceOrderIsNotSelf("order-1", null)).not.toThrow();
+    });
+
+    it("создаёт заказ, где часть строк — rework (цена 0) со ссылкой на заказ-источник, а часть — обычные новые строки", async () => {
+      await runInRolledBackTransaction(async (tx) => {
+        const { company, product, variant, boms, approvedBom, workshops, workshop } = await seedApprovedBomAndVariant(tx);
+        const productionOrders = new DrizzleProductionOrderRepository(tx);
+        const bomApproval = makeBomApprovalPort(boms);
+
+        const sourceOrder = await createProductionOrderDraft(
+          { productionOrders, workshops, bomApproval },
+          {
+            companyId: company.id,
+            productId: product.id,
+            bomId: approvedBom.id,
+            workshopId: workshop.id,
+            plannedQuantity: 100,
+            agreedUnitPrice: 450,
+            variants: [{ productVariantId: variant.id, quantity: 100 }],
+          },
+        );
+
+        // Смешанный заказ: 4 шт. rework (бесплатно, брак из sourceOrder) + 20
+        // шт. нового оплачиваемого объёма — ровно пример из задания владельца.
+        const mixedOrder = await createProductionOrderDraft(
+          { productionOrders, workshops, bomApproval },
+          {
+            companyId: company.id,
+            productId: product.id,
+            bomId: approvedBom.id,
+            workshopId: workshop.id,
+            plannedQuantity: 24,
+            agreedUnitPrice: 450,
+            sourceProductionOrderId: sourceOrder.id,
+            variants: [
+              { productVariantId: variant.id, quantity: 4, variantType: "rework", unitPrice: 0 },
+              { productVariantId: variant.id, quantity: 20, variantType: "new" },
+            ],
+          },
+        );
+
+        expect(mixedOrder.sourceProductionOrderId).toBe(sourceOrder.id);
+        const rework = mixedOrder.variants.find((v) => v.variantType === "rework");
+        const fresh = mixedOrder.variants.find((v) => v.variantType === "new");
+        expect(rework?.unitPrice).toBe("0.00");
+        expect(fresh?.unitPrice).toBeNull();
+
+        // Заказ-источник не затронут: его снимок/статус/варианты не менялись.
+        const reloadedSource = await productionOrders.findById(company.id, sourceOrder.id);
+        expect(reloadedSource?.status).toBe("draft");
+        expect(reloadedSource?.variants).toHaveLength(1);
+      });
+    });
+
+    it("отклоняет rework-строку с ненулевой ценой", async () => {
+      await runInRolledBackTransaction(async (tx) => {
+        const { company, product, variant, boms, approvedBom, workshops, workshop } = await seedApprovedBomAndVariant(tx);
+        const productionOrders = new DrizzleProductionOrderRepository(tx);
+        const bomApproval = makeBomApprovalPort(boms);
+
+        const sourceOrder = await createProductionOrderDraft(
+          { productionOrders, workshops, bomApproval },
+          {
+            companyId: company.id,
+            productId: product.id,
+            bomId: approvedBom.id,
+            workshopId: workshop.id,
+            plannedQuantity: 100,
+            agreedUnitPrice: 450,
+            variants: [{ productVariantId: variant.id, quantity: 100 }],
+          },
+        );
+
+        await expect(
+          createProductionOrderDraft(
+            { productionOrders, workshops, bomApproval },
+            {
+              companyId: company.id,
+              productId: product.id,
+              bomId: approvedBom.id,
+              workshopId: workshop.id,
+              plannedQuantity: 4,
+              agreedUnitPrice: 450,
+              sourceProductionOrderId: sourceOrder.id,
+              variants: [{ productVariantId: variant.id, quantity: 4, variantType: "rework", unitPrice: 300 }],
+            },
+          ),
+        ).rejects.toMatchObject({ code: "PRODUCTION_ORDER_REWORK_PRICE_NOT_ZERO" });
+      });
+    });
+
+    it("отклоняет rework-строку без указания заказа-источника", async () => {
+      await runInRolledBackTransaction(async (tx) => {
+        const { company, product, variant, boms, approvedBom, workshops, workshop } = await seedApprovedBomAndVariant(tx);
+        const productionOrders = new DrizzleProductionOrderRepository(tx);
+        const bomApproval = makeBomApprovalPort(boms);
+
+        await expect(
+          createProductionOrderDraft(
+            { productionOrders, workshops, bomApproval },
+            {
+              companyId: company.id,
+              productId: product.id,
+              bomId: approvedBom.id,
+              workshopId: workshop.id,
+              plannedQuantity: 4,
+              agreedUnitPrice: 450,
+              variants: [{ productVariantId: variant.id, quantity: 4, variantType: "rework", unitPrice: 0 }],
+            },
+          ),
+        ).rejects.toMatchObject({ code: "PRODUCTION_ORDER_REWORK_REQUIRES_SOURCE" });
+      });
+    });
+
+    it("отклоняет заказ, ссылающийся на несуществующий заказ-источник", async () => {
+      await runInRolledBackTransaction(async (tx) => {
+        const { company, product, variant, boms, workshops, workshop } = await seedApprovedBomAndVariant(tx);
+        const approvedBom = boms;
+        const productionOrders = new DrizzleProductionOrderRepository(tx);
+        const bomApproval = makeBomApprovalPort(approvedBom);
+
+        const approved = await getApprovedBom({ boms: approvedBom }, { companyId: company.id, productId: product.id });
+
+        await expect(
+          createProductionOrderDraft(
+            { productionOrders, workshops, bomApproval },
+            {
+              companyId: company.id,
+              productId: product.id,
+              bomId: approved!.id,
+              workshopId: workshop.id,
+              plannedQuantity: 4,
+              agreedUnitPrice: 450,
+              sourceProductionOrderId: "00000000-0000-0000-0000-000000000000",
+              variants: [{ productVariantId: variant.id, quantity: 4, variantType: "rework", unitPrice: 0 }],
+            },
+          ),
+        ).rejects.toMatchObject({ code: "PRODUCTION_ORDER_SOURCE_NOT_FOUND" });
+      });
+    });
+
+    // Проверка реального DB CHECK (миграция 0022) — обходит domain-слой
+    // намеренно: self-reference структурно недостижим через обычный путь
+    // создания (id ещё не существует на момент валидации черновика), поэтому
+    // единственный способ убедиться, что constraint в БД реально работает —
+    // прямой SQL UPDATE поверх уже вставленной строки.
+    it("DB CHECK production_orders_source_not_self_check отклоняет self-reference на уровне БД", async () => {
+      await runInRolledBackTransaction(async (tx) => {
+        const { company, product, variant, boms, approvedBom, workshops, workshop } = await seedApprovedBomAndVariant(tx);
+        const productionOrders = new DrizzleProductionOrderRepository(tx);
+        const bomApproval = makeBomApprovalPort(boms);
+
+        const order = await createProductionOrderDraft(
+          { productionOrders, workshops, bomApproval },
+          {
+            companyId: company.id,
+            productId: product.id,
+            bomId: approvedBom.id,
+            workshopId: workshop.id,
+            plannedQuantity: 10,
+            agreedUnitPrice: 450,
+            variants: [{ productVariantId: variant.id, quantity: 10 }],
+          },
+        );
+
+        let caught: unknown;
+        try {
+          await tx.execute(
+            sql`update ${productionOrdersTable} set source_production_order_id = ${order.id} where id = ${order.id}`,
+          );
+        } catch (error) {
+          caught = error;
+        }
+        expect(caught).toBeDefined();
+        const cause = caught instanceof Error && caught.cause instanceof Error ? caught.cause : caught;
+        expect(String(cause)).toMatch(/production_orders_source_not_self_check/);
+      });
     });
   });
 });

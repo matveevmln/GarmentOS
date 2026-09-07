@@ -20,6 +20,10 @@ import { NotificationsModule } from "./notifications/notifications.module";
 import { TelegramModule } from "./telegram/telegram.module";
 import { AiProductionAssistantModule } from "./ai-production-assistant/ai-production-assistant.module";
 import { DocumentModule } from "./document/document.module";
+import { ReportingModule } from "./reporting/reporting.module";
+import { CuttingModule } from "./cutting/cutting.module";
+import { QcModule } from "./qc/qc.module";
+import { DocumentIntelligenceModule } from "./document-intelligence/document-intelligence.module";
 
 // Presentation-слой (docs/ARCHITECTURE.md, п.2). Доменные модули
 // (packages/domain/*) подключаются сюда по мере реализации итераций
@@ -44,6 +48,10 @@ import { DocumentModule } from "./document/document.module";
     TelegramModule,
     DocumentModule,
     AiProductionAssistantModule,
+    ReportingModule,
+    CuttingModule,
+    QcModule,
+    DocumentIntelligenceModule,
   ],
   providers: [
     { provide: APP_PIPE, useClass: ZodValidationPipe },

@@ -2,8 +2,12 @@ import { DomainError } from "../domain/errors";
 import {
   assertBomIsApproved,
   assertHasVariants,
+  assertReworkPriceIsZero,
+  assertReworkRequiresSource,
+  assertSourceOrderExists,
   assertValidPlannedQuantity,
   assertValidUnitPrice,
+  assertVariantsMatchPlannedQuantity,
   assertValidVariant,
   type ProductionOrder,
   type ProductionOrderVariantDraft,
@@ -21,6 +25,9 @@ export interface CreateProductionOrderInput {
   dueDate?: string;
   variants: ProductionOrderVariantDraft[];
   createdBy?: string;
+  // Заказ на переделку брака — nullable, обычный заказ его не заполняет
+  // (P5-1). Заказ-источник проверяется на существование в этой же компании.
+  sourceProductionOrderId?: string;
 }
 
 export interface CreateProductionOrderDeps {
@@ -40,7 +47,10 @@ export async function createProductionOrderDraft(
 ): Promise<ProductionOrder> {
   assertHasVariants(input.variants);
   for (const variant of input.variants) assertValidVariant(variant);
+  for (const variant of input.variants) assertReworkPriceIsZero(variant);
+  assertReworkRequiresSource(input.variants, input.sourceProductionOrderId);
   assertValidPlannedQuantity(input.plannedQuantity);
+  assertVariantsMatchPlannedQuantity(input.variants, input.plannedQuantity);
   assertValidUnitPrice(input.agreedUnitPrice);
 
   const workshop = await deps.workshops.findById(input.companyId, input.workshopId);
@@ -50,6 +60,11 @@ export async function createProductionOrderDraft(
 
   const bomApproved = await deps.bomApproval.isBomApproved(input.companyId, input.bomId, input.productId);
   assertBomIsApproved(bomApproved, input.bomId);
+
+  if (input.sourceProductionOrderId) {
+    const source = await deps.productionOrders.findById(input.companyId, input.sourceProductionOrderId);
+    assertSourceOrderExists(input.sourceProductionOrderId, source !== null);
+  }
 
   return deps.productionOrders.create({
     companyId: input.companyId,
@@ -63,5 +78,6 @@ export async function createProductionOrderDraft(
     dueDate: input.dueDate ?? null,
     createdBy: input.createdBy ?? null,
     variants: input.variants,
+    sourceProductionOrderId: input.sourceProductionOrderId ?? null,
   });
 }

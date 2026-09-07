@@ -61,6 +61,9 @@ services:
       DATABASE_URL: postgres://garmentos:garmentos@postgres:5432/garmentos
       REDIS_URL: redis://redis:6379
       S3_ENDPOINT: http://minio:9000
+      # apps/web (Итерация 11) — браузерный SPA на другом origin/порту;
+      # без этого apps/api отклоняет запросы браузера (main.ts, enableCors).
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:4173}
     ports:
       - "3000:3000"
     depends_on:
@@ -70,6 +73,20 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
+
+  web:
+    build:
+      context: ..
+      dockerfile: infra/docker/web.Dockerfile
+      args:
+        # Vite встраивает эту переменную в бандл во время сборки — не
+        # переменная окружения контейнера в рантайме (см. web.Dockerfile).
+        VITE_API_URL: ${VITE_API_URL:-http://localhost:3000/v1}
+    restart: unless-stopped
+    ports:
+      - "4173:4173"
+    depends_on:
+      - api
 
 volumes:
   postgres-data:

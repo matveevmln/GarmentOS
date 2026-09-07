@@ -1,5 +1,6 @@
 import type { DocumentDerivativeType, DocumentEntity, DocumentLink, DocumentLinkSource } from "../domain/document";
 import type { SpecificationDocumentData, SpecificationTemplateDefinition } from "../domain/specification-template";
+import type { CuttingOrderDocumentData } from "../domain/cutting-order-template";
 
 export interface NewDocumentInput {
   companyId: string;
@@ -14,6 +15,11 @@ export interface NewDocumentInput {
 export interface DocumentRepository {
   create(input: NewDocumentInput): Promise<DocumentEntity>;
   findById(companyId: string, id: string): Promise<DocumentEntity | null>;
+  // Снимает флаг "текущая версия" (owner, требование до пилота, 2026-08-04:
+  // "в системе одновременно не может существовать несколько актуальных
+  // версий одной спецификации") — вызывается при генерации новой версии для
+  // всех документов, которые она замещает.
+  markSuperseded(companyId: string, id: string): Promise<void>;
 }
 
 export interface NewDocumentLinkInput {
@@ -63,8 +69,20 @@ export interface DocumentDerivativeRepository {
 // За интерфейсом (docs/INFRASTRUCTURE.md, раздел 2.3; docs/DOCUMENT_ENGINE_ARCHITECTURE.md,
 // раздел 1) — конкретная реализация (S3-совместимое хранилище/MinIO в проде,
 // локальная файловая система для тестов) не зашита в домен.
+export interface StoredFile {
+  data: Uint8Array;
+  contentType: string;
+}
+
 export interface StorageAdapter {
   upload(key: string, data: Uint8Array, contentType: string): Promise<{ url: string }>;
+  // Чтение по тому же адресу, который вернул upload. Раньше файл отдавался
+  // редиректом на этот адрес, но приватный бакет по прямой ссылке недоступен
+  // — а публичный бакет означал бы, что договоры и спецификации компании
+  // читает любой, кто знает адрес. Поэтому байты проходят через API, где уже
+  // проверены вход и права; формат адреса знает сам адаптер, документ хранит
+  // только строку.
+  download(fileUrl: string): Promise<StoredFile | null>;
 }
 
 // DocumentRenderAdapter (docs/DOCUMENT_ENGINE_ARCHITECTURE.md, раздел 2) —
@@ -75,4 +93,8 @@ export interface StorageAdapter {
 // структуру+данные в PDF.
 export interface DocumentRenderAdapter {
   renderSpecification(template: SpecificationTemplateDefinition, data: SpecificationDocumentData): Promise<Uint8Array>;
+  // Второй документ движка — раскройное задание (владелец проекта,
+  // 2026-08-30). Отдельный метод, а не замена: у спецификации своя форма
+  // данных, у матрицы кроя своя, а рендерер и шрифты общие.
+  renderCuttingOrder(data: CuttingOrderDocumentData): Promise<Uint8Array>;
 }

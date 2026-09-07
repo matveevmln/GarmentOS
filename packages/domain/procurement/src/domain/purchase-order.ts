@@ -19,6 +19,11 @@ export interface PurchaseOrder {
   status: PurchaseOrderStatus;
   orderedAt: string;
   expectedDate: string | null;
+  // Валюта закупки задаётся явно и не выводится из типа материала: одна и та
+  // же ткань может быть куплена и за доллары, и за сомы, а суммы разных
+  // валют не складываются (docs/PRINCIPLES.md, принцип 21). null — закупки,
+  // созданные до появления поля: валюта у них неизвестна, а не «по умолчанию».
+  currency: string | null;
   createdBy: string | null;
   createdAt: Date;
   updatedAt: Date;
