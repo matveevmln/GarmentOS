@@ -24,7 +24,9 @@ export function CostBreakdown({
   currency,
 }: {
   rows: CostRow[];
-  total: { label: string; unitCost: number; total: number };
+  // undefined — итог не показывается (P0-2): например, компоненты
+  // себестоимости в разных валютах, единое число посчитать нечестно.
+  total?: { label: string; unitCost: number; total: number };
   currency?: string;
 }) {
   return (
@@ -54,17 +56,19 @@ export function CostBreakdown({
           </li>
         ))}
       </ul>
-      <div className="mt-1 grid grid-cols-[1fr_auto] items-center gap-4 border-t border-border pt-3 lg:grid-cols-[minmax(0,150px)_minmax(0,1fr)_100px_110px_44px]">
-        <span className="text-[13px] font-semibold">{total.label}</span>
-        <span className="hidden lg:block" />
-        <span className="num hidden text-[12px] text-muted-foreground lg:block">
-          {formatMoney(total.unitCost, currency, 2)}
-        </span>
-        <span className="num text-right text-[14px] font-semibold">
-          {formatMoney(total.total, currency, 2)}
-        </span>
-        <span className="hidden lg:block" />
-      </div>
+      {total ? (
+        <div className="mt-1 grid grid-cols-[1fr_auto] items-center gap-4 border-t border-border pt-3 lg:grid-cols-[minmax(0,150px)_minmax(0,1fr)_100px_110px_44px]">
+          <span className="text-[13px] font-semibold">{total.label}</span>
+          <span className="hidden lg:block" />
+          <span className="num hidden text-[12px] text-muted-foreground lg:block">
+            {formatMoney(total.unitCost, currency, 2)}
+          </span>
+          <span className="num text-right text-[14px] font-semibold">
+            {formatMoney(total.total, currency, 2)}
+          </span>
+          <span className="hidden lg:block" />
+        </div>
+      ) : null}
     </div>
   );
 }

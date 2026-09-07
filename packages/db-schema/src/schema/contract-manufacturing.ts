@@ -151,12 +151,23 @@ export const productionOrderVariants = pgTable(
     // ровно 0 для "rework" — проверяется в domain (assertReworkPriceIsZero),
     // не только здесь.
     unitPrice: numeric("unit_price", { precision: 14, scale: 2 }),
+    // Факт приёмки (P0-1, владелец проекта, 2026-09-07) — null, пока партия
+    // не принята. Тот же принцип, что и cutting_order_results.actual_quantity:
+    // план (quantity выше) никогда не переписывается фактом, оба числа
+    // сосуществуют. Заполняется ровно один раз, вместе со статусом
+    // "received" (см. markReceived) — повторная приёмка невозможна, потому
+    // что assertCanReceive пускает только из "ready_for_pickup".
+    receivedQuantity: numeric("received_quantity", { precision: 12, scale: 3 }),
     ...auditColumns,
   },
   (table) => [
     check(
       "production_order_variants_rework_price_zero_check",
       sql`${table.variantType} != 'rework' or ${table.unitPrice} = 0`,
+    ),
+    check(
+      "production_order_variants_received_quantity_non_negative_check",
+      sql`${table.receivedQuantity} is null or ${table.receivedQuantity} >= 0`,
     ),
   ],
 );

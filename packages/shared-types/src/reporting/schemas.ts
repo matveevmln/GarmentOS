@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { productionOrderCostSnapshotSchema } from "../contract-manufacturing/schemas";
+import { materialCostByCurrencySchema, productionOrderCostSnapshotSchema } from "../contract-manufacturing/schemas";
 import { documentResponseSchema } from "../document/schemas";
 
 // Контракт модуля Reporting/BI (docs/ARCHITECTURE.md, раздел про Reporting/BI —
@@ -63,9 +63,15 @@ export const specificationPricingResponseSchema = z.object({
   packagingCostPerUnit: z.number(),
   sewingCostPerUnit: z.number(),
   otherCostPerUnit: z.number(),
-  actualCostPerUnit: z.number(),
+  materialCostsByCurrency: z.array(materialCostByCurrencySchema),
+  // null, если единую себестоимость честно посчитать нельзя (материалы в
+  // нескольких валютах, или в валюте, отличной от валюты пошива/прочих
+  // расходов) — это НЕ отсутствие данных, а явный признак "не считать".
+  actualCostPerUnit: z.number().nullable(),
+  actualCostCurrency: z.string().nullable(),
+  currencyWarning: z.string().nullable(),
   deductionPerUnit: z.number(),
-  specificationPricePerUnit: z.number(),
+  specificationPricePerUnit: z.number().nullable(),
   // Материалы BOM без единой закупки в истории — цену для них взять неоткуда
   // (не подставляется 0 молча, чтобы не занизить фактическую себестоимость).
   materialsWithoutPriceHistory: z.array(z.string()),
@@ -98,6 +104,10 @@ export const batchPassportVariantSchema = z.object({
   // plannedQuantity, неверной для смешанных заказов.
   variantType: z.enum(["new", "rework"]),
   unitPrice: z.string().nullable(),
+  // Факт приёмки (P0-1, владелец проекта, 2026-09-07) — null, пока партия
+  // не принята; показывается на паспорте рядом с планом (quantity), никогда
+  // его не подменяя.
+  receivedQuantity: z.string().nullable(),
 });
 export type BatchPassportVariantDto = z.infer<typeof batchPassportVariantSchema>;
 

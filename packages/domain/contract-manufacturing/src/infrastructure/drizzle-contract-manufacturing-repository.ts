@@ -6,7 +6,12 @@ import {
 } from "@garmentos/db-schema";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import type { Workshop } from "../domain/workshop";
-import type { ProductionOrder, ProductionOrderStatus, ProductionOrderVariant } from "../domain/production-order";
+import type {
+  ProductionOrder,
+  ProductionOrderStatus,
+  ProductionOrderVariant,
+  ReceivedVariantInput,
+} from "../domain/production-order";
 import type {
   NewProductionOrderInput,
   NewWorkshopInput,
@@ -51,6 +56,7 @@ function toProductionOrderVariant(row: ProductionOrderVariantRow): ProductionOrd
     quantity: row.quantity,
     variantType: row.variantType,
     unitPrice: row.unitPrice,
+    receivedQuantity: row.receivedQuantity,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -238,20 +244,39 @@ export class DrizzleProductionOrderRepository implements ProductionOrderReposito
     return toProductionOrder(orderRow, variantRows);
   }
 
-  async markReceived(id: string): Promise<ProductionOrder> {
-    const [orderRow] = await this.db
-      .update(productionOrders)
-      .set({ status: "received", receivedAt: new Date(), updatedAt: new Date() })
-      .where(eq(productionOrders.id, id))
-      .returning();
-    if (!orderRow) throw new Error(`UPDATE production_orders не нашёл строку id=${id}`);
+  // Факт по варианту (P0-1) пишется в той же транзакции, что и перевод
+  // статуса в "received" — атомарно, чтобы не оказалось заказа, уже
+  // принятого по статусу, но ещё без зафиксированного факта по строкам.
+  async markReceived(id: string, received: ReceivedVariantInput[]): Promise<ProductionOrder> {
+    return this.db.transaction(async (tx) => {
+      const [orderRow] = await tx
+        .update(productionOrders)
+        .set({ status: "received", receivedAt: new Date(), updatedAt: new Date() })
+        .where(eq(productionOrders.id, id))
+        .returning();
+      if (!orderRow) throw new Error(`UPDATE production_orders не нашёл строку id=${id}`);
 
-    const variantRows = await this.db
-      .select()
-      .from(productionOrderVariants)
-      .where(eq(productionOrderVariants.productionOrderId, orderRow.id));
+      await Promise.all(
+        received.map((line) =>
+          tx
+            .update(productionOrderVariants)
+            .set({ receivedQuantity: String(line.quantity), updatedAt: new Date() })
+            .where(
+              and(
+                eq(productionOrderVariants.productionOrderId, orderRow.id),
+                eq(productionOrderVariants.productVariantId, line.productVariantId),
+              ),
+            ),
+        ),
+      );
 
-    return toProductionOrder(orderRow, variantRows);
+      const variantRows = await tx
+        .select()
+        .from(productionOrderVariants)
+        .where(eq(productionOrderVariants.productionOrderId, orderRow.id));
+
+      return toProductionOrder(orderRow, variantRows);
+    });
   }
 
   async findLatestActiveByWorkshop(companyId: string, workshopId: string): Promise<ProductionOrder | null> {

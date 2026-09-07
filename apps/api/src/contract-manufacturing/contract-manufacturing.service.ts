@@ -286,25 +286,37 @@ export class ContractManufacturingService {
     );
   }
 
-  // Приёмка партии от цеха на склад (Итерация 10) — переводит заказ в
-  // received и зачисляет каждый SKU (variants) на выбранный склад через
-  // WarehouseService.receiveStock, тот же принцип композиции на границе
-  // модулей, что и ProcurementService.receivePurchaseOrder (материалы).
+  // Приёмка партии от цеха на склад (Итерация 10, факт — P0-1, владелец
+  // проекта, 2026-09-07) — переводит заказ в received и зачисляет каждый SKU
+  // на выбранный склад через WarehouseService.receiveStock, тот же принцип
+  // композиции на границе модулей, что и ProcurementService.receivePurchaseOrder
+  // (материалы). КРИТИЧНО: на склад зачисляется ФАКТИЧЕСКИ принятое
+  // количество (order.variants[].receivedQuantity после markReceived), а не
+  // плановое (quantity) — "ordered ≠ received", подмена плана фактом
+  // запрещена ("ordered ≠ received ≠ good ≠ defect", там же).
   async receiveProductionOrder(
     currentUser: AuthenticatedRequestUser,
     productionOrderId: string,
     warehouseId: string,
+    receivedVariants?: Array<{ productVariantId: string; quantity: number }>,
   ): Promise<ProductionOrder> {
+    const draftForAudit = await this.productionOrders.findById(currentUser.companyId, productionOrderId);
     const order = await receiveProductionOrderUseCase(
       { productionOrders: this.productionOrders },
-      { companyId: currentUser.companyId, productionOrderId },
+      { companyId: currentUser.companyId, productionOrderId, receivedVariants },
     );
 
     for (const variant of order.variants) {
+      const quantity = variant.receivedQuantity !== null ? Number(variant.receivedQuantity) : Number(variant.quantity);
+      // Нечего зачислять на склад, если фактически ничего не пришло по этой
+      // строке (0 — легитимный факт, не ошибка, ReceiveStockDto не принимает
+      // ноль/отрицательное количество отдельным use case, поэтому строки без
+      // факта просто пропускаются, а не падают).
+      if (quantity <= 0) continue;
       await this.warehouseService.receiveStock(currentUser, {
         warehouseId,
         productVariantId: variant.productVariantId,
-        quantity: Number(variant.quantity),
+        quantity,
         referenceType: "production_order",
         referenceId: order.id,
         createdBy: currentUser.id,
@@ -315,7 +327,18 @@ export class ContractManufacturingService {
       entityType: "production_order",
       entityId: order.id,
       action: "production_order.received",
-      afterJson: { status: order.status, warehouseId, variants: order.variants.map((v) => ({ productVariantId: v.productVariantId, quantity: v.quantity })) },
+      beforeJson: {
+        variants: draftForAudit?.variants.map((v) => ({ productVariantId: v.productVariantId, plannedQuantity: v.quantity })),
+      },
+      afterJson: {
+        status: order.status,
+        warehouseId,
+        variants: order.variants.map((v) => ({
+          productVariantId: v.productVariantId,
+          plannedQuantity: v.quantity,
+          receivedQuantity: v.receivedQuantity,
+        })),
+      },
     });
 
     return order;

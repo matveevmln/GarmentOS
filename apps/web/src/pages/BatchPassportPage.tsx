@@ -536,6 +536,14 @@ export function BatchPassportPage() {
     const variant = passport.variants.find((row) => row.color === color && row.size === size);
     return variant ? Math.round(Number(variant.quantity)) : null;
   };
+  // Факт приёмки (P0-1) — null, пока партия не принята; показывается рядом
+  // с планом, никогда не подменяет его (ordered ≠ received).
+  const receivedQuantityFor = (color: string, size: string): number | null => {
+    const variant = passport.variants.find((row) => row.color === color && row.size === size);
+    return variant?.receivedQuantity !== null && variant?.receivedQuantity !== undefined
+      ? Math.round(Number(variant.receivedQuantity))
+      : null;
+  };
 
   // Сумма партии — по согласованной с цехом цене за единицу, посчитанная по
   // строкам (P5-2): rework-строки (переделка брака) бесплатны, остальные — по
@@ -671,12 +679,36 @@ export function BatchPassportPage() {
           {costRows.length > 0 ? (
             <CostBreakdown
               rows={costRows}
-              total={{
-                label: "Себестоимость факт",
-                unitCost: snapshot.actualCostPerUnit,
-                total: snapshot.actualCostPerUnit * plannedQuantity,
-              }}
+              total={
+                snapshot.actualCostPerUnit !== null
+                  ? {
+                      label: "Себестоимость факт",
+                      unitCost: snapshot.actualCostPerUnit,
+                      total: snapshot.actualCostPerUnit * plannedQuantity,
+                    }
+                  : undefined
+              }
             />
+          ) : null}
+
+          {/* P0-2 (владелец проекта, 2026-09-07): единая себестоимость не
+              показывается, если компоненты в разных валютах — сложение
+              исказило бы число. Вместо неё — явное предупреждение и разбивка
+              стоимости материалов по валюте закупки. */}
+          {snapshot.currencyWarning ? (
+            <p className="mt-4 rounded-[10px] border border-warning/30 bg-warning/[0.06] px-3 py-2 text-[12px] font-medium text-warning">
+              {snapshot.currencyWarning}
+            </p>
+          ) : null}
+          {snapshot.materialCostsByCurrency && snapshot.materialCostsByCurrency.length > 0 ? (
+            <ul className="mt-3 divide-y divide-border rounded-[10px] border border-border px-3">
+              {snapshot.materialCostsByCurrency.map((row) => (
+                <li key={row.currency} className="flex items-center justify-between gap-3 py-2.5 text-[13px]">
+                  <span className="text-muted-foreground">Материалы, {row.currency} за ед.</span>
+                  <span className="num font-medium">{formatMoney(row.amountPerUnit, row.currency, 2)}</span>
+                </li>
+              ))}
+            </ul>
           ) : null}
 
           {snapshot.materialsWithoutPriceHistory.length > 0 && (
@@ -1098,12 +1130,22 @@ export function BatchPassportPage() {
               {/* Три колонки — как в прототипе; при большем числе размеров
                   ячейки переносятся на следующую строку. */}
               <div className="mt-2 grid grid-cols-3 gap-px overflow-hidden rounded-[10px] border border-border bg-border">
-                {sizes.map((size) => (
-                  <div key={size} className="bg-card px-3 py-2.5 text-center">
-                    <div className="num text-[11px] text-muted-foreground">{size}</div>
-                    <div className="num mt-1 text-[16px] font-semibold">{quantityFor(color, size) ?? "—"}</div>
-                  </div>
-                ))}
+                {sizes.map((size) => {
+                  const planned = quantityFor(color, size);
+                  const received = receivedQuantityFor(color, size);
+                  const hasDeviation = received !== null && planned !== null && received !== planned;
+                  return (
+                    <div key={size} className="bg-card px-3 py-2.5 text-center">
+                      <div className="num text-[11px] text-muted-foreground">{size}</div>
+                      <div className="num mt-1 text-[16px] font-semibold">{planned ?? "—"}</div>
+                      {received !== null ? (
+                        <div className={cn("num mt-0.5 text-[12px]", hasDeviation ? "text-warning" : "text-muted-foreground")}>
+                          факт {received}
+                        </div>
+                      ) : null}
+                    </div>
+                  );
+                })}
               </div>
             </div>
           ))}
@@ -1276,12 +1318,23 @@ export function BatchPassportPage() {
                 />
               </div>
               <div className="bg-card">
-                <MoneyBlock
-                  label="Себестоимость факт"
-                  value={snapshot.actualCostPerUnit}
-                  decimals={2}
-                  sub="за изделие, на момент подтверждения"
-                />
+                {snapshot.actualCostPerUnit !== null ? (
+                  <MoneyBlock
+                    label="Себестоимость факт"
+                    value={snapshot.actualCostPerUnit}
+                    currency="руб"
+                    decimals={2}
+                    sub="за изделие, на момент подтверждения"
+                  />
+                ) : (
+                  <div className="px-4 py-3.5">
+                    <div className="eyebrow text-[10px]">Себестоимость факт</div>
+                    <div className="num mt-2 text-[22px] font-semibold leading-none tracking-[-0.02em] text-warning">—</div>
+                    <div className="num mt-1.5 text-[11px] text-muted-foreground">
+                      не рассчитана — компоненты в разных валютах, см. вкладку «Себестоимость»
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           ) : (

@@ -68,6 +68,7 @@ export class BatchPassportService {
           quantity: row.quantity,
           variantType: row.variantType,
           unitPrice: row.unitPrice,
+          receivedQuantity: row.receivedQuantity,
         },
       ];
     });

@@ -32,6 +32,7 @@ import { SkeletonList } from "../design-system/Feedback/Skeleton";
 import { ErrorState } from "../design-system/Feedback/ErrorState";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../design-system/Tooltip/Tooltip";
 import { toast } from "../design-system/Toast/Toast";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "../design-system/Modal/Dialog";
 
 // Форма-эталон (docs/UI_FOUNDATION.md, шаг 5) — первый экран, полностью
 // собранный из GarmentInput/GarmentSelect/GarmentDatePicker/GarmentButton/
@@ -71,7 +72,11 @@ export function ProductionOrdersPage() {
 
   const [pendingVariantId, setPendingVariantId] = useState("");
   const [pendingQuantity, setPendingQuantity] = useState<number | undefined>(undefined);
-  const [receiveWarehouse, setReceiveWarehouse] = useState<Record<string, string>>({});
+  // Диалог фактической приёмки (P0-1) — открыт для receivingOrder, пока не null.
+  const [receivingOrder, setReceivingOrder] = useState<ProductionOrderResponseDto | null>(null);
+  const [receivingWarehouseId, setReceivingWarehouseId] = useState("");
+  const [receivingVariants, setReceivingVariants] = useState<ProductVariantResponseDto[]>([]);
+  const [receivingQuantities, setReceivingQuantities] = useState<Record<string, number>>({});
   const [statusFilter, setStatusFilter] = useState<(typeof STATUS_FILTERS)[number]["value"]>("all");
   const [query, setQuery] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -254,17 +259,62 @@ export function ProductionOrdersPage() {
     }
   };
 
-  const receiveOrder = async (orderId: string) => {
-    const warehouseId = receiveWarehouse[orderId];
-    if (!warehouseId) {
+  // Приёмка по факту (P0-1, владелец проекта, 2026-09-07): "ordered ≠
+  // received" — оператор видит план по каждому варианту и вводит
+  // фактически полученное количество (по умолчанию равно плану, если
+  // расхождений не было). Отдельный диалог, а не инлайн-поле в строке
+  // списка — на партию может приходиться несколько десятков вариантов
+  // размер×цвет, что не поместится в строку таблицы.
+  const openReceiveDialog = async (order: ProductionOrderResponseDto) => {
+    setReceivingOrder(order);
+    setReceivingWarehouseId("");
+    const quantities: Record<string, number> = {};
+    for (const variant of order.variants) quantities[variant.productVariantId] = Number(variant.quantity);
+    setReceivingQuantities(quantities);
+    try {
+      const productVariants = await apiRequest<ProductVariantResponseDto[]>(`/product-variants?productId=${order.productId}`);
+      setReceivingVariants(productVariants);
+    } catch {
+      setReceivingVariants([]);
+    }
+  };
+
+  const closeReceiveDialog = () => {
+    setReceivingOrder(null);
+    setReceivingVariants([]);
+    setReceivingQuantities({});
+  };
+
+  const receivingVariantLabel = (productVariantId: string) => {
+    const variant = receivingVariants.find((v) => v.id === productVariantId);
+    return variant ? `${variant.size} / ${variant.color}` : productVariantId;
+  };
+
+  const receivingPlannedTotal = receivingOrder
+    ? receivingOrder.variants.reduce((sum, v) => sum + Number(v.quantity), 0)
+    : 0;
+  const receivingActualTotal = Object.values(receivingQuantities).reduce((sum, value) => sum + (value || 0), 0);
+
+  const submitReceive = async () => {
+    if (!receivingOrder || !receivingWarehouseId) {
       toast.error("Выберите склад для приёмки");
       return;
     }
-    setPendingOrderAction(orderId);
+    setPendingOrderAction(receivingOrder.id);
     try {
-      await apiRequest(`/production-orders/${orderId}/receive`, { method: "POST", body: { warehouseId } });
+      await apiRequest(`/production-orders/${receivingOrder.id}/receive`, {
+        method: "POST",
+        body: {
+          warehouseId: receivingWarehouseId,
+          receivedVariants: receivingOrder.variants.map((variant) => ({
+            productVariantId: variant.productVariantId,
+            quantity: receivingQuantities[variant.productVariantId] ?? Number(variant.quantity),
+          })),
+        },
+      });
       await reload();
-      toast.success("Партия принята на склад");
+      toast.success("Партия принята на склад по фактическому количеству");
+      closeReceiveDialog();
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "Не удалось принять партию");
     } finally {
@@ -695,31 +745,9 @@ export function ProductionOrdersPage() {
                             Готово к отгрузке
                           </Button>
                         ) : row.status === "ready_for_pickup" ? (
-                          <>
-                            <Select
-                              value={receiveWarehouse[row.id] ?? ""}
-                              onValueChange={(value) => setReceiveWarehouse((prev) => ({ ...prev, [row.id]: value }))}
-                            >
-                              <SelectTrigger className="h-8 w-[104px]">
-                                <SelectValue placeholder="Склад" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {warehouses.map((warehouse) => (
-                                  <SelectItem key={warehouse.id} value={warehouse.id}>
-                                    {warehouse.name}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                            <Button
-                              type="button"
-                              size="sm"
-                              loading={pendingOrderAction === row.id}
-                              onClick={() => void receiveOrder(row.id)}
-                            >
-                              Принять
-                            </Button>
-                          </>
+                          <Button type="button" size="sm" onClick={() => void openReceiveDialog(row)}>
+                            Принять
+                          </Button>
                         ) : (
                           <StatusBadge status={row.status} />
                         )}
@@ -793,31 +821,9 @@ export function ProductionOrdersPage() {
                             Готово к отгрузке
                           </Button>
                         ) : (
-                          <>
-                            <Select
-                              value={receiveWarehouse[row.id] ?? ""}
-                              onValueChange={(value) => setReceiveWarehouse((prev) => ({ ...prev, [row.id]: value }))}
-                            >
-                              <SelectTrigger className="h-9 w-[120px]">
-                                <SelectValue placeholder="Склад" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {warehouses.map((warehouse) => (
-                                  <SelectItem key={warehouse.id} value={warehouse.id}>
-                                    {warehouse.name}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                            <Button
-                              type="button"
-                              size="sm"
-                              loading={pendingOrderAction === row.id}
-                              onClick={() => void receiveOrder(row.id)}
-                            >
-                              Принять партию
-                            </Button>
-                          </>
+                          <Button type="button" size="sm" onClick={() => void openReceiveDialog(row)}>
+                            Принять партию
+                          </Button>
                         )}
                       </div>
                     ) : undefined
@@ -849,6 +855,84 @@ export function ProductionOrdersPage() {
           </div>
         </>
       )}
+
+      {/* Диалог фактической приёмки (P0-1) — план показывается рядом с
+          редактируемым фактом по каждому варианту размер×цвет, плюс
+          отклонение по сумме; на склад зачисляется факт, а не план. */}
+      <Dialog open={receivingOrder !== null} onOpenChange={(open) => (!open ? closeReceiveDialog() : undefined)}>
+        <DialogContent className="max-w-xl">
+          <DialogHeader>
+            <DialogTitle>Приёмка партии</DialogTitle>
+          </DialogHeader>
+          {receivingOrder ? (
+            <div className="space-y-4">
+              <div>
+                <label className="t-meta mb-1.5 block">Склад приёмки</label>
+                <Select value={receivingWarehouseId} onValueChange={setReceivingWarehouseId}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Выберите склад" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {warehouses.map((warehouse) => (
+                      <SelectItem key={warehouse.id} value={warehouse.id}>
+                        {warehouse.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="max-h-[320px] space-y-2 overflow-y-auto">
+                <div className="grid grid-cols-[1fr_90px_90px] gap-2 text-[11px] font-medium uppercase text-muted-foreground">
+                  <span>Вариант</span>
+                  <span className="text-right">План</span>
+                  <span className="text-right">Факт</span>
+                </div>
+                {receivingOrder.variants.map((variant) => (
+                  <div key={variant.id} className="grid grid-cols-[1fr_90px_90px] items-center gap-2">
+                    <span className="text-[13px]">{receivingVariantLabel(variant.productVariantId)}</span>
+                    <span className="num text-right text-[13px] text-muted-foreground">
+                      {formatQuantity(Number(variant.quantity))}
+                    </span>
+                    <NumberInput
+                      className="text-right"
+                      min={0}
+                      value={receivingQuantities[variant.productVariantId]}
+                      onChange={(value) =>
+                        setReceivingQuantities((prev) => ({ ...prev, [variant.productVariantId]: value ?? 0 }))
+                      }
+                    />
+                  </div>
+                ))}
+              </div>
+
+              <div className="grid grid-cols-[1fr_90px_90px] gap-2 border-t border-border pt-2.5 text-[13px] font-medium">
+                <span>Итого</span>
+                <span className="num text-right">{formatQuantity(receivingPlannedTotal)}</span>
+                <span className="num text-right">{formatQuantity(receivingActualTotal)}</span>
+              </div>
+              {receivingActualTotal !== receivingPlannedTotal ? (
+                <p className="t-meta text-warning">
+                  Отклонение от плана: {formatQuantity(receivingActualTotal - receivingPlannedTotal)} шт.
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+          <DialogFooter>
+            <Button type="button" variant="secondary" onClick={closeReceiveDialog}>
+              Отмена
+            </Button>
+            <Button
+              type="button"
+              loading={receivingOrder ? pendingOrderAction === receivingOrder.id : false}
+              disabled={!receivingWarehouseId}
+              onClick={() => void submitReceive()}
+            >
+              Принять партию
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

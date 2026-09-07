@@ -325,6 +325,11 @@ export class DrizzleMaterialStockRepository implements MaterialStockRepository {
     return row ? toMaterialStockItem(row) : null;
   }
 
+  async listByWarehouse(warehouseId: string): Promise<MaterialStockItem[]> {
+    const rows = await this.db.select().from(materialStockItems).where(eq(materialStockItems.warehouseId, warehouseId));
+    return rows.map(toMaterialStockItem);
+  }
+
   async receive(warehouseId: string, materialId: string, quantity: number, meta: MaterialStockMovementMeta): Promise<MaterialStockItem> {
     return this.db.transaction(async (tx) => {
       const [existing] = await tx

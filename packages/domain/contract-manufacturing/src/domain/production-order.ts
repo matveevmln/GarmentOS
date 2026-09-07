@@ -15,6 +15,11 @@ export type ProductionOrderStatus =
 // выразить смешанный заказ, поэтому у rework-строки своя цена (всегда 0).
 export type ProductionOrderVariantType = "new" | "rework";
 
+export interface ReceivedVariantInput {
+  productVariantId: string;
+  quantity: number;
+}
+
 export interface ProductionOrderVariant {
   id: string;
   productionOrderId: string;
@@ -22,6 +27,11 @@ export interface ProductionOrderVariant {
   quantity: string;
   variantType: ProductionOrderVariantType;
   unitPrice: string | null;
+  // Факт приёмки (P0-1) — null, пока партия не принята; после markReceived
+  // хранится РЯДОМ с плановым quantity, никогда его не заменяя (Историческая
+  // память: "ordered ≠ received", plannedQuantity этой строки — навсегда то,
+  // что было заказано).
+  receivedQuantity: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -223,6 +233,35 @@ export function assertCanReceive(status: ProductionOrderStatus): void {
       `Нельзя принять заказ пошива в статусе "${status}" — приёмка доступна только когда цех сообщил "готово к отгрузке"`,
       "PRODUCTION_ORDER_NOT_READY_FOR_PICKUP",
     );
+  }
+}
+
+// Факт приёмки может отличаться от плана в любую сторону (P0-1, владелец
+// проекта, 2026-09-07 — "ordered ≠ received ≠ good ≠ defect"). Единственное,
+// что проверяется здесь — сами введённые числа корректны и относятся к
+// строкам ЭТОГО заказа; верхнего предела ("нельзя принять больше X% от
+// плана") сознательно нет — придумывать такое бизнес-правило молча запрещено
+// явным требованием задания. Если фактическая приёмка окажется больше
+// планового количества (over-receipt), система это разрешает — это
+// осознанно зафиксированное, а не забытое поведение.
+export function assertReceivedVariantsValid(
+  variants: ProductionOrderVariant[],
+  received: ReceivedVariantInput[],
+): void {
+  const knownVariantIds = new Set(variants.map((variant) => variant.productVariantId));
+  for (const line of received) {
+    if (!knownVariantIds.has(line.productVariantId)) {
+      throw new DomainError(
+        `Вариант ${line.productVariantId} не относится к этому заказу пошива`,
+        "PRODUCTION_ORDER_RECEIVED_VARIANT_NOT_FOUND",
+      );
+    }
+    if (!Number.isFinite(line.quantity) || line.quantity < 0) {
+      throw new DomainError(
+        `Фактически принятое количество не может быть отрицательным (получено ${line.quantity})`,
+        "PRODUCTION_ORDER_RECEIVED_QUANTITY_INVALID",
+      );
+    }
   }
 }
 

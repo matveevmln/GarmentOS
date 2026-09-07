@@ -145,8 +145,22 @@ export type CreateProductionOrderFromQuantityDto = z.infer<typeof createProducti
 // SKU заказа, выбирается человеком при приёмке (в отличие от материалов,
 // авторезолв единственного склада компании здесь не подходит: заказ пошива —
 // это готовая продукция, которая может приходить на другой склад, чем сырьё).
+//
+// receivedVariants — факт по каждому варианту (P0-1, владелец проекта,
+// 2026-09-07: "ordered ≠ received"). Необязателен: без него приёмка ведёт
+// себя как раньше — план засчитывается как факт (обратная совместимость для
+// всех существующих вызывающих). Строка, для которой факт не передан явно —
+// тоже принимается по плану.
 export const receiveProductionOrderSchema = z.object({
   warehouseId: z.string().uuid(),
+  receivedVariants: z
+    .array(
+      z.object({
+        productVariantId: z.string().uuid(),
+        quantity: z.number().min(0, "Фактически принятое количество не может быть отрицательным"),
+      }),
+    )
+    .optional(),
 });
 export type ReceiveProductionOrderDto = z.infer<typeof receiveProductionOrderSchema>;
 
@@ -170,6 +184,8 @@ export const productionOrderVariantResponseSchema = z.object({
   quantity: z.string(),
   variantType: productionOrderVariantTypeSchema,
   unitPrice: z.string().nullable(),
+  // Факт приёмки (P0-1) — null, пока партия не принята.
+  receivedQuantity: z.string().nullable(),
   createdAt: z.date(),
   updatedAt: z.date(),
 });
@@ -207,6 +223,18 @@ export const productionOrderMaterialNormSchema = z.object({
 });
 export type ProductionOrderMaterialNorm = z.infer<typeof productionOrderMaterialNormSchema>;
 
+// Себестоимость материалов по валюте закупки (P0-2, владелец проекта,
+// 2026-09-07) — суммы в разных валютах никогда не складываются в одно
+// число (docs/PRINCIPLES.md, принцип 21). Определена здесь (не в
+// reporting/schemas.ts, который её тоже использует) — reporting уже
+// импортирует productionOrderCostSnapshotSchema ИЗ этого файла, обратный
+// импорт создал бы циклическую зависимость модулей.
+export const materialCostByCurrencySchema = z.object({
+  currency: z.string(),
+  amountPerUnit: z.number(),
+});
+export type MaterialCostByCurrencyDto = z.infer<typeof materialCostByCurrencySchema>;
+
 export const productionOrderCostSnapshotSchema = z.object({
   capturedAt: z.string(),
   fabricCostPerUnit: z.number(),
@@ -214,9 +242,17 @@ export const productionOrderCostSnapshotSchema = z.object({
   packagingCostPerUnit: z.number(),
   sewingCostPerUnit: z.number(),
   otherCostPerUnit: z.number(),
-  actualCostPerUnit: z.number(),
+  // Материалы по валюте закупки (P0-2) — необязательно: у снимков,
+  // зафиксированных до появления этого поля, его нет, и интерфейс честно
+  // показывает единственно верную старую сумму без разбивки по валютам.
+  materialCostsByCurrency: z.array(materialCostByCurrencySchema).optional(),
+  // null — единую себестоимость посчитать нельзя (материалы в другой
+  // валюте/нескольких валютах сразу), см. costing.service.ts, P0-2.
+  actualCostPerUnit: z.number().nullable(),
+  actualCostCurrency: z.string().nullable().optional(),
+  currencyWarning: z.string().nullable().optional(),
   deductionPerUnit: z.number(),
-  specificationPricePerUnit: z.number(),
+  specificationPricePerUnit: z.number().nullable(),
   materialsWithoutPriceHistory: z.array(z.string()),
   paymentTerms: z.string(),
   deliveryMethod: z.string(),

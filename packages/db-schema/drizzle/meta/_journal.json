@@ -162,6 +162,13 @@
       "when": 1788669490615,
       "tag": "0022_sharp_sabretooth",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1788766021513,
+      "tag": "0023_right_jack_power",
+      "breakpoints": true
     }
   ]
 }

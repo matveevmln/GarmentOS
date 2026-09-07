@@ -113,6 +113,7 @@ export class ProductionOrdersController {
       currentUser,
       id,
       body.warehouseId,
+      body.receivedVariants,
     );
     return productionOrderResponseSchema.parse(productionOrder);
   }

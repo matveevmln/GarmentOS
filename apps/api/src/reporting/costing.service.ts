@@ -7,6 +7,10 @@ import { CatalogService } from "../catalog/catalog.service";
 import { DATABASE_CONNECTION } from "../database/database.module";
 
 const DEFAULT_DEDUCTION = 175;
+// Пошив и «прочие расходы» договорно всегда в рублях (docs/PRINCIPLES.md,
+// принцип 21) — у product.standardSewingCost/otherProductionCost нет
+// собственного поля валюты, потому что оно не требуется бизнес-правилом.
+const SEWING_AND_OTHER_CURRENCY = "RUB";
 
 // «Расчёт стоимости спецификации» (владелец проекта, 2026-08-03): фактическая
 // себестоимость (ткань/фурнитура/упаковка из утверждённого BOM × последняя
@@ -48,26 +52,61 @@ export class CostingService {
     let trimCostPerUnit = 0;
     let packagingCostPerUnit = 0;
     const materialsWithoutPriceHistory: string[] = [];
+    // Материалы по валюте закупки (P0-2, владелец проекта, 2026-09-07) —
+    // тот же принцип, что уже применялся к потребности материалов на партию
+    // (BatchPassportPage.tsx, requirementTotals): суммы в разных валютах
+    // никогда не складываются в одно число, только отдельно по каждой
+    // валюте (docs/PRINCIPLES.md, принцип 21).
+    const materialCostsByCurrency = new Map<string, number>();
 
     for (const item of bom.items) {
-      const lastPrice = await this.findLastPurchasePrice(companyId, item.materialId);
+      const lastPurchase = await this.findLastPurchase(companyId, item.materialId);
       const consumption = Number(item.quantityPerUnit) * (1 + Number(item.wastePercent) / 100);
-      if (lastPrice === null) {
+      if (lastPurchase === null) {
         const material = await this.findMaterialName(item.materialId);
         materialsWithoutPriceHistory.push(material);
         continue;
       }
-      const cost = consumption * lastPrice;
+      const cost = consumption * lastPurchase.unitPrice;
       const materialType = await this.findMaterialType(item.materialId);
       if (materialType === "fabric") fabricCostPerUnit += cost;
       else if (materialType === "packaging") packagingCostPerUnit += cost;
       else trimCostPerUnit += cost;
+
+      // Валюта закупки материала — nullable у закупок, заведённых до
+      // появления этого поля (см. purchase_orders.currency); такую сумму
+      // нельзя честно отнести ни к одной валюте, поэтому не участвует ни в
+      // одном ведре — тот же принцип, что materialsWithoutPriceHistory.
+      if (lastPurchase.currency !== null) {
+        materialCostsByCurrency.set(lastPurchase.currency, (materialCostsByCurrency.get(lastPurchase.currency) ?? 0) + cost);
+      }
     }
 
     const sewingCostPerUnit = product.standardSewingCost !== null ? Number(product.standardSewingCost) : 0;
     const otherCostPerUnit = product.otherProductionCost !== null ? Number(product.otherProductionCost) : 0;
-    const actualCostPerUnit = fabricCostPerUnit + trimCostPerUnit + packagingCostPerUnit + sewingCostPerUnit + otherCostPerUnit;
-    const specificationPricePerUnit = Math.max(0, actualCostPerUnit - deduction);
+
+    // Итог считается ОДНИМ числом только тогда, когда это арифметически
+    // честно: материалы куплены ровно в одной валюте, и она совпадает с
+    // валютой пошива/прочих расходов (RUB). Во всех остальных случаях —
+    // материалы в другой валюте, материалы в нескольких валютах сразу —
+    // единого числа не существует, показывать его нельзя (задание P0-2
+    // прямо запрещает "число, которое выглядит как единая себестоимость,
+    // если компоненты в разных валютах").
+    const distinctMaterialCurrencies = [...materialCostsByCurrency.keys()];
+    const hasSewingOrOtherCost = sewingCostPerUnit > 0 || otherCostPerUnit > 0;
+    let actualCostPerUnit: number | null = null;
+    let actualCostCurrency: string | null = null;
+    let currencyWarning: string | null = null;
+
+    if (distinctMaterialCurrencies.length > 1) {
+      currencyWarning = `Итоговая себестоимость не рассчитана: материалы куплены в разных валютах (${distinctMaterialCurrencies.join(", ")}).`;
+    } else if (distinctMaterialCurrencies.length === 1 && distinctMaterialCurrencies[0] !== SEWING_AND_OTHER_CURRENCY && hasSewingOrOtherCost) {
+      currencyWarning = `Итоговая себестоимость не рассчитана: материалы — ${distinctMaterialCurrencies[0]}, пошив и прочие расходы — ${SEWING_AND_OTHER_CURRENCY}.`;
+    } else {
+      actualCostPerUnit = fabricCostPerUnit + trimCostPerUnit + packagingCostPerUnit + sewingCostPerUnit + otherCostPerUnit;
+      actualCostCurrency = SEWING_AND_OTHER_CURRENCY;
+    }
+    const specificationPricePerUnit = actualCostPerUnit !== null ? Math.max(0, actualCostPerUnit - deduction) : null;
 
     return {
       fabricCostPerUnit,
@@ -75,7 +114,13 @@ export class CostingService {
       packagingCostPerUnit,
       sewingCostPerUnit,
       otherCostPerUnit,
+      materialCostsByCurrency: [...materialCostsByCurrency.entries()].map(([currency, amountPerUnit]) => ({
+        currency,
+        amountPerUnit,
+      })),
       actualCostPerUnit,
+      actualCostCurrency,
+      currencyWarning,
       deductionPerUnit: deduction,
       specificationPricePerUnit,
       materialsWithoutPriceHistory,
@@ -117,11 +162,6 @@ export class CostingService {
   async findApprovedBomVersion(companyId: string, productId: string): Promise<number | null> {
     const bom = await this.bomService.getApproved(companyId, { productId });
     return bom ? bom.version : null;
-  }
-
-  private async findLastPurchasePrice(companyId: string, materialId: string): Promise<number | null> {
-    const row = await this.findLastPurchase(companyId, materialId);
-    return row ? row.unitPrice : null;
   }
 
   // Последняя закупочная цена вместе с валютой закупки. Валюта берётся из

@@ -3,6 +3,7 @@ import type {
   ProductionOrder,
   ProductionOrderStatus,
   ProductionOrderVariantDraft,
+  ReceivedVariantInput,
 } from "../domain/production-order";
 
 export interface NewWorkshopInput {
@@ -76,10 +77,14 @@ export interface ProductionOrderRepository {
   create(input: NewProductionOrderInput): Promise<ProductionOrder>;
   findById(companyId: string, id: string): Promise<ProductionOrder | null>;
   updateStatus(id: string, status: ProductionOrderStatus): Promise<ProductionOrder>;
-  // Приёмка партии (Итерация 10) — статус и receivedAt устанавливаются
-  // одной атомарной операцией, в отличие от updateStatus, который не знает
-  // о receivedAt.
-  markReceived(id: string): Promise<ProductionOrder>;
+  // Приёмка партии (Итерация 10, факт — P0-1) — статус, receivedAt и
+  // фактическое количество по каждому варианту устанавливаются одной
+  // атомарной операцией, в отличие от updateStatus, который не знает о них.
+  // received — фактическое количество по productVariantId; строки заказа,
+  // для которых явно не передано значение, получают receivedQuantity, равный
+  // плановому quantity (обратная совместимость: приёмка без указания факта
+  // ведёт себя ровно как раньше).
+  markReceived(id: string, received: ReceivedVariantInput[]): Promise<ProductionOrder>;
   // Безусловная запись — сама по себе НЕ проверяет, есть ли уже снимок.
   // Единственный корректный вызывающий — application/capture-production-order-cost-snapshot.ts
   // (P1-1), которая сначала проверяет assertCostSnapshotNotYetSet. Прямой

@@ -250,4 +250,151 @@ describe("Production order — полный цикл через REST без Tele
       .expect(409);
     expect((repeatReceiveResponse.body as ErrorResponseBody).code).toBe("PRODUCTION_ORDER_NOT_READY_FOR_PICKUP");
   });
+
+  // P0-1 (владелец проекта, 2026-09-07): "ordered ≠ received" — реальный
+  // пример владельца: заказано 4000, фактически принято 3993 — на склад
+  // должно попасть 3993, а план (4000) не должен быть переписан.
+  it("приёмка по фактическому количеству, отличному от планового: на склад зачисляется факт, план не меняется", async () => {
+    const companyName = `E2E Lifecycle Actual ${Date.now()}`;
+    createdCompanyNames.push(companyName);
+    const { accessToken } = await setupAuthenticatedCompany(db, httpServer, companyName, "owner");
+    const suffix = `${Date.now()}`;
+
+    const productResponse = await request(httpServer)
+      .post("/v1/products")
+      .set(...authHeader(accessToken))
+      .send({ name: `Стеганка Тест ${suffix}`, code: `STEGANKA-${suffix}` })
+      .expect(201);
+    const product = productResponse.body as ProductResponseDto;
+
+    const variantResponse = await request(httpServer)
+      .post("/v1/product-variants")
+      .set(...authHeader(accessToken))
+      .send({ productId: product.id, size: "ONE SIZE", color: "Графит", skuCode: `STEGANKA-${suffix}-GRAFIT` })
+      .expect(201);
+    const variant = variantResponse.body as ProductVariantResponseDto;
+
+    const materialResponse = await request(httpServer)
+      .post("/v1/materials")
+      .set(...authHeader(accessToken))
+      .send({ name: `Плащевка ${suffix}`, type: "fabric", unit: "m" })
+      .expect(201);
+    const material = materialResponse.body as MaterialResponseDto;
+
+    const workshopResponse = await request(httpServer)
+      .post("/v1/workshops")
+      .set(...authHeader(accessToken))
+      .send({ name: `Цех Стеганки ${suffix}`, contractNumber: `Д-СТГ-${suffix}` })
+      .expect(201);
+    const workshop = workshopResponse.body as WorkshopResponseDto;
+
+    const warehouseResponse = await request(httpServer)
+      .post("/v1/warehouses")
+      .set(...authHeader(accessToken))
+      .send({ name: `Склад Стеганки ${suffix}` })
+      .expect(201);
+    const warehouse = warehouseResponse.body as WarehouseResponseDto;
+
+    const draftBomResponse = await request(httpServer)
+      .post("/v1/boms")
+      .set(...authHeader(accessToken))
+      .send({ productId: product.id, items: [{ materialId: material.id, quantityPerUnit: 1, wastePercent: 0 }] })
+      .expect(201);
+    const approvedBomResponse = await request(httpServer)
+      .post(`/v1/boms/${(draftBomResponse.body as BomResponseDto).id}/approve`)
+      .set(...authHeader(accessToken))
+      .expect(201);
+    const approvedBom = approvedBomResponse.body as BomResponseDto;
+
+    const orderResponse = await request(httpServer)
+      .post("/v1/production-orders")
+      .set(...authHeader(accessToken))
+      .send({
+        productId: product.id,
+        bomId: approvedBom.id,
+        workshopId: workshop.id,
+        plannedQuantity: 4000,
+        agreedUnitPrice: 450,
+        variants: [{ productVariantId: variant.id, quantity: 4000 }],
+      })
+      .expect(201);
+    const order = orderResponse.body as ProductionOrderResponseDto;
+
+    await request(httpServer)
+      .post(`/v1/production-orders/${order.id}/confirm`)
+      .set(...authHeader(accessToken))
+      .expect(201);
+    await request(httpServer)
+      .post(`/v1/production-orders/${order.id}/status`)
+      .set(...authHeader(accessToken))
+      .send({ status: "in_progress" })
+      .expect(201);
+    await request(httpServer)
+      .post(`/v1/production-orders/${order.id}/status`)
+      .set(...authHeader(accessToken))
+      .send({ status: "ready_for_pickup" })
+      .expect(201);
+
+    const receiveResponse = await request(httpServer)
+      .post(`/v1/production-orders/${order.id}/receive`)
+      .set(...authHeader(accessToken))
+      .send({ warehouseId: warehouse.id, receivedVariants: [{ productVariantId: variant.id, quantity: 3993 }] })
+      .expect(201);
+    const received = receiveResponse.body as ProductionOrderResponseDto;
+    const receivedVariant = received.variants.find((v) => v.productVariantId === variant.id);
+    expect(receivedVariant?.quantity).toBe("4000.000"); // план не переписан фактом
+    expect(receivedVariant?.receivedQuantity).toBe("3993.000");
+
+    // На склад зачислено ФАКТИЧЕСКОЕ количество, а не плановое 4000.
+    const [stockItem] = await db
+      .select()
+      .from(stockItems)
+      .where(and(eq(stockItems.warehouseId, warehouse.id), eq(stockItems.productVariantId, variant.id)));
+    expect(Number(stockItem?.quantityOnHand)).toBe(3993);
+
+    // Аудит сохраняет и план, и факт (требование P0-1 п.6).
+    const [auditEntry] = await db
+      .select()
+      .from(auditLog)
+      .where(and(eq(auditLog.entityId, order.id), eq(auditLog.action, "production_order.received")));
+    const afterJson = auditEntry?.afterJson as { variants: Array<{ plannedQuantity: string; receivedQuantity: string | null }> };
+    expect(afterJson.variants[0]?.plannedQuantity).toBe("4000.000");
+    expect(afterJson.variants[0]?.receivedQuantity).toBe("3993.000");
+
+    // Нельзя передать отрицательное фактическое количество.
+    const anotherOrderResponse = await request(httpServer)
+      .post("/v1/production-orders")
+      .set(...authHeader(accessToken))
+      .send({
+        productId: product.id,
+        bomId: approvedBom.id,
+        workshopId: workshop.id,
+        plannedQuantity: 10,
+        agreedUnitPrice: 450,
+        variants: [{ productVariantId: variant.id, quantity: 10 }],
+      })
+      .expect(201);
+    const anotherOrder = anotherOrderResponse.body as ProductionOrderResponseDto;
+    await request(httpServer)
+      .post(`/v1/production-orders/${anotherOrder.id}/confirm`)
+      .set(...authHeader(accessToken))
+      .expect(201);
+    await request(httpServer)
+      .post(`/v1/production-orders/${anotherOrder.id}/status`)
+      .set(...authHeader(accessToken))
+      .send({ status: "in_progress" })
+      .expect(201);
+    await request(httpServer)
+      .post(`/v1/production-orders/${anotherOrder.id}/status`)
+      .set(...authHeader(accessToken))
+      .send({ status: "ready_for_pickup" })
+      .expect(201);
+    // Отклонено на уровне схемы (nestjs-zod) — квантити ниже 0 не проходит
+    // валидацию тела запроса раньше, чем дойдёт до доменной проверки.
+    await request(httpServer)
+      .post(`/v1/production-orders/${anotherOrder.id}/receive`)
+      .set(...authHeader(accessToken))
+      .send({ warehouseId: warehouse.id, receivedVariants: [{ productVariantId: variant.id, quantity: -5 }] })
+      .expect(400);
+  });
 });

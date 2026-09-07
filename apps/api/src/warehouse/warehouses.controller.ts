@@ -1,7 +1,13 @@
-import { Body, Controller, Get, Post } from "@nestjs/common";
+import { Body, Controller, Get, Param, Post } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
 import { createZodDto } from "nestjs-zod";
-import { createWarehouseSchema, warehouseResponseSchema, type WarehouseResponseDto } from "@garmentos/shared-types";
+import {
+  createWarehouseSchema,
+  materialStockItemResponseSchema,
+  warehouseResponseSchema,
+  type MaterialStockItemResponseDto,
+  type WarehouseResponseDto,
+} from "@garmentos/shared-types";
 import { CurrentUser, type AuthenticatedRequestUser } from "../auth/current-user.decorator";
 import { RequirePermissions } from "../auth/require-permissions.decorator";
 import { WarehouseService } from "./warehouse.service";
@@ -28,5 +34,17 @@ export class WarehousesController {
   async list(@CurrentUser() currentUser: AuthenticatedRequestUser): Promise<WarehouseResponseDto[]> {
     const warehouses = await this.warehouseService.listWarehouses(currentUser.companyId);
     return warehouses.map((warehouse) => warehouseResponseSchema.parse(warehouse));
+  }
+
+  // Остаток материалов по складу (P0-3, владелец проекта, 2026-09-07) —
+  // раньше остаток можно было узнать только прямым запросом к БД.
+  @RequirePermissions("warehouse.read")
+  @Get(":id/material-stock")
+  async materialStock(
+    @Param("id") id: string,
+    @CurrentUser() currentUser: AuthenticatedRequestUser,
+  ): Promise<MaterialStockItemResponseDto[]> {
+    const items = await this.warehouseService.listMaterialStock(currentUser.companyId, id);
+    return items.map((item) => materialStockItemResponseSchema.parse(item));
   }
 }

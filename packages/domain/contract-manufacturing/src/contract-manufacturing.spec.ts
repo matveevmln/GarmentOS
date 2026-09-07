@@ -282,6 +282,104 @@ describe("domain/contract-manufacturing", () => {
     });
   });
 
+  // P0-1 (владелец проекта, 2026-09-07): "ordered ≠ received" — фактическое
+  // количество может отличаться от планового в любую сторону, план при этом
+  // остаётся неизменным.
+  it("принимает партию по фактическому количеству, отличному от планового, не изменяя план", async () => {
+    await runInRolledBackTransaction(async (tx) => {
+      const { company, product, variant, boms, approvedBom, workshops, workshop } = await seedApprovedBomAndVariant(tx);
+      const productionOrders = new DrizzleProductionOrderRepository(tx);
+      const bomApproval = makeBomApprovalPort(boms);
+
+      const draft = await createProductionOrderDraft(
+        { productionOrders, workshops, bomApproval },
+        {
+          companyId: company.id,
+          productId: product.id,
+          bomId: approvedBom.id,
+          workshopId: workshop.id,
+          plannedQuantity: 4000,
+          agreedUnitPrice: 450,
+          variants: [{ productVariantId: variant.id, quantity: 4000 }],
+        },
+      );
+      await confirmProductionOrder({ productionOrders }, { companyId: company.id, productionOrderId: draft.id });
+      await updateProductionOrderStatusFromWorkshop(
+        { productionOrders },
+        { companyId: company.id, workshopId: workshop.id, status: "in_progress" },
+      );
+      await updateProductionOrderStatusFromWorkshop(
+        { productionOrders },
+        { companyId: company.id, workshopId: workshop.id, status: "ready_for_pickup" },
+      );
+
+      const received = await receiveProductionOrder(
+        { productionOrders },
+        {
+          companyId: company.id,
+          productionOrderId: draft.id,
+          receivedVariants: [{ productVariantId: variant.id, quantity: 3993 }],
+        },
+      );
+
+      const receivedVariant = received.variants.find((v) => v.productVariantId === variant.id);
+      expect(receivedVariant?.quantity).toBe("4000.000"); // план не изменился
+      expect(Number(receivedVariant?.receivedQuantity)).toBe(3993); // факт хранится отдельно
+    });
+  });
+
+  it("отклоняет отрицательное фактическое количество и variantId не из этого заказа", async () => {
+    await runInRolledBackTransaction(async (tx) => {
+      const { company, product, variant, boms, approvedBom, workshops, workshop } = await seedApprovedBomAndVariant(tx);
+      const productionOrders = new DrizzleProductionOrderRepository(tx);
+      const bomApproval = makeBomApprovalPort(boms);
+
+      const draft = await createProductionOrderDraft(
+        { productionOrders, workshops, bomApproval },
+        {
+          companyId: company.id,
+          productId: product.id,
+          bomId: approvedBom.id,
+          workshopId: workshop.id,
+          plannedQuantity: 100,
+          agreedUnitPrice: 450,
+          variants: [{ productVariantId: variant.id, quantity: 100 }],
+        },
+      );
+      await confirmProductionOrder({ productionOrders }, { companyId: company.id, productionOrderId: draft.id });
+      await updateProductionOrderStatusFromWorkshop(
+        { productionOrders },
+        { companyId: company.id, workshopId: workshop.id, status: "in_progress" },
+      );
+      await updateProductionOrderStatusFromWorkshop(
+        { productionOrders },
+        { companyId: company.id, workshopId: workshop.id, status: "ready_for_pickup" },
+      );
+
+      await expect(
+        receiveProductionOrder(
+          { productionOrders },
+          {
+            companyId: company.id,
+            productionOrderId: draft.id,
+            receivedVariants: [{ productVariantId: variant.id, quantity: -1 }],
+          },
+        ),
+      ).rejects.toThrow(/отрицательным/);
+
+      await expect(
+        receiveProductionOrder(
+          { productionOrders },
+          {
+            companyId: company.id,
+            productionOrderId: draft.id,
+            receivedVariants: [{ productVariantId: "00000000-0000-4000-8000-000000000000", quantity: 10 }],
+          },
+        ),
+      ).rejects.toThrow(/не относится к этому заказу/);
+    });
+  });
+
   it("бросает ошибку, если у цеха нет ни одного активного заказа", async () => {
     await runInRolledBackTransaction(async (tx) => {
       const company = await createCompany({ companies: new DrizzleCompanyRepository(tx) }, { name: "Бренд без заказов" });

@@ -65,6 +65,11 @@ export interface MaterialStockMovementMeta {
 // ранее внесённого факта).
 export interface MaterialStockRepository {
   findMaterialStockItem(warehouseId: string, materialId: string): Promise<MaterialStockItem | null>;
+  // Остаток по складу (P0-3, владелец проекта, 2026-09-07) — "видимость
+  // остатков материалов". Источник истины — эта же денормализованная
+  // таблица (material_stock_items), обновляемая на каждое движение; новой
+  // таблицы/агрегата не заводим.
+  listByWarehouse(warehouseId: string): Promise<MaterialStockItem[]>;
   receive(warehouseId: string, materialId: string, quantity: number, meta: MaterialStockMovementMeta): Promise<MaterialStockItem>;
   consume(warehouseId: string, materialId: string, quantity: number, meta: MaterialStockMovementMeta): Promise<MaterialStockItem>;
   // Корректировка на разницу: прошлое движение не переписывается, добавляется
