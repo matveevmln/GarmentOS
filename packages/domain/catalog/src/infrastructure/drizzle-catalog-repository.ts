@@ -45,7 +45,9 @@ function toProduct(row: ProductRow): Product {
     status: row.status,
     techPackUrl: row.techPackUrl,
     standardSewingCost: row.standardSewingCost,
+    standardSewingCostCurrency: row.standardSewingCostCurrency,
     otherProductionCost: row.otherProductionCost,
+    otherProductionCostCurrency: row.otherProductionCostCurrency,
     createdBy: row.createdBy,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
@@ -99,7 +101,12 @@ export class DrizzleProductRepository implements ProductRepository {
   async updateCosts(companyId: string, id: string, input: ProductCostsInput): Promise<Product> {
     const [row] = await this.db
       .update(products)
-      .set({ standardSewingCost: input.standardSewingCost, otherProductionCost: input.otherProductionCost })
+      .set({
+        standardSewingCost: input.standardSewingCost,
+        standardSewingCostCurrency: input.standardSewingCostCurrency,
+        otherProductionCost: input.otherProductionCost,
+        otherProductionCostCurrency: input.otherProductionCostCurrency,
+      })
       .where(and(eq(products.companyId, companyId), eq(products.id, id)))
       .returning();
     if (!row) throw new Error(`UPDATE products не вернул строку для id=${id}`);

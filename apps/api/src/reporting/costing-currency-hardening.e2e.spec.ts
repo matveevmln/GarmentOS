@@ -39,12 +39,23 @@ if (!databaseUrl) {
 }
 const db = createDb(databaseUrl);
 
-// P0-2 (владелец проекта, 2026-09-07): "Никаких скрытых автоматических
-// конвертаций" — материалы могут быть закуплены в USD/KGS, пошив всегда в
-// RUB (принцип 21). computeSpecificationPricing НЕ должен складывать эти
-// числа в одно "итого", если валюты расходятся — здесь это проверяется на
-// реальном REST-эндпоинте, а не на моке.
-describe("Costing — валютная безопасность себестоимости (P0-2, e2e)", () => {
+// P1, hardening перед первой реальной партией «Стеганка» (владелец проекта,
+// 2026-09-07) — продолжение costing.e2e.spec.ts (P0-2), отдельный файл (а не
+// новые it() там же), чтобы не превышать лимит логинов ThrottlerGuard
+// (5 запросов/60с на /v1/auth/login, apps/api/src/auth/auth.controller.ts) —
+// каждый .e2e.spec.ts поднимает свой экземпляр Nest-приложения в своём
+// beforeAll, поэтому и счётчик throttler у него свой.
+//
+// Два независимых уточнения валютной безопасности:
+// A. Материалы ОДНОЙ категории (например, "ткань") в разных валютах закупки
+//    раньше суммировались в fabricCostPerUnit/trimCostPerUnit/packagingCostPerUnit
+//    в одно число вне зависимости от валюты — сама категория теперь тоже
+//    должна честно стать null, а не просто участвовать в общем предупреждении.
+// D. standardSewingCost/otherProductionCost получили собственную валюту
+//    (products.standard_sewing_cost_currency/other_production_cost_currency) —
+//    услуга вроде стёжки, реально оплачиваемая в KGS, больше не считается
+//    молча как RUB.
+describe("Costing — валютная безопасность внутри категорий и стоимости пошива/прочего (P1, hardening, e2e)", () => {
   let app: INestApplication;
   let httpServer: Server;
   const createdCompanyNames: string[] = [];
@@ -86,8 +97,13 @@ describe("Costing — валютная безопасность себестои
     await app.close();
   });
 
-  it("материалы в USD + пошив в RUB — итог НЕ считается одним числом, есть явное предупреждение", async () => {
-    const companyName = `E2E Costing USD ${Date.now()}`;
+  // A: раньше fabricCostPerUnit суммировал ВСЕ материалы типа "ткань" в одно
+  // число независимо от валюты закупки каждого — основная ткань в USD и
+  // подклад в RUB давали бессмысленное "150 USD/RUB". Теперь такая категория
+  // должна вернуться отдельно по валютам (fabricCostPerUnit = null), а не
+  // одним искажённым числом.
+  it("ткань в USD + подклад в RUB (одна категория, разные валюты) — категория не считается одним числом", async () => {
+    const companyName = `E2E Costing Category Mixed ${Date.now()}`;
     createdCompanyNames.push(companyName);
     const { accessToken } = await setupAuthenticatedCompany(db, httpServer, companyName, "owner");
     const suffix = `${Date.now()}`;
@@ -95,113 +111,40 @@ describe("Costing — валютная безопасность себестои
     const productResponse = await request(httpServer)
       .post("/v1/products")
       .set(...authHeader(accessToken))
-      .send({ name: `Стеганка USD ${suffix}`, code: `COST-USD-${suffix}` })
+      .send({ name: `Стеганка Category Mixed ${suffix}`, code: `COST-CATMIX-${suffix}` })
       .expect(201);
     const product = productResponse.body as ProductResponseDto;
 
-    // Пошив всегда в RUB (принцип 21) — задаём стоимость пошива, чтобы
-    // проверить именно смешение материалы(USD) + пошив(RUB).
-    await request(httpServer)
-      .patch(`/v1/products/${product.id}/costs`)
-      .set(...authHeader(accessToken))
-      .send({ standardSewingCost: 300 })
-      .expect(200);
-
-    const materialResponse = await request(httpServer)
+    const mainFabricResponse = await request(httpServer)
       .post("/v1/materials")
       .set(...authHeader(accessToken))
-      .send({ name: `Плащевка ${suffix}`, type: "fabric", unit: "m" })
+      .send({ name: `Основная ткань ${suffix}`, type: "fabric", unit: "m" })
       .expect(201);
-    const material = materialResponse.body as MaterialResponseDto;
+    const mainFabric = mainFabricResponse.body as MaterialResponseDto;
+
+    const liningResponse = await request(httpServer)
+      .post("/v1/materials")
+      .set(...authHeader(accessToken))
+      .send({ name: `Подклад ${suffix}`, type: "fabric", unit: "m" })
+      .expect(201);
+    const lining = liningResponse.body as MaterialResponseDto;
 
     const supplierResponse = await request(httpServer)
       .post("/v1/suppliers")
       .set(...authHeader(accessToken))
-      .send({ name: `Поставщик USD ${suffix}`, type: "fabric" })
+      .send({ name: `Поставщик Category Mixed ${suffix}`, type: "fabric" })
       .expect(201);
     const supplier = supplierResponse.body as SupplierResponseDto;
 
     await request(httpServer)
       .post("/v1/purchase-orders")
       .set(...authHeader(accessToken))
-      .send({
-        supplierId: supplier.id,
-        currency: "USD",
-        items: [{ materialId: material.id, quantity: 100, unitPrice: 0.95 }],
-      })
-      .expect(201);
-
-    const draftBomResponse = await request(httpServer)
-      .post("/v1/boms")
-      .set(...authHeader(accessToken))
-      .send({ productId: product.id, items: [{ materialId: material.id, quantityPerUnit: 1, wastePercent: 0 }] })
-      .expect(201);
-    await request(httpServer)
-      .post(`/v1/boms/${(draftBomResponse.body as BomResponseDto).id}/approve`)
-      .set(...authHeader(accessToken))
-      .expect(201);
-
-    const pricingResponse = await request(httpServer)
-      .get(`/v1/costing/products/${product.id}/specification-price`)
-      .set(...authHeader(accessToken))
-      .expect(200);
-    const pricing = pricingResponse.body as SpecificationPricingResponseDto;
-
-    // Компоненты сохранены раздельно по валюте — не потеряны, не выдуманы.
-    expect(pricing.materialCostsByCurrency).toEqual([{ currency: "USD", amountPerUnit: 0.95 }]);
-    expect(pricing.sewingCostPerUnit).toBe(300);
-    // ГЛАВНАЯ ПРОВЕРКА P0-2: USD (материалы) + RUB (пошив) НЕ превращается
-    // в одно арифметическое число (например, 300.95).
-    expect(pricing.actualCostPerUnit).toBeNull();
-    expect(pricing.specificationPricePerUnit).toBeNull();
-    expect(pricing.currencyWarning).not.toBeNull();
-    expect(pricing.currencyWarning).toMatch(/USD/);
-    expect(pricing.currencyWarning).toMatch(/RUB/);
-  });
-
-  it("материалы сразу в двух валютах (USD и KGS) — тоже не складываются, обе валюты видны раздельно", async () => {
-    const companyName = `E2E Costing Mixed ${Date.now()}`;
-    createdCompanyNames.push(companyName);
-    const { accessToken } = await setupAuthenticatedCompany(db, httpServer, companyName, "owner");
-    const suffix = `${Date.now()}`;
-
-    const productResponse = await request(httpServer)
-      .post("/v1/products")
-      .set(...authHeader(accessToken))
-      .send({ name: `Стеганка Mixed ${suffix}`, code: `COST-MIX-${suffix}` })
-      .expect(201);
-    const product = productResponse.body as ProductResponseDto;
-
-    const fabricResponse = await request(httpServer)
-      .post("/v1/materials")
-      .set(...authHeader(accessToken))
-      .send({ name: `Плащевка Mixed ${suffix}`, type: "fabric", unit: "m" })
-      .expect(201);
-    const fabric = fabricResponse.body as MaterialResponseDto;
-
-    const trimResponse = await request(httpServer)
-      .post("/v1/materials")
-      .set(...authHeader(accessToken))
-      .send({ name: `Фурнитура Mixed ${suffix}`, type: "trim", unit: "pcs" })
-      .expect(201);
-    const trim = trimResponse.body as MaterialResponseDto;
-
-    const supplierResponse = await request(httpServer)
-      .post("/v1/suppliers")
-      .set(...authHeader(accessToken))
-      .send({ name: `Поставщик Mixed ${suffix}`, type: "fabric" })
-      .expect(201);
-    const supplier = supplierResponse.body as SupplierResponseDto;
-
-    await request(httpServer)
-      .post("/v1/purchase-orders")
-      .set(...authHeader(accessToken))
-      .send({ supplierId: supplier.id, currency: "USD", items: [{ materialId: fabric.id, quantity: 10, unitPrice: 1 }] })
+      .send({ supplierId: supplier.id, currency: "USD", items: [{ materialId: mainFabric.id, quantity: 10, unitPrice: 1 }] })
       .expect(201);
     await request(httpServer)
       .post("/v1/purchase-orders")
       .set(...authHeader(accessToken))
-      .send({ supplierId: supplier.id, currency: "KGS", items: [{ materialId: trim.id, quantity: 10, unitPrice: 5 }] })
+      .send({ supplierId: supplier.id, currency: "RUB", items: [{ materialId: lining.id, quantity: 10, unitPrice: 50 }] })
       .expect(201);
 
     const draftBomResponse = await request(httpServer)
@@ -210,8 +153,8 @@ describe("Costing — валютная безопасность себестои
       .send({
         productId: product.id,
         items: [
-          { materialId: fabric.id, quantityPerUnit: 1, wastePercent: 0 },
-          { materialId: trim.id, quantityPerUnit: 1, wastePercent: 0 },
+          { materialId: mainFabric.id, quantityPerUnit: 1, wastePercent: 0 },
+          { materialId: lining.id, quantityPerUnit: 1, wastePercent: 0 },
         ],
       })
       .expect(201);
@@ -226,19 +169,21 @@ describe("Costing — валютная безопасность себестои
       .expect(200);
     const pricing = pricingResponse.body as SpecificationPricingResponseDto;
 
-    expect(pricing.materialCostsByCurrency).toEqual(
-      expect.arrayContaining([
-        { currency: "USD", amountPerUnit: 1 },
-        { currency: "KGS", amountPerUnit: 5 },
-      ]),
-    );
+    // ГЛАВНАЯ ПРОВЕРКА: "ткань" — не единое число (внутри категории USD и
+    // RUB одновременно), и это НЕ равно 150 (1 USD + 50 RUB).
+    expect(pricing.fabricCostPerUnit).toBeNull();
     expect(pricing.actualCostPerUnit).toBeNull();
+    expect(pricing.currencyWarning).not.toBeNull();
+    expect(pricing.currencyWarning).toMatch(/ткань/);
     expect(pricing.currencyWarning).toMatch(/USD/);
-    expect(pricing.currencyWarning).toMatch(/KGS/);
+    expect(pricing.currencyWarning).toMatch(/RUB/);
   });
 
-  it("материалы и пошив в одной валюте (RUB) — итог считается одним числом, без предупреждения", async () => {
-    const companyName = `E2E Costing RUB ${Date.now()}`;
+  // Регрессия: две позиции одной категории в ОДНОЙ валюте по-прежнему дают
+  // корректную сумму — категория не считается "смешанной" просто потому что
+  // в ней больше одного материала.
+  it("ткань в RUB + подклад в RUB (одна категория, одна валюта) — сумма корректна, без предупреждения", async () => {
+    const companyName = `E2E Costing Category RUB ${Date.now()}`;
     createdCompanyNames.push(companyName);
     const { accessToken } = await setupAuthenticatedCompany(db, httpServer, companyName, "owner");
     const suffix = `${Date.now()}`;
@@ -246,27 +191,110 @@ describe("Costing — валютная безопасность себестои
     const productResponse = await request(httpServer)
       .post("/v1/products")
       .set(...authHeader(accessToken))
-      .send({ name: `Стеганка RUB ${suffix}`, code: `COST-RUB-${suffix}` })
+      .send({ name: `Стеганка Category RUB ${suffix}`, code: `COST-CATRUB-${suffix}` })
+      .expect(201);
+    const product = productResponse.body as ProductResponseDto;
+
+    const mainFabricResponse = await request(httpServer)
+      .post("/v1/materials")
+      .set(...authHeader(accessToken))
+      .send({ name: `Основная ткань RUB ${suffix}`, type: "fabric", unit: "m" })
+      .expect(201);
+    const mainFabric = mainFabricResponse.body as MaterialResponseDto;
+
+    const liningResponse = await request(httpServer)
+      .post("/v1/materials")
+      .set(...authHeader(accessToken))
+      .send({ name: `Подклад RUB ${suffix}`, type: "fabric", unit: "m" })
+      .expect(201);
+    const lining = liningResponse.body as MaterialResponseDto;
+
+    const supplierResponse = await request(httpServer)
+      .post("/v1/suppliers")
+      .set(...authHeader(accessToken))
+      .send({ name: `Поставщик Category RUB ${suffix}`, type: "fabric" })
+      .expect(201);
+    const supplier = supplierResponse.body as SupplierResponseDto;
+
+    await request(httpServer)
+      .post("/v1/purchase-orders")
+      .set(...authHeader(accessToken))
+      .send({ supplierId: supplier.id, currency: "RUB", items: [{ materialId: mainFabric.id, quantity: 10, unitPrice: 100 }] })
+      .expect(201);
+    await request(httpServer)
+      .post("/v1/purchase-orders")
+      .set(...authHeader(accessToken))
+      .send({ supplierId: supplier.id, currency: "RUB", items: [{ materialId: lining.id, quantity: 10, unitPrice: 50 }] })
+      .expect(201);
+
+    const draftBomResponse = await request(httpServer)
+      .post("/v1/boms")
+      .set(...authHeader(accessToken))
+      .send({
+        productId: product.id,
+        items: [
+          { materialId: mainFabric.id, quantityPerUnit: 1, wastePercent: 0 },
+          { materialId: lining.id, quantityPerUnit: 1, wastePercent: 0 },
+        ],
+      })
+      .expect(201);
+    await request(httpServer)
+      .post(`/v1/boms/${(draftBomResponse.body as BomResponseDto).id}/approve`)
+      .set(...authHeader(accessToken))
+      .expect(201);
+
+    const pricingResponse = await request(httpServer)
+      .get(`/v1/costing/products/${product.id}/specification-price`)
+      .set(...authHeader(accessToken))
+      .expect(200);
+    const pricing = pricingResponse.body as SpecificationPricingResponseDto;
+
+    expect(pricing.fabricCostPerUnit).toBe(150); // 100 + 50, одна валюта — сумма честная
+    expect(pricing.actualCostPerUnit).toBe(150);
+    expect(pricing.actualCostCurrency).toBe("RUB");
+    expect(pricing.currencyWarning).toBeNull();
+  });
+
+  // D: реальный сценарий стёжки — материалы и пошив в RUB, но услуга стёжки
+  // (otherProductionCost) оплачивается в KGS (владелец проекта, 2026-09-07,
+  // пример: 358 575 KGS). До этой правки обе суммы (standardSewingCost/
+  // otherProductionCost) считались жёстко в RUB — KGS-сумма молча
+  // складывалась бы с рублями.
+  it("материалы и пошив в RUB, прочие расходы (стёжка) в KGS — итог не считается одним числом", async () => {
+    const companyName = `E2E Costing Quilting KGS ${Date.now()}`;
+    createdCompanyNames.push(companyName);
+    const { accessToken } = await setupAuthenticatedCompany(db, httpServer, companyName, "owner");
+    const suffix = `${Date.now()}`;
+
+    const productResponse = await request(httpServer)
+      .post("/v1/products")
+      .set(...authHeader(accessToken))
+      .send({ name: `Стеганка Quilting ${suffix}`, code: `COST-QUILT-${suffix}` })
       .expect(201);
     const product = productResponse.body as ProductResponseDto;
 
     await request(httpServer)
       .patch(`/v1/products/${product.id}/costs`)
       .set(...authHeader(accessToken))
-      .send({ standardSewingCost: 300 })
+      .send({ standardSewingCost: 700, standardSewingCostCurrency: "RUB" })
+      .expect(200);
+    await request(httpServer)
+      .patch(`/v1/products/${product.id}/costs`)
+      .set(...authHeader(accessToken))
+      .send({ otherProductionCost: 75, otherProductionCostCurrency: "KGS" })
       .expect(200);
 
     const materialResponse = await request(httpServer)
       .post("/v1/materials")
       .set(...authHeader(accessToken))
-      .send({ name: `Плащевка RUB ${suffix}`, type: "fabric", unit: "m" })
+      .send({ name: `Плащевка Quilting ${suffix}`, type: "fabric", unit: "m" })
       .expect(201);
     const material = materialResponse.body as MaterialResponseDto;
 
     const supplierResponse = await request(httpServer)
       .post("/v1/suppliers")
       .set(...authHeader(accessToken))
-      .send({ name: `Поставщик RUB ${suffix}`, type: "fabric" })
+      .send({ name: `Поставщик Quilting ${suffix}`, type: "fabric" })
       .expect(201);
     const supplier = supplierResponse.body as SupplierResponseDto;
 
@@ -292,18 +320,11 @@ describe("Costing — валютная безопасность себестои
       .expect(200);
     const pricing = pricingResponse.body as SpecificationPricingResponseDto;
 
-    expect(pricing.actualCostPerUnit).toBe(500); // 200 (ткань) + 300 (пошив), одна валюта — считается честно
-    expect(pricing.actualCostCurrency).toBe("RUB");
-    expect(pricing.currencyWarning).toBeNull();
-    expect(pricing.specificationPricePerUnit).toBe(325); // 500 - 175 (DEFAULT_DEDUCTION)
+    // ГЛАВНАЯ ПРОВЕРКА P1/D: материалы(RUB) + пошив(RUB) + стёжка(KGS) НЕ
+    // складываются в одно число.
+    expect(pricing.actualCostPerUnit).toBeNull();
+    expect(pricing.currencyWarning).not.toBeNull();
+    expect(pricing.currencyWarning).toMatch(/RUB/);
+    expect(pricing.currencyWarning).toMatch(/KGS/);
   });
 });
-
-// Продолжение — тесты на валютную безопасность внутри одной категории
-// материалов и на собственную валюту standardSewingCost/otherProductionCost
-// (P1, hardening перед «Стеганкой») вынесены в отдельный файл
-// costing-currency-hardening.e2e.spec.ts: каждый .e2e.spec.ts поднимает свой
-// экземпляр Nest-приложения в своём beforeAll, поэтому вынос в отдельный файл
-// даёт им свой собственный счётчик ThrottlerGuard на /v1/auth/login (лимит
-// 5 запросов/60с) — держать все 6 сценариев в одном файле означало бы
-// упереться в этот лимит на последних тестах.

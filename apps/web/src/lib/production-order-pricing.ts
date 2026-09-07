@@ -27,3 +27,20 @@ export function computeProductionOrderBatchSum(order: ProductionOrderPricingShap
     return sum + Number(variant.quantity) * unitPrice;
   }, 0);
 }
+
+/**
+ * Факт приёмки суммарно по партии (P1, hardening перед «Стеганкой», владелец
+ * проекта, 2026-09-07) — единственный законный источник значения "Получено"
+ * для ОТК: план (plannedQuantity/quantity) никогда не подставляется вместо
+ * факта ("ordered ≠ received"). null означает, что факт неизвестен хотя бы по
+ * одной строке — например, заказ был принят до появления поля
+ * receivedQuantity (P0-1); в этом случае вызывающая сторона обязана честно
+ * показать "факт неизвестен", а не молча взять план.
+ */
+export function computeTotalReceivedQuantity(order: {
+  variants: Array<{ receivedQuantity: string | null }>;
+}): number | null {
+  if (order.variants.length === 0) return null;
+  if (order.variants.some((variant) => variant.receivedQuantity === null)) return null;
+  return order.variants.reduce((sum, variant) => sum + Number(variant.receivedQuantity), 0);
+}

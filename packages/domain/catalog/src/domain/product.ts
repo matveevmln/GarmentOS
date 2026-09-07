@@ -19,7 +19,14 @@ export interface Product {
   // считаются из bom_items × текущая цена материала, эти два поля — прямой
   // ввод (владелец проекта, 2026-08-03 — расчёт стоимости спецификации).
   standardSewingCost: string | null;
+  // Валюта каждой суммы — своя (P1, hardening перед «Стеганкой», владелец
+  // проекта, 2026-09-07): costing.service.ts раньше жёстко считал обе суммы
+  // в RUB, из-за чего услугу вроде стёжки (реально оплачиваемую в KGS) нельзя
+  // было завести, не смешав валюты молча (docs/PRINCIPLES.md, принцип 21).
+  // null у существующих строк без суммы — валюте просто нечего описывать.
+  standardSewingCostCurrency: string | null;
   otherProductionCost: string | null;
+  otherProductionCostCurrency: string | null;
   createdBy: string | null;
   createdAt: Date;
   updatedAt: Date;

@@ -169,6 +169,13 @@
       "when": 1788766021513,
       "tag": "0023_right_jack_power",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1788791261213,
+      "tag": "0024_military_post",
+      "breakpoints": true
     }
   ]
 }

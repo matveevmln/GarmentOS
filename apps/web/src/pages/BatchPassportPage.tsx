@@ -46,7 +46,7 @@ import { DatePicker } from "../design-system/Form/DatePicker";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../design-system/Select/Select";
 import { statusMeta } from "../lib/status";
 import { formatDate, formatMoney, formatQuantity, materialTypeLabel, unitLabel } from "../lib/format";
-import { computeProductionOrderBatchSum } from "../lib/production-order-pricing";
+import { computeProductionOrderBatchSum, computeTotalReceivedQuantity } from "../lib/production-order-pricing";
 import { cn } from "../design-system/utils";
 import { toast } from "../design-system/Toast/Toast";
 
@@ -152,7 +152,6 @@ export function BatchPassportPage() {
   // заказа. null после загрузки значит «результата ещё нет» (не ошибка).
   const [qcResult, setQcResult] = useState<QcResultResponseDto | null>(null);
   const [qcLoaded, setQcLoaded] = useState(false);
-  const [qcReceived, setQcReceived] = useState<number | undefined>(undefined);
   const [qcGood, setQcGood] = useState<number | undefined>(undefined);
   const [qcDefect, setQcDefect] = useState<number | undefined>(undefined);
   const [qcComment, setQcComment] = useState("");
@@ -200,13 +199,19 @@ export function BatchPassportPage() {
   };
 
   const submitQc = async () => {
-    if (!id || qcReceived === undefined || qcGood === undefined || qcDefect === undefined) return;
+    // Получено — ТОЛЬКО факт приёмки (P0-1: production_order_variants.received_quantity),
+    // никогда не план (P1, hardening перед «Стеганкой», владелец проекта,
+    // 2026-09-07). Форма ОТК вообще не рендерится, пока факт неизвестен (см.
+    // qcReceivedFact === null в JSX ниже) — эта проверка здесь на случай,
+    // если submitQc будет вызван до перерисовки после смены passport.
+    const receivedFact = passport ? computeTotalReceivedQuantity(passport) : null;
+    if (!id || receivedFact === null || qcGood === undefined || qcDefect === undefined) return;
     setIsSubmittingQc(true);
     try {
       const result = await apiRequest<QcResultResponseDto>(`/production-orders/${id}/qc`, {
         method: "POST",
         body: {
-          receivedQuantity: qcReceived,
+          receivedQuantity: receivedFact,
           goodQuantity: qcGood,
           defectQuantity: qcDefect,
           comment: qcComment.trim() || null,
@@ -544,6 +549,11 @@ export function BatchPassportPage() {
       ? Math.round(Number(variant.receivedQuantity))
       : null;
   };
+  // Единственный источник "Получено" для формы ОТК (P1, hardening перед
+  // «Стеганкой», владелец проекта, 2026-09-07) — сумма фактов приёмки по
+  // вариантам, никогда план. null — факт неизвестен хотя бы по одной строке
+  // (например, заказ принят до появления учёта факта, P0-1).
+  const qcReceivedFact = computeTotalReceivedQuantity(passport);
 
   // Сумма партии — по согласованной с цехом цене за единицу, посчитанная по
   // строкам (P5-2): rework-строки (переделка брака) бесплатны, остальные — по
@@ -577,16 +587,26 @@ export function BatchPassportPage() {
   const requirementWithoutPrice = requirement.filter((row) => row.totalCost === null);
 
   // Строки себестоимости — те же пять статей, что показывались и раньше;
-  // доля считается от их суммы, а не вводится как новая величина.
-  const rawCost = snapshot
-    ? [
-        { label: "Ткань", unitCost: snapshot.fabricCostPerUnit },
-        { label: "Пошив", unitCost: snapshot.sewingCostPerUnit },
-        { label: "Фурнитура", unitCost: snapshot.trimCostPerUnit },
-        { label: "Упаковка", unitCost: snapshot.packagingCostPerUnit },
-        { label: "Прочее", unitCost: snapshot.otherCostPerUnit },
-      ].filter((row) => row.unitCost > 0)
-    : [];
+  // доля считается от их суммы, а не вводится как новая величина. Строится
+  // ТОЛЬКО когда actualCostPerUnit !== null (P1, hardening перед
+  // «Стеганкой», владелец проекта, 2026-09-07) — costing.service.ts не
+  // допускает такого значения, если хоть один компонент (в т.ч. внутри одной
+  // категории материалов) в другой валюте, поэтому здесь можно безопасно
+  // считать, что fabricCostPerUnit/trimCostPerUnit/packagingCostPerUnit (они
+  // сами по себе nullable — см. specificationPricingResponseSchema) уже не
+  // null. Иначе раскладку не строим вовсе — не показываем потенциально
+  // смешанную по валюте разбивку под видом одной суммы, вместо неё ниже
+  // показывается currencyWarning + materialCostsByCurrency.
+  const rawCost =
+    snapshot && snapshot.actualCostPerUnit !== null
+      ? [
+          { label: "Ткань", unitCost: snapshot.fabricCostPerUnit },
+          { label: "Пошив", unitCost: snapshot.sewingCostPerUnit },
+          { label: "Фурнитура", unitCost: snapshot.trimCostPerUnit },
+          { label: "Упаковка", unitCost: snapshot.packagingCostPerUnit },
+          { label: "Прочее", unitCost: snapshot.otherCostPerUnit },
+        ].filter((row): row is { label: string; unitCost: number } => row.unitCost !== null && row.unitCost > 0)
+      : [];
   const costUnitTotal = rawCost.reduce((sum, row) => sum + row.unitCost, 0);
   const costRows: CostRow[] = rawCost.map((row) => ({
     label: row.label,
@@ -679,6 +699,13 @@ export function BatchPassportPage() {
           {costRows.length > 0 ? (
             <CostBreakdown
               rows={costRows}
+              // Реальная валюта снимка (P1, hardening перед «Стеганкой»,
+              // владелец проекта, 2026-09-07) — раньше currency не
+              // передавался, и CostBreakdown подставлял валюту по умолчанию
+              // ("сом"), из-за чего себестоимость в RUB подписывалась как
+              // KGS. costRows.length > 0 здесь возможно только когда
+              // actualCostCurrency гарантированно задан (см. rawCost выше).
+              currency={snapshot.actualCostCurrency ?? undefined}
               total={
                 snapshot.actualCostPerUnit !== null
                   ? {
@@ -1474,10 +1501,27 @@ export function BatchPassportPage() {
               </div>
             ) : null}
           </dl>
+        ) : qcReceivedFact === null ? (
+          // Заказ уже "Принято", но факт приёмки по вариантам неизвестен —
+          // например, партия принята до появления учёта факта (P0-1). Вводить
+          // ОТК по плану вместо факта запрещено (P1, hardening перед
+          // «Стеганкой», владелец проекта, 2026-09-07: "ordered ≠ received"),
+          // поэтому форма не показывается вовсе, а не подставляет план молча.
+          <div className="mt-4">
+            <EmptyState
+              compact
+              title="Факт приёмки для этого заказа не сохранён"
+              description="Заказ принят до появления учёта фактического количества — ввод ОТК недоступен, чтобы не подставить план вместо факта."
+            />
+          </div>
         ) : (
           <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
-            <Field label="Получено, шт">
-              <NumberInput value={qcReceived} onChange={setQcReceived} min={0} />
+            {/* Получено — только факт приёмки (P0-1), никогда не редактируется
+                вручную здесь: раньше оператор мог случайно ввести план вместо
+                факта (P1, hardening перед «Стеганкой», владелец проекта,
+                2026-09-07). */}
+            <Field label="Получено по приёмке, шт">
+              <NumberInput value={qcReceivedFact ?? undefined} onChange={() => undefined} disabled />
             </Field>
             <Field label="Годных, шт">
               <NumberInput value={qcGood} onChange={setQcGood} min={0} />
@@ -1493,7 +1537,7 @@ export function BatchPassportPage() {
                 type="button"
                 size="sm"
                 loading={isSubmittingQc}
-                disabled={qcReceived === undefined || qcGood === undefined || qcDefect === undefined}
+                disabled={qcGood === undefined || qcDefect === undefined}
                 onClick={() => void submitQc()}
               >
                 Зафиксировать результат ОТК

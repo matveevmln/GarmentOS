@@ -29,7 +29,9 @@ export interface NewProductInput {
 
 export interface ProductCostsInput {
   standardSewingCost: string | null;
+  standardSewingCostCurrency: string | null;
   otherProductionCost: string | null;
+  otherProductionCostCurrency: string | null;
 }
 
 export interface ProductRepository {

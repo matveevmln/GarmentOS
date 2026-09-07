@@ -7,10 +7,30 @@ import { CatalogService } from "../catalog/catalog.service";
 import { DATABASE_CONNECTION } from "../database/database.module";
 
 const DEFAULT_DEDUCTION = 175;
-// Пошив и «прочие расходы» договорно всегда в рублях (docs/PRINCIPLES.md,
-// принцип 21) — у product.standardSewingCost/otherProductionCost нет
-// собственного поля валюты, потому что оно не требуется бизнес-правилом.
-const SEWING_AND_OTHER_CURRENCY = "RUB";
+// Запасное значение валюты пошива/прочих расходов ТОЛЬКО для карточек модели,
+// заведённых до появления собственных полей валюты (P1, hardening перед
+// «Стеганкой», владелец проекта, 2026-09-07) — миграция 0024 проставляет то
+// же самое значение существующим строкам явно, здесь оно нужно только как
+// дополнительная подстраховка на случай null. Новые значения ВСЕГДА несут
+// свою явную валюту (product.standardSewingCostCurrency/otherProductionCostCurrency).
+const LEGACY_SEWING_AND_OTHER_CURRENCY = "RUB";
+
+type MaterialCategory = "fabric" | "trim" | "packaging";
+
+// Результат сведения одной категории материалов (ткань/фурнитура/упаковка) к
+// одному числу (P1, hardening перед «Стеганкой», владелец проекта,
+// 2026-09-07): раньше материалы одной категории суммировались в одно число
+// независимо от валюты закупки каждого — если в BOM окажется, например, два
+// разных материала-"ткани", один в USD и один в RUB, получившееся число не
+// имеет экономического смысла ("150 USD/RUB"). total/currency — null, если
+// внутри категории встретилось больше одной ИЗВЕСТНОЙ валюты закупки;
+// позиции без указанной валюты (закупки, заведённые до появления этого поля)
+// не считаются конфликтом и по-прежнему складываются в сумму как раньше.
+interface CategoryCostResult {
+  total: number | null;
+  currency: string | null;
+  mixedCurrencies: string[];
+}
 
 // «Расчёт стоимости спецификации» (владелец проекта, 2026-08-03): фактическая
 // себестоимость (ткань/фурнитура/упаковка из утверждённого BOM × последняя
@@ -48,15 +68,25 @@ export class CostingService {
       });
     }
 
-    let fabricCostPerUnit = 0;
-    let trimCostPerUnit = 0;
-    let packagingCostPerUnit = 0;
     const materialsWithoutPriceHistory: string[] = [];
+    // По категории — своя карта currency→сумма (P1, hardening перед
+    // «Стеганкой»): позиции без указанной валюты закупки складываются в
+    // отдельный "неизвестный" накопитель категории — они не создают
+    // конфликта (как и раньше), но и не помогают определить валюту категории.
+    const categoryCostsByCurrency: Record<MaterialCategory, Map<string, number>> = {
+      fabric: new Map(),
+      trim: new Map(),
+      packaging: new Map(),
+    };
+    const categoryCostsUnknownCurrency: Record<MaterialCategory, number> = { fabric: 0, trim: 0, packaging: 0 };
     // Материалы по валюте закупки (P0-2, владелец проекта, 2026-09-07) —
     // тот же принцип, что уже применялся к потребности материалов на партию
     // (BatchPassportPage.tsx, requirementTotals): суммы в разных валютах
     // никогда не складываются в одно число, только отдельно по каждой
-    // валюте (docs/PRINCIPLES.md, принцип 21).
+    // валюте (docs/PRINCIPLES.md, принцип 21). Эта карта — по ВСЕМ материалам
+    // сразу (не по категориям), используется только для показа разбивки
+    // "Материалы, X за ед." в UI — независимо от того, посчиталась ли
+    // отдельная категория одним числом.
     const materialCostsByCurrency = new Map<string, number>();
 
     for (const item of bom.items) {
@@ -69,49 +99,99 @@ export class CostingService {
       }
       const cost = consumption * lastPurchase.unitPrice;
       const materialType = await this.findMaterialType(item.materialId);
-      if (materialType === "fabric") fabricCostPerUnit += cost;
-      else if (materialType === "packaging") packagingCostPerUnit += cost;
-      else trimCostPerUnit += cost;
+      const category: MaterialCategory =
+        materialType === "fabric" ? "fabric" : materialType === "packaging" ? "packaging" : "trim";
 
-      // Валюта закупки материала — nullable у закупок, заведённых до
-      // появления этого поля (см. purchase_orders.currency); такую сумму
-      // нельзя честно отнести ни к одной валюте, поэтому не участвует ни в
-      // одном ведре — тот же принцип, что materialsWithoutPriceHistory.
       if (lastPurchase.currency !== null) {
+        const byCurrency = categoryCostsByCurrency[category];
+        byCurrency.set(lastPurchase.currency, (byCurrency.get(lastPurchase.currency) ?? 0) + cost);
         materialCostsByCurrency.set(lastPurchase.currency, (materialCostsByCurrency.get(lastPurchase.currency) ?? 0) + cost);
+      } else {
+        // Валюта закупки материала — nullable у закупок, заведённых до
+        // появления этого поля (см. purchase_orders.currency); такую сумму
+        // нельзя честно отнести ни к одной валюте, но и запрещать расчёт
+        // категории из-за одной старой закупки без валюты избыточно — сумма
+        // просто прибавляется к категории отдельно от валютного учёта, тот
+        // же принцип терпимости, что уже был здесь раньше.
+        categoryCostsUnknownCurrency[category] += cost;
       }
     }
 
+    // Категория "чиста" (может быть выражена одним числом), если среди её
+    // материалов не больше одной ИЗВЕСТНОЙ валюты закупки. Две и более
+    // известных валюты внутри одной категории — total/currency становятся
+    // null (P1: "150 USD/RUB" не имеет смысла), это отдельно от общего
+    // мультивалютного предупреждения ниже.
+    const resolveCategory = (category: MaterialCategory): CategoryCostResult => {
+      const byCurrency = categoryCostsByCurrency[category];
+      const distinctCurrencies = [...byCurrency.keys()];
+      if (distinctCurrencies.length > 1) {
+        return { total: null, currency: null, mixedCurrencies: distinctCurrencies };
+      }
+      const currency = distinctCurrencies[0] ?? null;
+      const knownTotal = currency !== null ? (byCurrency.get(currency) ?? 0) : 0;
+      return { total: knownTotal + categoryCostsUnknownCurrency[category], currency, mixedCurrencies: [] };
+    };
+
+    const fabric = resolveCategory("fabric");
+    const trim = resolveCategory("trim");
+    const packaging = resolveCategory("packaging");
+
     const sewingCostPerUnit = product.standardSewingCost !== null ? Number(product.standardSewingCost) : 0;
     const otherCostPerUnit = product.otherProductionCost !== null ? Number(product.otherProductionCost) : 0;
+    // Валюта каждой суммы — своя (P1, hardening перед «Стеганкой», владелец
+    // проекта, 2026-09-07): раньше обе жёстко считались в RUB, из-за чего
+    // услугу вроде стёжки (реально в KGS) нельзя было завести, не смешав
+    // валюты молча. LEGACY_SEWING_AND_OTHER_CURRENCY — подстраховка только
+    // для карточек, заведённых до появления этого поля (миграция 0024 уже
+    // проставляет им явное значение).
+    const sewingCostCurrency = product.standardSewingCostCurrency ?? LEGACY_SEWING_AND_OTHER_CURRENCY;
+    const otherCostCurrency = product.otherProductionCostCurrency ?? LEGACY_SEWING_AND_OTHER_CURRENCY;
 
-    // Итог считается ОДНИМ числом только тогда, когда это арифметически
-    // честно: материалы куплены ровно в одной валюте, и она совпадает с
-    // валютой пошива/прочих расходов (RUB). Во всех остальных случаях —
-    // материалы в другой валюте, материалы в нескольких валютах сразу —
-    // единого числа не существует, показывать его нельзя (задание P0-2
-    // прямо запрещает "число, которое выглядит как единая себестоимость,
-    // если компоненты в разных валютах").
-    const distinctMaterialCurrencies = [...materialCostsByCurrency.keys()];
-    const hasSewingOrOtherCost = sewingCostPerUnit > 0 || otherCostPerUnit > 0;
     let actualCostPerUnit: number | null = null;
     let actualCostCurrency: string | null = null;
     let currencyWarning: string | null = null;
 
-    if (distinctMaterialCurrencies.length > 1) {
-      currencyWarning = `Итоговая себестоимость не рассчитана: материалы куплены в разных валютах (${distinctMaterialCurrencies.join(", ")}).`;
-    } else if (distinctMaterialCurrencies.length === 1 && distinctMaterialCurrencies[0] !== SEWING_AND_OTHER_CURRENCY && hasSewingOrOtherCost) {
-      currencyWarning = `Итоговая себестоимость не рассчитана: материалы — ${distinctMaterialCurrencies[0]}, пошив и прочие расходы — ${SEWING_AND_OTHER_CURRENCY}.`;
+    const mixedCategoryLabels: string[] = [];
+    if (fabric.mixedCurrencies.length > 0) mixedCategoryLabels.push(`ткань — ${fabric.mixedCurrencies.join(", ")}`);
+    if (trim.mixedCurrencies.length > 0) mixedCategoryLabels.push(`фурнитура — ${trim.mixedCurrencies.join(", ")}`);
+    if (packaging.mixedCurrencies.length > 0) mixedCategoryLabels.push(`упаковка — ${packaging.mixedCurrencies.join(", ")}`);
+
+    if (mixedCategoryLabels.length > 0) {
+      // Внутри одной категории материалов больше одной известной валюты —
+      // сама категория (не только итог) не может быть выражена одним числом,
+      // поэтому дальше даже не сравниваем валюты между категориями.
+      currencyWarning = `Итоговая себестоимость не рассчитана: внутри одной категории материалов несколько валют закупки (${mixedCategoryLabels.join("; ")}).`;
     } else {
-      actualCostPerUnit = fabricCostPerUnit + trimCostPerUnit + packagingCostPerUnit + sewingCostPerUnit + otherCostPerUnit;
-      actualCostCurrency = SEWING_AND_OTHER_CURRENCY;
+      // Итог считается ОДНИМ числом только тогда, когда это арифметически
+      // честно: у всех ненулевых компонентов (категории материалов, пошив,
+      // прочие расходы) — ровно одна и та же валюта. Иначе единого числа не
+      // существует, показывать его нельзя (принцип 21: "число, которое
+      // выглядит как единая себестоимость, если компоненты в разных
+      // валютах" — запрещено).
+      const componentCurrencies = new Set<string>();
+      for (const category of [fabric, trim, packaging]) {
+        if (category.total !== null && category.total !== 0 && category.currency !== null) {
+          componentCurrencies.add(category.currency);
+        }
+      }
+      if (sewingCostPerUnit > 0) componentCurrencies.add(sewingCostCurrency);
+      if (otherCostPerUnit > 0) componentCurrencies.add(otherCostCurrency);
+
+      if (componentCurrencies.size > 1) {
+        currencyWarning = `Итоговая себестоимость не рассчитана: компоненты в разных валютах (${[...componentCurrencies].join(", ")}).`;
+      } else {
+        actualCostPerUnit = (fabric.total ?? 0) + (trim.total ?? 0) + (packaging.total ?? 0) + sewingCostPerUnit + otherCostPerUnit;
+        const [onlyCurrency] = componentCurrencies;
+        actualCostCurrency = onlyCurrency ?? LEGACY_SEWING_AND_OTHER_CURRENCY;
+      }
     }
     const specificationPricePerUnit = actualCostPerUnit !== null ? Math.max(0, actualCostPerUnit - deduction) : null;
 
     return {
-      fabricCostPerUnit,
-      trimCostPerUnit,
-      packagingCostPerUnit,
+      fabricCostPerUnit: fabric.total,
+      trimCostPerUnit: trim.total,
+      packagingCostPerUnit: packaging.total,
       sewingCostPerUnit,
       otherCostPerUnit,
       materialCostsByCurrency: [...materialCostsByCurrency.entries()].map(([currency, amountPerUnit]) => ({

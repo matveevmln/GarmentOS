@@ -58,9 +58,14 @@ export const specificationPricingRequestSchema = z.object({
 export type SpecificationPricingRequestDto = z.infer<typeof specificationPricingRequestSchema>;
 
 export const specificationPricingResponseSchema = z.object({
-  fabricCostPerUnit: z.number(),
-  trimCostPerUnit: z.number(),
-  packagingCostPerUnit: z.number(),
+  // null — внутри этой категории материалов больше одной известной валюты
+  // закупки, категория не может быть выражена одним числом (P1, hardening
+  // перед «Стеганкой», владелец проекта, 2026-09-07: "150 USD/RUB" не имеет
+  // смысла), costing.service.ts возвращает такую категорию отдельно по
+  // валютам через materialCostsByCurrency, а не одним искажённым числом.
+  fabricCostPerUnit: z.number().nullable(),
+  trimCostPerUnit: z.number().nullable(),
+  packagingCostPerUnit: z.number().nullable(),
   sewingCostPerUnit: z.number(),
   otherCostPerUnit: z.number(),
   materialCostsByCurrency: z.array(materialCostByCurrencySchema),

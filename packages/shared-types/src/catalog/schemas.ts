@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { purchaseCurrencySchema } from "../procurement/schemas";
 
 // Контракты модуля Catalog (docs/ARCHITECTURE.md, раздел 3; CLAUDE.md,
 // глоссарий: collection/product/sku).
@@ -47,9 +48,14 @@ export const productResponseSchema = z.object({
   status: z.enum(["draft", "active", "discontinued"]),
   techPackUrl: z.string().nullable(),
   // Плановые составляющие себестоимости, не выводимые из BOM
-  // (docs/PRODUCT_MODEL_ARCHITECTURE.md, раздел 6) — прямой ввод.
+  // (docs/PRODUCT_MODEL_ARCHITECTURE.md, раздел 6) — прямой ввод. У каждой
+  // суммы своя валюта (P1, hardening перед «Стеганкой», владелец проекта,
+  // 2026-09-07) — не выводится из типа расхода, чтобы услугу вроде стёжки
+  // (реально в KGS) нельзя было молча посчитать как RUB.
   standardSewingCost: z.string().nullable(),
+  standardSewingCostCurrency: purchaseCurrencySchema.nullable(),
   otherProductionCost: z.string().nullable(),
+  otherProductionCostCurrency: purchaseCurrencySchema.nullable(),
   createdBy: z.string().uuid().nullable(),
   createdAt: z.date(),
   updatedAt: z.date(),
@@ -61,7 +67,9 @@ export type ProductResponseDto = z.infer<typeof productResponseSchema>;
 // модели (владелец проекта, 2026-08-03 — «Расчёт стоимости спецификации»).
 export const updateProductCostsSchema = z.object({
   standardSewingCost: z.number().min(0).optional(),
+  standardSewingCostCurrency: purchaseCurrencySchema.optional(),
   otherProductionCost: z.number().min(0).optional(),
+  otherProductionCostCurrency: purchaseCurrencySchema.optional(),
 });
 export type UpdateProductCostsDto = z.infer<typeof updateProductCostsSchema>;
 

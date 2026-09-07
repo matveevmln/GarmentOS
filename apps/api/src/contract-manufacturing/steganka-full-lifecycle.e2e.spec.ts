@@ -38,6 +38,7 @@ import {
   workshops,
 } from "@garmentos/db-schema";
 import type {
+  BatchPassportResponseDto,
   BomResponseDto,
   CuttingFactResponseDto,
   CuttingOrderResponseDto,
@@ -361,6 +362,23 @@ describe("Стеганка — полный жизненный цикл перв
       .from(stockItems)
       .where(and(eq(stockItems.warehouseId, finishedGoodsWarehouse.id), eq(stockItems.productVariantId, colorVariants["Графит"].id)));
     expect(Number(graphiteStock?.quantityOnHand)).toBe(1330); // факт, не план 1334
+
+    // Паспорт партии отдаёт тот же факт по вариантам, что и ответ /receive
+    // (P1, hardening перед «Стеганкой», владелец проекта, 2026-09-07) — это
+    // ровно те данные, из которых веб-клиент (BatchPassportPage.tsx,
+    // computeTotalReceivedQuantity) автоматически подставляет "Получено" в
+    // форму ОТК, никогда не беря план (4000) вместо факта (3993).
+    const passportAfterReceive = (
+      await request(httpServer)
+        .get(`/v1/production-orders/${order.id}/passport`)
+        .set(...authHeader(accessToken))
+        .expect(200)
+    ).body as BatchPassportResponseDto;
+    const passportReceivedTotal = passportAfterReceive.variants.reduce(
+      (sum, v) => sum + Number(v.receivedQuantity ?? 0),
+      0,
+    );
+    expect(passportReceivedTotal).toBe(3993);
 
     // --- 8. ОТК ---
     const qcResponse = await request(httpServer)

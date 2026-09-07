@@ -237,9 +237,13 @@ export type MaterialCostByCurrencyDto = z.infer<typeof materialCostByCurrencySch
 
 export const productionOrderCostSnapshotSchema = z.object({
   capturedAt: z.string(),
-  fabricCostPerUnit: z.number(),
-  trimCostPerUnit: z.number(),
-  packagingCostPerUnit: z.number(),
+  // null — категория материалов купила больше одной известной валюты, не
+  // может быть выражена одним числом (P1, hardening перед «Стеганкой»,
+  // владелец проекта, 2026-09-07) — см. reporting/schemas.ts,
+  // specificationPricingResponseSchema, тот же принцип.
+  fabricCostPerUnit: z.number().nullable(),
+  trimCostPerUnit: z.number().nullable(),
+  packagingCostPerUnit: z.number().nullable(),
   sewingCostPerUnit: z.number(),
   otherCostPerUnit: z.number(),
   // Материалы по валюте закупки (P0-2) — необязательно: у снимков,

@@ -62,7 +62,16 @@ export const products = pgTable(
     // производственные расходы за единицу (владелец проекта, 2026-08-03 —
     // расчёт стоимости спецификации).
     standardSewingCost: numeric("standard_sewing_cost", { precision: 14, scale: 2 }),
+    // Валюта каждой суммы — своя, не выводится из типа расхода (P1, hardening
+    // перед первой партией «Стеганка», владелец проекта, 2026-09-07): раньше
+    // costing.service.ts жёстко считал обе суммы в RUB, из-за чего услугу
+    // стёжки (реально в KGS) невозможно было завести, не смешав валюты молча.
+    // Для уже существующих строк (заведённых до этого поля) миграция
+    // проставляет "RUB" — это ровно то значение, которое раньше подразумевалось
+    // жёстко в коде, поэтому подстановка не меняет уже посчитанные партии.
+    standardSewingCostCurrency: text("standard_sewing_cost_currency"),
     otherProductionCost: numeric("other_production_cost", { precision: 14, scale: 2 }),
+    otherProductionCostCurrency: text("other_production_cost_currency"),
     createdBy: uuid("created_by").references(() => users.id),
     ...auditColumns,
     ...softDelete,
