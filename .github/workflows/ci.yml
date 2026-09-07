@@ -35,6 +35,15 @@ jobs:
           --health-retries 5
     env:
       DATABASE_URL: postgres://garmentos:garmentos@localhost:5432/garmentos_test
+      # apps/api/src/auth/token.service.ts бросает исключение, если секрет не
+      # задан (TokenService.signAccessToken/verifyAccessToken) — до этого
+      # изменения CI не задавал их вовсе, поэтому любой /v1/auth/login падал
+      # с 500 (JWT_ACCESS_SECRET is not set), что ломало почти все e2e-тесты,
+      # использующие setupAuthenticatedCompany. Значения — только для
+      # ephemeral CI-прогона, не совпадают ни с одним реальным окружением
+      # (см. .env.example).
+      JWT_ACCESS_SECRET: ci-test-access-secret
+      JWT_REFRESH_SECRET: ci-test-refresh-secret
     steps:
       - uses: actions/checkout@v4
 
