@@ -5,7 +5,7 @@
   "description": "GarmentOS API — модульный монолит (см. docs/ARCHITECTURE.md)",
   "type": "commonjs",
   "scripts": {
-    "build": "nest build",
+    "build": "pnpm --filter \"@garmentos/api...\" --filter \"!@garmentos/api\" run build && nest build",
     "dev": "nest start --watch",
     "start": "node dist/main.js",
     "lint": "eslint \"src/**/*.ts\"",
