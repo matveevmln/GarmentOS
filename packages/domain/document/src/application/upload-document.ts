@@ -13,6 +13,11 @@ const CONTENT_TYPES: Record<string, string> = {
   jpg: "image/jpeg",
   jpeg: "image/jpeg",
   png: "image/png",
+  // P6 (Document Intelligence, владелец проекта, 2026-09-06): текст,
+  // вставленный оператором вручную (инвойс/пакинг-лист без файла), тоже
+  // должен пройти через тот же Document Engine, а не создавать отдельное
+  // хранилище — сохраняется как обычный документ с расширением .txt.
+  txt: "text/plain",
 };
 
 export interface UploadDocumentInput {

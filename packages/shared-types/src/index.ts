@@ -16,3 +16,4 @@ export * from "./document";
 export * from "./reporting";
 export * from "./cutting";
 export * from "./qc";
+export * from "./document-intelligence";

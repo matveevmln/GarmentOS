@@ -53,6 +53,9 @@ import { ProductionRequestService } from "./production-request.service";
   ],
   // ProductionOrderOrchestrationService нужен TelegramModule (сценарий
   // "текст → подтверждение → заказ") — переиспользуется, не дублируется.
-  exports: [ProductionOrderOrchestrationService],
+  // AI_CLASSIFIER экспортирован дополнительно для DocumentIntelligenceModule
+  // (P6, 2026-09-06) — тот же классификатор/конфигурация Anthropic, не
+  // второй AI-клиент (document-intelligence.module.ts).
+  exports: [ProductionOrderOrchestrationService, AI_CLASSIFIER],
 })
 export class AiProductionAssistantModule {}

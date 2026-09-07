@@ -8,6 +8,7 @@ import {
   IconBatch,
   IconClose,
   IconHome,
+  IconInbox,
   IconMaterial,
   IconMenu,
   IconModel,
@@ -58,6 +59,9 @@ const NAV_SUPPLY: NavItem[] = [
   { to: "/purchase-orders", label: "Закупки", icon: IconPurchase },
   { to: "/warehouses", label: "Склады", icon: IconWarehouse },
   { to: "/suppliers", label: "Поставщики", icon: IconSupplier },
+  // P6 (Document Intelligence, владелец проекта, 2026-09-06) — импорт данных
+  // из инвойса/пакинг-листа вместо повторного ручного ввода.
+  { to: "/document-import", label: "Импорт документов", icon: IconInbox },
 ];
 
 const NAV_OFFICE: NavItem[] = [{ to: "/documents", label: "Документы", icon: IconDocument }];

@@ -501,7 +501,11 @@ describe("Вертикальный сценарий Итерации 7 (e2e): т
       .field("docType", "invoice")
       .field("entityType", "production_order")
       .field("entityId", order.id)
-      .attach("file", Buffer.from("не документ", "utf8"), "note.txt")
+      // .txt теперь поддерживается (P6, Document Intelligence — вставленный
+      // текст сохраняется как обычный документ с этим расширением), поэтому
+      // для проверки "неподдерживаемый тип файла" здесь нужно расширение вне
+      // CONTENT_TYPES (packages/domain/document/src/application/upload-document.ts).
+      .attach("file", Buffer.from("не документ", "utf8"), "note.exe")
       .expect(400);
   });
 });

@@ -23,6 +23,7 @@ import { DocumentModule } from "./document/document.module";
 import { ReportingModule } from "./reporting/reporting.module";
 import { CuttingModule } from "./cutting/cutting.module";
 import { QcModule } from "./qc/qc.module";
+import { DocumentIntelligenceModule } from "./document-intelligence/document-intelligence.module";
 
 // Presentation-слой (docs/ARCHITECTURE.md, п.2). Доменные модули
 // (packages/domain/*) подключаются сюда по мере реализации итераций
@@ -50,6 +51,7 @@ import { QcModule } from "./qc/qc.module";
     ReportingModule,
     CuttingModule,
     QcModule,
+    DocumentIntelligenceModule,
   ],
   providers: [
     { provide: APP_PIPE, useClass: ZodValidationPipe },

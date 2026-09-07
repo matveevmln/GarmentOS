@@ -9,11 +9,15 @@ import {
   type AttachDocumentResult,
   type StoredFile,
   type UploadDocumentInput,
+  type DocumentDerivativeEntity,
   type DocumentDerivativeRepository,
   type DocumentEntity,
+  type DocumentLink,
   type DocumentLinkRepository,
   type DocumentRenderAdapter,
   type DocumentRepository,
+  type NewDocumentDerivativeInput,
+  type NewDocumentLinkInput,
   type SpecificationDocumentData,
   type StorageAdapter,
 } from "@garmentos/domain-document";
@@ -115,5 +119,29 @@ export class DocumentService {
     if (!document) return null;
     const file = await this.storage.download(document.fileUrl);
     return file ? { document, file } : null;
+  }
+
+  // Ниже — три тонких метода для DocumentIntelligenceModule (P6, владелец
+  // проекта, 2026-09-06). Тот же Document Engine, что и generateSpecification/
+  // upload выше: ни новой таблицы, ни нового репозитория, просто доступ к уже
+  // внедрённым document_derivatives/document_links оттуда, где раньше они
+  // были приватными деталями генерации документов.
+
+  // document_derivatives — insert-only (у DocumentDerivativeRepository нет
+  // update): повторное извлечение создаёт новую запись, не переписывая
+  // прежнюю (Immutable Original, docs/PRINCIPLES.md принцип 19).
+  async createDerivative(input: NewDocumentDerivativeInput): Promise<DocumentDerivativeEntity> {
+    return this.documentDerivatives.create(input);
+  }
+
+  async findLatestDerivative(documentId: string, type: string): Promise<DocumentDerivativeEntity | null> {
+    return this.documentDerivatives.findLatestByDocumentId(documentId, type);
+  }
+
+  // Добавляет связь к уже существующему документу (материал, закупка) —
+  // отдельно от uploadDocument/generateSpecification, которые создают
+  // документ и его первую связь одним шагом.
+  async link(input: NewDocumentLinkInput): Promise<DocumentLink> {
+    return this.documentLinks.create(input);
   }
 }
