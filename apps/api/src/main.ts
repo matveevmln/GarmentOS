@@ -18,6 +18,13 @@ import { AppModule } from "./app.module";
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule);
 
+  // Railway (и любой оркестратор) шлёт SIGTERM перед остановкой контейнера
+  // при redeploy/restart — без этого вызова Nest не подписывается на
+  // системные сигналы и не вызывает onModuleDestroy/onApplicationShutdown
+  // у провайдеров (в т.ч. закрытие соединения с Postgres), процесс просто
+  // обрывается на полпути.
+  app.enableShutdownHooks();
+
   // apps/web (Итерация 11) — браузерный SPA на отдельном origin (Vite dev
   // server/Vercel), аутентификация через Bearer-токен в заголовке, не
   // cookie — credentials не нужны, поэтому withCredentials/credentials:true
