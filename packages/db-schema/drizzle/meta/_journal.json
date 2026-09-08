@@ -176,6 +176,13 @@
       "when": 1788791261213,
       "tag": "0024_military_post",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1788899983135,
+      "tag": "0025_blushing_betty_ross",
+      "breakpoints": true
     }
   ]
 }

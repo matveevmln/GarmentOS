@@ -1,0 +1,2 @@
+ALTER TABLE "companies" ADD COLUMN "bootstrap_key" text;--> statement-breakpoint
+CREATE UNIQUE INDEX "companies_bootstrap_key_idx" ON "companies" USING btree ("bootstrap_key") WHERE "companies"."bootstrap_key" IS NOT NULL;

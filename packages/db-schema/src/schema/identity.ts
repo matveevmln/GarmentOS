@@ -1,25 +1,42 @@
 import { boolean, type AnyPgColumn, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 import { auditColumns, id } from "./_shared";
 
 // docs/DATABASE_SCHEMA.md, раздел 4 (Identity & Access).
 // Корень мультитенантности — companies. Ни одна другая таблица в схеме
 // не существует без ссылки (прямой или косвенной) на companies.id.
 
-export const companies = pgTable("companies", {
-  id: id(),
-  name: text("name").notNull(),
-  legalName: text("legal_name"),
-  inn: text("inn"),
-  timezone: text("timezone").notNull().default("UTC"),
-  // KGS по умолчанию (docs/PRINCIPLES.md, принцип 21) — валюта учёта
-  // компании; спецификации для цехов всегда в RUB независимо от этого поля.
-  defaultCurrency: text("default_currency").notNull().default("KGS"),
-  // Кто подписывает спецификации со стороны компании (Заказчик) — ФИО,
-  // выводится в блок подписи документа (docs/PRINCIPLES.md, Document
-  // Template Engine); nullable, пока не задано в настройках компании.
-  signerName: text("signer_name"),
-  ...auditColumns,
-});
+export const companies = pgTable(
+  "companies",
+  {
+    id: id(),
+    name: text("name").notNull(),
+    legalName: text("legal_name"),
+    inn: text("inn"),
+    timezone: text("timezone").notNull().default("UTC"),
+    // KGS по умолчанию (docs/PRINCIPLES.md, принцип 21) — валюта учёта
+    // компании; спецификации для цехов всегда в RUB независимо от этого поля.
+    defaultCurrency: text("default_currency").notNull().default("KGS"),
+    // Кто подписывает спецификации со стороны компании (Заказчик) — ФИО,
+    // выводится в блок подписи документа (docs/PRINCIPLES.md, Document
+    // Template Engine); nullable, пока не задано в настройках компании.
+    signerName: text("signer_name"),
+    // Идентификатор initial-бутстрапа (bootstrap-company.script.ts) — NULL
+    // для любой компании, созданной обычным путём (CompanyRepository.create,
+    // будущий multi-company onboarding). Уникален только среди NOT NULL
+    // значений (partial index ниже) — не превращается в глобальное
+    // ограничение на компании вообще, только защищает конкретный
+    // bootstrap-сценарий от повторного/параллельного создания дубля
+    // (docs/AUTH_ARCHITECTURE.md, раздел 9; аудит идемпотентности bootstrap).
+    bootstrapKey: text("bootstrap_key"),
+    ...auditColumns,
+  },
+  (table) => [
+    uniqueIndex("companies_bootstrap_key_idx")
+      .on(table.bootstrapKey)
+      .where(sql`${table.bootstrapKey} IS NOT NULL`),
+  ],
+);
 
 export const users = pgTable(
   "users",

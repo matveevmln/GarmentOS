@@ -16,7 +16,10 @@ export interface ManageUserRoleDeps {
 // Роль ищется сначала как кастомная для этой компании, затем как глобальная
 // предустановленная (docs/AUTH_ARCHITECTURE.md, раздел 4) — компания может
 // переопределить предустановленную роль своей с тем же кодом.
-async function resolveRole(deps: ManageUserRoleDeps, companyId: string, roleCode: string) {
+// Экспортирована дополнительно для bootstrap-company.ts (resume-логика
+// должна резолвить тот же "owner", что и обычный assignRoleToUser ниже —
+// не дублировать эту логику отдельной копией).
+export async function resolveRole(deps: ManageUserRoleDeps, companyId: string, roleCode: string) {
   const custom = await deps.roles.findByCode(companyId, roleCode);
   if (custom) return custom;
 

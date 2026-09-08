@@ -43,6 +43,12 @@ export {
   type ManageUserRoleDeps,
   type ManageUserRoleInput,
 } from "./application/manage-user-roles";
+export {
+  bootstrapCompany,
+  type BootstrapCompanyDeps,
+  type BootstrapCompanyInput,
+  type BootstrapCompanyResult,
+} from "./application/bootstrap-company";
 
 export { DrizzleCompanyRepository, DrizzleUserRepository } from "./infrastructure/drizzle-identity-repository";
 export {

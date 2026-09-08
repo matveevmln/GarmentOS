@@ -4,6 +4,7 @@ import {
   roles,
   userRoles,
   rolePermissions,
+  users,
   type DbOrTx,
 } from "@garmentos/db-schema";
 import { and, eq, isNull } from "drizzle-orm";
@@ -87,6 +88,16 @@ export class DrizzleUserRoleRepository implements UserRoleRepository {
 
   async revoke(userId: string, roleId: string): Promise<void> {
     await this.db.delete(userRoles).where(and(eq(userRoles.userId, userId), eq(userRoles.roleId, roleId)));
+  }
+
+  async findUserIdsWithRole(companyId: string, roleId: string): Promise<string[]> {
+    const rows = await this.db
+      .select({ userId: userRoles.userId })
+      .from(userRoles)
+      .innerJoin(users, eq(users.id, userRoles.userId))
+      .where(and(eq(users.companyId, companyId), eq(userRoles.roleId, roleId)));
+
+    return rows.map((row) => row.userId);
   }
 
   async listPermissionCodesForUser(userId: string): Promise<string[]> {

@@ -1,5 +1,5 @@
 import { companies, users, type DbOrTx } from "@garmentos/db-schema";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNotNull } from "drizzle-orm";
 import type { Company } from "../domain/company";
 import type { User } from "../domain/user";
 import type { CompanyRepository, NewCompanyInput, NewUserInput, UserRepository } from "../application/ports";
@@ -45,6 +45,26 @@ export class DrizzleCompanyRepository implements CompanyRepository {
 
   async findById(id: string): Promise<Company | null> {
     const [row] = await this.db.select().from(companies).where(eq(companies.id, id)).limit(1);
+    return row ? toCompany(row) : null;
+  }
+
+  // ON CONFLICT DO NOTHING — единственный способ закрыть race condition на
+  // уровне БД, а не приложения: два одновременных вызова с одним и тем же
+  // bootstrapKey всегда сериализуются Postgres на уровне partial unique
+  // index (companies_bootstrap_key_idx); ровно один получает строку через
+  // RETURNING, второй получает null и должен пойти по resume-пути
+  // (bootstrap-company.ts), а не молча создавать вторую компанию.
+  async createIfAbsentByBootstrapKey(bootstrapKey: string, input: NewCompanyInput): Promise<Company | null> {
+    const [row] = await this.db
+      .insert(companies)
+      .values({ ...input, bootstrapKey })
+      .onConflictDoNothing({ target: companies.bootstrapKey, where: isNotNull(companies.bootstrapKey) })
+      .returning();
+    return row ? toCompany(row) : null;
+  }
+
+  async findByBootstrapKey(bootstrapKey: string): Promise<Company | null> {
+    const [row] = await this.db.select().from(companies).where(eq(companies.bootstrapKey, bootstrapKey)).limit(1);
     return row ? toCompany(row) : null;
   }
 }

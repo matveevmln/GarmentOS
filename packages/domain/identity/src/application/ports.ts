@@ -18,6 +18,15 @@ export interface CompanyRepository {
   // Реквизиты компании (legalName/inn) нужны для заполнения шапки
   // сгенерированной спецификации (Итерация 7, Document Template Engine).
   findById(id: string): Promise<Company | null>;
+  // Только для bootstrap-company (см. application/bootstrap-company.ts) —
+  // атомарная вставка с DB-level защитой от дубля через partial unique index
+  // на bootstrap_key. Возвращает null, если компания с этим ключом уже
+  // существует (конфликт), а не бросает ошибку — вызывающий код должен сам
+  // решить, что делать при конфликте (см. bootstrap-company.ts). Обычный
+  // create() выше не участвует и не меняется — multi-company onboarding
+  // будущего использует его, оставляя bootstrapKey не заданным (NULL).
+  createIfAbsentByBootstrapKey(bootstrapKey: string, input: NewCompanyInput): Promise<Company | null>;
+  findByBootstrapKey(bootstrapKey: string): Promise<Company | null>;
 }
 
 export interface NewUserInput {
@@ -56,6 +65,11 @@ export interface RoleRepository {
 export interface UserRoleRepository {
   assign(userId: string, roleId: string): Promise<void>;
   revoke(userId: string, roleId: string): Promise<void>;
+  // Только для bootstrap-company resume-логики: кто в этой компании уже
+  // держит указанную роль (обычно "owner") — чтобы отличить "bootstrap уже
+  // завершён этим же владельцем" от "владелец другой" (см.
+  // application/bootstrap-company.ts). Не используется обычным RBAC-путём.
+  findUserIdsWithRole(companyId: string, roleId: string): Promise<string[]>;
   // Агрегирует permissions всех ролей пользователя одним запросом
   // (user_roles → role_permissions → permissions) — источник истины для
   // PermissionsGuard (кэшируется на уровне apps/api).
