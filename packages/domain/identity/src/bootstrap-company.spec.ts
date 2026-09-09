@@ -127,8 +127,8 @@ describe("domain/identity — bootstrapCompany", () => {
       const company = await companies.findByBootstrapKey(key);
       expect(company).toBeNull();
 
-      const owner = await users.findByEmailGlobal("owner@pilot.example");
-      expect(owner).toBeNull();
+      const owners = await users.findByEmailGlobal("owner@pilot.example");
+      expect(owners).toHaveLength(0);
     });
   });
 

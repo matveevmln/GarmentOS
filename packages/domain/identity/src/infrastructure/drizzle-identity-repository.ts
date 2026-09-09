@@ -87,9 +87,13 @@ export class DrizzleUserRepository implements UserRepository {
     return row ? toUser(row) : null;
   }
 
-  async findByEmailGlobal(email: string): Promise<User | null> {
-    const [row] = await this.db.select().from(users).where(eq(users.email, email)).limit(1);
-    return row ? toUser(row) : null;
+  // limit(2), а не limit(1) и не выборка целиком: вызывающему коду нужно
+  // отличить только три случая — ни одного, ровно один, больше одного
+  // (authenticate-user.ts). Второй строки достаточно, чтобы обнаружить
+  // коллизию email между компаниями, а Postgres останавливает чтение раньше.
+  async findByEmailGlobal(email: string): Promise<User[]> {
+    const rows = await this.db.select().from(users).where(eq(users.email, email)).limit(2);
+    return rows.map(toUser);
   }
 
   async findByIdGlobal(id: string): Promise<User | null> {

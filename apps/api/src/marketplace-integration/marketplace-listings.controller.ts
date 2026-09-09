@@ -36,8 +36,9 @@ export class MarketplaceListingsController {
   async updatePrice(
     @Param("id") id: string,
     @Body() body: UpdateListingPriceDto,
+    @CurrentUser() currentUser: AuthenticatedRequestUser,
   ): Promise<MarketplaceListingResponseDto> {
-    const listing = await this.marketplaceIntegrationService.updateListingPrice(id, body);
+    const listing = await this.marketplaceIntegrationService.updateListingPrice(currentUser.companyId, id, body);
     return marketplaceListingResponseSchema.parse(listing);
   }
 
@@ -46,8 +47,9 @@ export class MarketplaceListingsController {
   async updateStock(
     @Param("id") id: string,
     @Body() body: UpdateListingStockDto,
+    @CurrentUser() currentUser: AuthenticatedRequestUser,
   ): Promise<MarketplaceListingResponseDto> {
-    const listing = await this.marketplaceIntegrationService.updateListingStock(id, body);
+    const listing = await this.marketplaceIntegrationService.updateListingStock(currentUser.companyId, id, body);
     return marketplaceListingResponseSchema.parse(listing);
   }
 }

@@ -5,6 +5,7 @@ loadEnv({ path: "../../.env" });
 import "reflect-metadata";
 import { parseArgs } from "node:util";
 import { NestFactory } from "@nestjs/core";
+import { createUserSchema } from "@garmentos/shared-types";
 import { AppModule } from "./app.module";
 import { IdentityService } from "./identity/identity.service";
 
@@ -61,6 +62,18 @@ async function run(): Promise<void> {
         "--owner-email <email> --owner-full-name <имя> --owner-password <пароль> " +
         "[--inn <инн>] [--signer-name <ФИО>]",
     );
+    process.exitCode = 1;
+    return;
+  }
+
+  // CLI-путь не проходит через createUserSchema (POST /users) — та же
+  // проверка минимальной длины пароля здесь применяется явно, чтобы первый
+  // владелец production-компании не мог быть создан со слабым паролем
+  // (Step 4A, задача 4). Не хардкодим "8" отдельным числом — берём то же
+  // правило, что уже используется на HTTP-границе, единым источником истины.
+  const passwordCheck = createUserSchema.shape.password.safeParse(ownerPassword);
+  if (!passwordCheck.success) {
+    console.error(`Пароль владельца не прошёл проверку: ${passwordCheck.error.issues[0]?.message ?? "некорректный пароль"}`);
     process.exitCode = 1;
     return;
   }

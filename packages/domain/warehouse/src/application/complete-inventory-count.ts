@@ -3,6 +3,7 @@ import type { InventoryCount } from "../domain/inventory-count";
 import type { InventoryCountRepository } from "./ports";
 
 export interface CompleteInventoryCountInput {
+  companyId: string;
   inventoryCountId: string;
 }
 
@@ -14,7 +15,8 @@ export async function completeInventoryCount(
   deps: CompleteInventoryCountDeps,
   input: CompleteInventoryCountInput,
 ): Promise<InventoryCount> {
-  const count = await deps.inventoryCounts.findById(input.inventoryCountId);
+  // Поиск строго в пределах компании — id приходит из URL (Step 4A.2).
+  const count = await deps.inventoryCounts.findById(input.companyId, input.inventoryCountId);
   if (!count) {
     throw new DomainError(`Инвентаризация ${input.inventoryCountId} не найдена`, "INVENTORY_COUNT_NOT_FOUND");
   }

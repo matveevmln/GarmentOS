@@ -70,21 +70,33 @@ export class MarketplaceIntegrationService {
     );
   }
 
-  async updateListingPrice(listingId: string, input: UpdateListingPriceDto): Promise<MarketplaceListing> {
-    return updateListingPrice({ marketplaceListings: this.marketplaceListings }, { listingId, ...input });
+  // companyId — из аутентифицированного контекста (@CurrentUser), не из
+  // тела/URL: карточка и журнал синхронизации принадлежат компании через
+  // личный кабинет маркетплейса (Step 4A.2).
+  async updateListingPrice(
+    companyId: string,
+    listingId: string,
+    input: UpdateListingPriceDto,
+  ): Promise<MarketplaceListing> {
+    return updateListingPrice({ marketplaceListings: this.marketplaceListings }, { companyId, listingId, ...input });
   }
 
-  async updateListingStock(listingId: string, input: UpdateListingStockDto): Promise<MarketplaceListing> {
-    return updateListingStock({ marketplaceListings: this.marketplaceListings }, { listingId, ...input });
+  async updateListingStock(
+    companyId: string,
+    listingId: string,
+    input: UpdateListingStockDto,
+  ): Promise<MarketplaceListing> {
+    return updateListingStock({ marketplaceListings: this.marketplaceListings }, { companyId, listingId, ...input });
   }
 
-  async recordSyncLog(input: RecordSyncLogDto): Promise<MarketplaceSyncLog> {
+  async recordSyncLog(companyId: string, input: RecordSyncLogDto): Promise<MarketplaceSyncLog> {
     // startedAt/finishedAt — ISO-строки в DTO (Swagger/zod v4 не представляют
     // Date в JSON Schema), домен ожидает Date — приведение на границе.
     return recordSyncLog(
-      { syncLogs: this.syncLogs },
+      { syncLogs: this.syncLogs, marketplaceAccounts: this.marketplaceAccounts },
       {
         ...input,
+        companyId,
         startedAt: new Date(input.startedAt),
         finishedAt: input.finishedAt ? new Date(input.finishedAt) : undefined,
       },

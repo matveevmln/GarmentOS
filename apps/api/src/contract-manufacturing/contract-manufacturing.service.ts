@@ -115,7 +115,7 @@ export class ContractManufacturingService {
     companyId: string,
     input: CreateProductionOrderFromQuantityDto,
   ): Promise<ProductionOrder> {
-    const variants = await this.catalogService.listProductVariants(input.productId);
+    const variants = await this.catalogService.listProductVariants(companyId, input.productId);
     if (variants.length === 0) {
       throw new CatalogDomainError(`У модели ${input.productId} нет ни одного SKU`, "PRODUCT_HAS_NO_VARIANTS");
     }
@@ -185,9 +185,10 @@ export class ContractManufacturingService {
   // сервере, чтобы показанные числа совпадали с сохранёнными: округление по
   // методу наибольших остатков должно быть ровно одним и тем же.
   async previewProductionOrderVariants(
+    companyId: string,
     input: PreviewProductionOrderVariantsDto,
   ): Promise<PreviewProductionOrderVariantsResponseDto> {
-    const variants = await this.catalogService.listProductVariants(input.productId);
+    const variants = await this.catalogService.listProductVariants(companyId, input.productId);
     if (variants.length === 0) {
       throw new CatalogDomainError(`У модели ${input.productId} нет ни одного SKU`, "PRODUCT_HAS_NO_VARIANTS");
     }

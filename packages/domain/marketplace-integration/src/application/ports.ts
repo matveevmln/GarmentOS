@@ -28,9 +28,13 @@ export interface NewMarketplaceListingInput {
   currentStockReported: number | null;
 }
 
+// У marketplace_listings нет своей колонки company_id — принадлежность
+// компании выражена через marketplace_accounts.company_id. companyId в
+// findById обязателен и применяется join'ом к аккаунтам: без него цену и
+// остаток чужой карточки можно было менять по одному UUID (Step 4A.2).
 export interface MarketplaceListingRepository {
   create(input: NewMarketplaceListingInput): Promise<MarketplaceListing>;
-  findById(id: string): Promise<MarketplaceListing | null>;
+  findById(companyId: string, id: string): Promise<MarketplaceListing | null>;
   findByAccountAndExternalSkuId(marketplaceAccountId: string, externalSkuId: string): Promise<MarketplaceListing | null>;
   updatePrice(id: string, currentPrice: number): Promise<MarketplaceListing>;
   updateStock(id: string, currentStockReported: number): Promise<MarketplaceListing>;

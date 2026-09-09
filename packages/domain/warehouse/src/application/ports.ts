@@ -93,9 +93,13 @@ export interface ShipmentRepository {
   updateStatus(id: string, status: ShipmentStatus, deliveredAt: Date | null): Promise<Shipment>;
 }
 
+// У inventory_counts нет своей колонки company_id — принадлежность компании
+// выражена через warehouses.company_id. companyId в findById обязателен и
+// применяется join'ом к warehouses: без него инвентаризацию чужой компании
+// можно было дополнить и завершить, зная только её UUID (Step 4A.2).
 export interface InventoryCountRepository {
   create(warehouseId: string, performedBy: string | null): Promise<InventoryCount>;
-  findById(id: string): Promise<InventoryCount | null>;
+  findById(companyId: string, id: string): Promise<InventoryCount | null>;
   addItem(
     inventoryCountId: string,
     productVariantId: string,

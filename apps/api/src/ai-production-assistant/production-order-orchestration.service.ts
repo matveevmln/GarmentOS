@@ -135,7 +135,7 @@ export class ProductionOrderOrchestrationService {
 
     const variants: Array<{ productVariantId: string; quantity: number }> = [];
     for (const item of parsed.items) {
-      const variant = await this.catalogService.findProductVariant(product.id, item.size, item.colorName);
+      const variant = await this.catalogService.findProductVariant(companyId, product.id, item.size, item.colorName);
       if (!variant) {
         throw new ProductionRequestOrchestrationError(
           `SKU не найден: модель "${parsed.modelName}", цвет "${item.colorName}", размер "${item.size}"`,
@@ -222,7 +222,7 @@ export class ProductionOrderOrchestrationService {
     for (const item of parsed.items) {
       let skuFound = false;
       if (product) {
-        const variant = await this.catalogService.findProductVariant(product.id, item.size, item.colorName);
+        const variant = await this.catalogService.findProductVariant(companyId, product.id, item.size, item.colorName);
         skuFound = !!variant;
         if (!skuFound) warnings.push(`SKU не найден: цвет "${item.colorName}", размер "${item.size}"`);
       }
@@ -499,7 +499,7 @@ export class ProductionOrderOrchestrationService {
     let totalQuantity = 0;
     let totalSum = 0;
     for (const variant of order.variants) {
-      const productVariant = await this.catalogService.findProductVariantById(variant.productVariantId);
+      const productVariant = await this.catalogService.findProductVariantById(companyId, variant.productVariantId);
       if (!productVariant) continue;
       const { quantity, unitPrice, sum } = computeSpecificationLinePricing(order, variant);
       totalQuantity += quantity;

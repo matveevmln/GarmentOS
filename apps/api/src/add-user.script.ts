@@ -5,6 +5,7 @@ loadEnv({ path: "../../.env" });
 import "reflect-metadata";
 import { parseArgs } from "node:util";
 import { NestFactory } from "@nestjs/core";
+import { createUserSchema } from "@garmentos/shared-types";
 import { AppModule } from "./app.module";
 import { IdentityService } from "./identity/identity.service";
 
@@ -41,6 +42,16 @@ async function run(): Promise<void> {
       "Использование: add-user --company-id <uuid> --email <email> " +
         "--full-name <имя> --password <пароль> --role <owner|director|accountant|procurement_manager|marketplace_manager|warehouse_keeper|viewer>",
     );
+    process.exitCode = 1;
+    return;
+  }
+
+  // CLI-путь не проходит через createUserSchema (POST /users) — та же
+  // проверка минимальной длины пароля здесь применяется явно (Step 4A,
+  // задача 4), тем же правилом, что уже используется на HTTP-границе.
+  const passwordCheck = createUserSchema.shape.password.safeParse(password);
+  if (!passwordCheck.success) {
+    console.error(`Пароль не прошёл проверку: ${passwordCheck.error.issues[0]?.message ?? "некорректный пароль"}`);
     process.exitCode = 1;
     return;
   }

@@ -370,7 +370,7 @@ async function run(): Promise<void> {
       const variants: ProductRecord["variants"] = [];
       for (const size of sizes) {
         for (const color of colors) {
-          const variant = await catalog.createProductVariant({
+          const variant = await catalog.createProductVariant(company.id, {
             productId: product.id,
             size,
             color,
@@ -673,7 +673,7 @@ async function run(): Promise<void> {
       bump("marketplaceListings");
     }
     const syncStart = daysAgo(0);
-    await marketplace.recordSyncLog({
+    await marketplace.recordSyncLog(company.id, {
       marketplaceAccountId: wbAccount.id,
       syncType: "full_sync",
       status: "success",

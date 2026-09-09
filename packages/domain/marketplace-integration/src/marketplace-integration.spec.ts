@@ -57,8 +57,8 @@ async function seedVariant(tx: DbOrTx) {
   );
   const productVariants = new DrizzleProductVariantRepository(tx);
   const variant = await createProductVariant(
-    { productVariants },
-    { productId: product.id, size: "M", color: "Петроль", skuCode: "HOODIE-PETROL-M" },
+    { productVariants, products },
+    { companyId: company.id, productId: product.id, size: "M", color: "Петроль", skuCode: "HOODIE-PETROL-M" },
   );
   return { company, variant };
 }
@@ -102,16 +102,29 @@ describe("domain/marketplace-integration", () => {
         ),
       ).rejects.toThrow(DomainError);
 
-      const afterPriceUpdate = await updateListingPrice({ marketplaceListings }, { listingId: listing.id, currentPrice: 2790 });
+      const afterPriceUpdate = await updateListingPrice(
+        { marketplaceListings },
+        { companyId: company.id, listingId: listing.id, currentPrice: 2790 },
+      );
       expect(afterPriceUpdate.currentPrice).toBe("2790.00");
 
-      const afterStockUpdate = await updateListingStock({ marketplaceListings }, { listingId: listing.id, currentStockReported: 45 });
+      const afterStockUpdate = await updateListingStock(
+        { marketplaceListings },
+        { companyId: company.id, listingId: listing.id, currentStockReported: 45 },
+      );
       expect(afterStockUpdate.currentStockReported).toBe("45.000");
 
       const syncLogs = new DrizzleSyncLogRepository(tx);
       const log = await recordSyncLog(
-        { syncLogs },
-        { marketplaceAccountId: account.id, syncType: "stock_price_sync", status: "success", startedAt: new Date(), finishedAt: new Date() },
+        { syncLogs, marketplaceAccounts },
+        {
+          companyId: company.id,
+          marketplaceAccountId: account.id,
+          syncType: "stock_price_sync",
+          status: "success",
+          startedAt: new Date(),
+          finishedAt: new Date(),
+        },
       );
       expect(log.status).toBe("success");
 

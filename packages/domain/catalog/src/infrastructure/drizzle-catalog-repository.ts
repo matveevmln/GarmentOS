@@ -173,29 +173,48 @@ export class DrizzleProductVariantRepository implements ProductVariantRepository
     return row ? toProductVariant(row) : null;
   }
 
-  async findByProductSizeColor(productId: string, size: string, color: string): Promise<ProductVariant | null> {
+  // join к products во всех трёх методах ниже — единственный способ
+  // ограничить выборку компанией: собственной колонки company_id у
+  // product_variants нет (см. комментарий у порта).
+  async findByProductSizeColor(
+    companyId: string,
+    productId: string,
+    size: string,
+    color: string,
+  ): Promise<ProductVariant | null> {
     const [row] = await this.db
-      .select()
+      .select({ variant: productVariants })
       .from(productVariants)
+      .innerJoin(products, eq(products.id, productVariants.productId))
       .where(
         and(
+          eq(products.companyId, companyId),
           eq(productVariants.productId, productId),
           eq(productVariants.size, size),
           eq(productVariants.color, color),
         ),
       )
       .limit(1);
-    return row ? toProductVariant(row) : null;
+    return row ? toProductVariant(row.variant) : null;
   }
 
-  async findById(id: string): Promise<ProductVariant | null> {
-    const [row] = await this.db.select().from(productVariants).where(eq(productVariants.id, id)).limit(1);
-    return row ? toProductVariant(row) : null;
+  async findById(companyId: string, id: string): Promise<ProductVariant | null> {
+    const [row] = await this.db
+      .select({ variant: productVariants })
+      .from(productVariants)
+      .innerJoin(products, eq(products.id, productVariants.productId))
+      .where(and(eq(products.companyId, companyId), eq(productVariants.id, id)))
+      .limit(1);
+    return row ? toProductVariant(row.variant) : null;
   }
 
-  async listByProduct(productId: string): Promise<ProductVariant[]> {
-    const rows = await this.db.select().from(productVariants).where(eq(productVariants.productId, productId));
-    return rows.map(toProductVariant);
+  async listByProduct(companyId: string, productId: string): Promise<ProductVariant[]> {
+    const rows = await this.db
+      .select({ variant: productVariants })
+      .from(productVariants)
+      .innerJoin(products, eq(products.id, productVariants.productId))
+      .where(and(eq(products.companyId, companyId), eq(productVariants.productId, productId)));
+    return rows.map((row) => toProductVariant(row.variant));
   }
 }
 

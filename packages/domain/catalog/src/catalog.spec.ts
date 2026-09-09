@@ -67,8 +67,8 @@ describe("domain/catalog", () => {
 
       const productVariants = new DrizzleProductVariantRepository(tx);
       const variant = await createProductVariant(
-        { productVariants },
-        { productId: product.id, size: "M", color: "Петроль", skuCode: "HOODIE-PETROL-M-PETROL" },
+        { productVariants, products },
+        { companyId: company.id, productId: product.id, size: "M", color: "Петроль", skuCode: "HOODIE-PETROL-M-PETROL" },
       );
       expect(variant.productId).toBe(product.id);
 
@@ -83,8 +83,8 @@ describe("domain/catalog", () => {
       // Дубликат (размер, цвет) для той же модели запрещён.
       await expect(
         createProductVariant(
-          { productVariants },
-          { productId: product.id, size: "M", color: "Петроль", skuCode: "ДРУГОЙ-КОД" },
+          { productVariants, products },
+          { companyId: company.id, productId: product.id, size: "M", color: "Петроль", skuCode: "ДРУГОЙ-КОД" },
         ),
       ).rejects.toThrow(/уже есть SKU/);
 
@@ -95,8 +95,8 @@ describe("domain/catalog", () => {
       );
       await expect(
         createProductVariant(
-          { productVariants },
-          { productId: otherProduct.id, size: "L", color: "Чёрный", skuCode: "HOODIE-PETROL-M-PETROL" },
+          { productVariants, products },
+          { companyId: company.id, productId: otherProduct.id, size: "L", color: "Чёрный", skuCode: "HOODIE-PETROL-M-PETROL" },
         ),
       ).rejects.toThrow(/SKU с кодом/);
     });

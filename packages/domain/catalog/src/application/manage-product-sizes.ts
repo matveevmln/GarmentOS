@@ -88,7 +88,7 @@ export async function addProductColor(
   let created = 0;
   let skipped = 0;
   for (const size of sizes) {
-    const existing = await deps.productVariants.findByProductSizeColor(input.productId, size.size, color);
+    const existing = await deps.productVariants.findByProductSizeColor(input.companyId, input.productId, size.size, color);
     if (existing) {
       skipped += 1;
       continue;

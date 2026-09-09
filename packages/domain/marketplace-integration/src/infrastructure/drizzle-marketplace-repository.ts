@@ -130,9 +130,16 @@ export class DrizzleMarketplaceListingRepository implements MarketplaceListingRe
     return toMarketplaceListing(row);
   }
 
-  async findById(id: string): Promise<MarketplaceListing | null> {
-    const [row] = await this.db.select().from(marketplaceListings).where(eq(marketplaceListings.id, id)).limit(1);
-    return row ? toMarketplaceListing(row) : null;
+  // join к marketplace_accounts — единственный способ ограничить выборку
+  // компанией: собственной колонки company_id у карточки нет (см. порт).
+  async findById(companyId: string, id: string): Promise<MarketplaceListing | null> {
+    const [joined] = await this.db
+      .select({ listing: marketplaceListings })
+      .from(marketplaceListings)
+      .innerJoin(marketplaceAccounts, eq(marketplaceAccounts.id, marketplaceListings.marketplaceAccountId))
+      .where(and(eq(marketplaceAccounts.companyId, companyId), eq(marketplaceListings.id, id)))
+      .limit(1);
+    return joined ? toMarketplaceListing(joined.listing) : null;
   }
 
   async findByAccountAndExternalSkuId(marketplaceAccountId: string, externalSkuId: string): Promise<MarketplaceListing | null> {

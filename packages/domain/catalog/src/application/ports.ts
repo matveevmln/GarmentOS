@@ -67,13 +67,24 @@ export interface ProductSizeRepository {
   replaceForProduct(productId: string, sizes: ProductSizeDraft[]): Promise<ProductSize[]>;
 }
 
+// У product_variants нет собственной колонки company_id — принадлежность
+// компании выражена через products.company_id (docs/DATABASE_SCHEMA.md,
+// раздел 5). Поэтому companyId здесь не фильтр по колонке, а обязательный
+// параметр, который реализация обязана применить join'ом к products: без
+// него любой SKU читался и менялся бы по одному лишь UUID, в том числе из
+// чужой компании (найдено аудитом Step 4A.2).
 export interface ProductVariantRepository {
   create(input: NewProductVariantInput): Promise<ProductVariant>;
+  // Единственный намеренно глобальный поиск: код SKU уникален во всей
+  // системе (product_variants_sku_idx — глобальный уникальный индекс), и
+  // проверка занятости кода при создании обязана видеть чужие коды тоже,
+  // иначе инвариант не выполняется. Наружу (в контроллеры) результат этого
+  // метода не отдаётся — используется только внутри createProductVariant.
   findBySkuCode(skuCode: string): Promise<ProductVariant | null>;
-  findByProductSizeColor(productId: string, size: string, color: string): Promise<ProductVariant | null>;
+  findByProductSizeColor(companyId: string, productId: string, size: string, color: string): Promise<ProductVariant | null>;
   // Заказ пошива хранит только productVariantId — нужен обратный резолв
   // size/color для заполнения строк спецификации (Итерация 7, Document
   // Template Engine).
-  findById(id: string): Promise<ProductVariant | null>;
-  listByProduct(productId: string): Promise<ProductVariant[]>;
+  findById(companyId: string, id: string): Promise<ProductVariant | null>;
+  listByProduct(companyId: string, productId: string): Promise<ProductVariant[]>;
 }

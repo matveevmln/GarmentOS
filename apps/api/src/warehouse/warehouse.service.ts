@@ -253,21 +253,34 @@ export class WarehouseService {
     return markShipmentDelivered({ shipments: this.shipments }, { companyId, shipmentId });
   }
 
-  async createInventoryCount(input: CreateInventoryCountDto): Promise<InventoryCount> {
-    return createInventoryCount({ inventoryCounts: this.inventoryCounts }, input);
+  // companyId во всех трёх методах — из аутентифицированного контекста
+  // (@CurrentUser), не из тела/URL: инвентаризация принадлежит компании
+  // через свой склад (Step 4A.2).
+  async createInventoryCount(companyId: string, input: CreateInventoryCountDto): Promise<InventoryCount> {
+    return createInventoryCount(
+      { inventoryCounts: this.inventoryCounts, warehouses: this.warehouses },
+      { ...input, companyId },
+    );
   }
 
   async recordInventoryCountItem(
+    companyId: string,
     inventoryCountId: string,
     input: RecordInventoryCountItemDto,
   ): Promise<InventoryCount> {
     return recordInventoryCountItem(
       { inventoryCounts: this.inventoryCounts, stock: this.stock },
-      { inventoryCountId, productVariantId: input.productVariantId, actualQuantity: input.actualQuantity, createdBy: input.createdBy },
+      {
+        companyId,
+        inventoryCountId,
+        productVariantId: input.productVariantId,
+        actualQuantity: input.actualQuantity,
+        createdBy: input.createdBy,
+      },
     );
   }
 
-  async completeInventoryCount(inventoryCountId: string): Promise<InventoryCount> {
-    return completeInventoryCount({ inventoryCounts: this.inventoryCounts }, { inventoryCountId });
+  async completeInventoryCount(companyId: string, inventoryCountId: string): Promise<InventoryCount> {
+    return completeInventoryCount({ inventoryCounts: this.inventoryCounts }, { companyId, inventoryCountId });
   }
 }

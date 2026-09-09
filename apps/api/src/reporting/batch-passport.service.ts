@@ -42,7 +42,7 @@ export class BatchPassportService {
     const [product, workshop, variants, documents, invoiceRows] = await Promise.all([
       this.catalogService.findProductById(companyId, order.productId),
       this.contractManufacturingService.findWorkshopById(companyId, order.workshopId),
-      this.catalogService.listProductVariants(order.productId),
+      this.catalogService.listProductVariants(companyId, order.productId),
       this.documentService.listForEntity(companyId, "production_order", order.id),
       this.db
         .select({ id: invoicesTable.id, status: invoicesTable.status, amount: invoicesTable.amount, dueDate: invoicesTable.dueDate })

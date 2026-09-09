@@ -3,6 +3,7 @@ import type { InventoryCount } from "../domain/inventory-count";
 import type { InventoryCountRepository, StockRepository } from "./ports";
 
 export interface RecordInventoryCountItemInput {
+  companyId: string;
   inventoryCountId: string;
   productVariantId: string;
   actualQuantity: number;
@@ -25,7 +26,9 @@ export async function recordInventoryCountItem(
   deps: RecordInventoryCountItemDeps,
   input: RecordInventoryCountItemInput,
 ): Promise<InventoryCount> {
-  const count = await deps.inventoryCounts.findById(input.inventoryCountId);
+  // Поиск строго в пределах компании: id приходит из URL, и без companyId
+  // позицию можно было бы записать в чужую инвентаризацию (Step 4A.2).
+  const count = await deps.inventoryCounts.findById(input.companyId, input.inventoryCountId);
   if (!count) {
     throw new DomainError(`Инвентаризация ${input.inventoryCountId} не найдена`, "INVENTORY_COUNT_NOT_FOUND");
   }

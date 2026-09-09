@@ -75,8 +75,11 @@ export class CatalogService {
     return createProduct({ products: this.products }, { ...input, companyId });
   }
 
-  async createProductVariant(input: CreateProductVariantDto): Promise<ProductVariant> {
-    return createProductVariant({ productVariants: this.productVariants }, input);
+  async createProductVariant(companyId: string, input: CreateProductVariantDto): Promise<ProductVariant> {
+    return createProductVariant(
+      { productVariants: this.productVariants, products: this.products },
+      { ...input, companyId },
+    );
   }
 
   async findProductById(companyId: string, id: string): Promise<Product | null> {
@@ -95,16 +98,24 @@ export class CatalogService {
     return this.products.listByCompany(companyId);
   }
 
-  async findProductVariant(productId: string, size: string, color: string): Promise<ProductVariant | null> {
-    return this.productVariants.findByProductSizeColor(productId, size, color);
+  // companyId во всех трёх методах — обязательный: SKU принадлежит компании
+  // через свою модель (products.company_id), и без этого параметра запрос по
+  // одному UUID вернул бы чужой SKU (Step 4A.2).
+  async findProductVariant(
+    companyId: string,
+    productId: string,
+    size: string,
+    color: string,
+  ): Promise<ProductVariant | null> {
+    return this.productVariants.findByProductSizeColor(companyId, productId, size, color);
   }
 
-  async listProductVariants(productId: string): Promise<ProductVariant[]> {
-    return this.productVariants.listByProduct(productId);
+  async listProductVariants(companyId: string, productId: string): Promise<ProductVariant[]> {
+    return this.productVariants.listByProduct(companyId, productId);
   }
 
-  async findProductVariantById(id: string): Promise<ProductVariant | null> {
-    return this.productVariants.findById(id);
+  async findProductVariantById(companyId: string, id: string): Promise<ProductVariant | null> {
+    return this.productVariants.findById(companyId, id);
   }
 
   async findSimilarProductNames(companyId: string, name: string, limit = 3): Promise<string[]> {

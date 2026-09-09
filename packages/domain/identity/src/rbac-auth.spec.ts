@@ -82,6 +82,84 @@ describe("domain/identity — RBAC/Auth (Итерация 5)", () => {
     });
   });
 
+  // Коллизия email между компаниями (Step 4A.2): email уникален только внутри
+  // компании, поэтому один и тот же адрес может быть заведён в двух. Логин не
+  // имеет права выбрать тенант произвольно — отклоняем, но так, чтобы ответ
+  // ничем не отличался от обычного "неверный email или пароль".
+  it("email в двух компаниях: логин отклоняется и с верным, и с неверным паролем — одинаковой ошибкой", async () => {
+    await runInRolledBackTransaction(async (tx) => {
+      const companies = new DrizzleCompanyRepository(tx);
+      const usersRepo = new DrizzleUserRepository(tx);
+
+      const sharedEmail = `shared-${randomUUID()}@example.com`;
+      const companyA = await createCompany({ companies }, { name: "ООО Первая" });
+      const companyB = await createCompany({ companies }, { name: "ООО Вторая" });
+      await createUser(
+        { users: usersRepo },
+        { companyId: companyA.id, email: sharedEmail, passwordHash: "password-a", fullName: "Пользователь А" },
+      );
+      await createUser(
+        { users: usersRepo },
+        { companyId: companyB.id, email: sharedEmail, passwordHash: "password-b", fullName: "Пользователь Б" },
+      );
+
+      // D. Верный пароль одной из компаний — всё равно отказ: тенант неоднозначен.
+      const withCorrectPassword = await authenticateUser(
+        { users: usersRepo, passwordVerifier: plainTextVerifier },
+        { email: sharedEmail, password: "password-a" },
+      ).catch((error: unknown) => error);
+      expect(withCorrectPassword).toBeInstanceOf(DomainError);
+
+      // E. Неверный пароль — тот же отказ.
+      const withWrongPassword = await authenticateUser(
+        { users: usersRepo, passwordVerifier: plainTextVerifier },
+        { email: sharedEmail, password: "не-тот-пароль" },
+      ).catch((error: unknown) => error);
+      expect(withWrongPassword).toBeInstanceOf(DomainError);
+
+      // F. Ответ не раскрывает существование второго тенанта: и код, и текст
+      // совпадают с обычной ошибкой для несуществующего email.
+      const forUnknownEmail = await authenticateUser(
+        { users: usersRepo, passwordVerifier: plainTextVerifier },
+        { email: `nobody-${randomUUID()}@example.com`, password: "anything" },
+      ).catch((error: unknown) => error);
+
+      const codeOf = (error: unknown): string => (error as DomainError).code;
+      const messageOf = (error: unknown): string => (error as DomainError).message;
+      expect(codeOf(withCorrectPassword)).toBe("INVALID_CREDENTIALS");
+      expect(codeOf(withCorrectPassword)).toBe(codeOf(forUnknownEmail));
+      expect(codeOf(withWrongPassword)).toBe(codeOf(forUnknownEmail));
+      expect(messageOf(withCorrectPassword)).toBe(messageOf(forUnknownEmail));
+      expect(messageOf(withWrongPassword)).toBe(messageOf(forUnknownEmail));
+    });
+  });
+
+  it("тот же email в одной компании продолжает пускать после удаления коллизии из второй", async () => {
+    await runInRolledBackTransaction(async (tx) => {
+      const companies = new DrizzleCompanyRepository(tx);
+      const usersRepo = new DrizzleUserRepository(tx);
+
+      // B/C: пока адрес существует ровно в одной компании — обычное поведение,
+      // отказ по коллизии не должен задевать нормальный однокомпанийный логин.
+      const email = `single-${randomUUID()}@example.com`;
+      const company = await createCompany({ companies }, { name: "ООО Единственная" });
+      await createUser(
+        { users: usersRepo },
+        { companyId: company.id, email, passwordHash: "correct-password", fullName: "Владелец" },
+      );
+
+      const authenticated = await authenticateUser(
+        { users: usersRepo, passwordVerifier: plainTextVerifier },
+        { email, password: "correct-password" },
+      );
+      expect(authenticated.companyId).toBe(company.id);
+
+      await expect(
+        authenticateUser({ users: usersRepo, passwordVerifier: plainTextVerifier }, { email, password: "wrong" }),
+      ).rejects.toThrow(/Неверный email или пароль/);
+    });
+  });
+
   it("назначает предустановленную глобальную роль пользователю и агрегирует её permissions", async () => {
     await runInRolledBackTransaction(async (tx) => {
       const companies = new DrizzleCompanyRepository(tx);

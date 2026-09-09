@@ -79,7 +79,7 @@ export class CuttingService {
 
     const results = await Promise.all(
       order.results.map(async (result) => {
-        const variant = await this.catalogService.findProductVariantById(result.productVariantId);
+        const variant = await this.catalogService.findProductVariantById(companyId, result.productVariantId);
         return {
           productVariantId: result.productVariantId,
           size: variant?.size ?? "",

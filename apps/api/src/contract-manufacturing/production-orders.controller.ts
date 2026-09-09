@@ -48,8 +48,12 @@ export class ProductionOrdersController {
   @Post("preview-variants")
   async previewVariants(
     @Body() body: PreviewProductionOrderVariantsDto,
+    @CurrentUser() currentUser: AuthenticatedRequestUser,
   ): Promise<PreviewProductionOrderVariantsResponseDto> {
-    const preview = await this.contractManufacturingService.previewProductionOrderVariants(body);
+    const preview = await this.contractManufacturingService.previewProductionOrderVariants(
+      currentUser.companyId,
+      body,
+    );
     return previewProductionOrderVariantsResponseSchema.parse(preview);
   }
 

@@ -1,5 +1,5 @@
-import { inventoryCounts, inventoryCountItems, type DbOrTx } from "@garmentos/db-schema";
-import { eq } from "drizzle-orm";
+import { inventoryCounts, inventoryCountItems, warehouses, type DbOrTx } from "@garmentos/db-schema";
+import { and, eq } from "drizzle-orm";
 import type { InventoryCount, InventoryCountItem, InventoryCountStatus } from "../domain/inventory-count";
 import type { InventoryCountRepository } from "../application/ports";
 
@@ -41,8 +41,16 @@ export class DrizzleInventoryCountRepository implements InventoryCountRepository
     return toInventoryCount(row, []);
   }
 
-  async findById(id: string): Promise<InventoryCount | null> {
-    const [row] = await this.db.select().from(inventoryCounts).where(eq(inventoryCounts.id, id)).limit(1);
+  // join к warehouses — единственный способ ограничить выборку компанией:
+  // собственной колонки company_id у inventory_counts нет (см. порт).
+  async findById(companyId: string, id: string): Promise<InventoryCount | null> {
+    const [joined] = await this.db
+      .select({ count: inventoryCounts })
+      .from(inventoryCounts)
+      .innerJoin(warehouses, eq(warehouses.id, inventoryCounts.warehouseId))
+      .where(and(eq(warehouses.companyId, companyId), eq(inventoryCounts.id, id)))
+      .limit(1);
+    const row = joined?.count;
     if (!row) return null;
     const itemRows = await this.db.select().from(inventoryCountItems).where(eq(inventoryCountItems.inventoryCountId, row.id));
     return toInventoryCount(row, itemRows);

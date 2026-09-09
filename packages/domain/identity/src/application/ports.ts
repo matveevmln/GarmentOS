@@ -44,7 +44,14 @@ export interface UserRepository {
   // успешного логина): по email — authenticate-user.ts; по id — после
   // ротации refresh-токена (в токене есть userId, companyId — только у
   // самого пользователя, не в refresh_tokens).
-  findByEmailGlobal(email: string): Promise<User | null>;
+  //
+  // Возвращает СПИСОК, а не одну запись: email уникален только в пределах
+  // компании (users_company_email_idx на (company_id, email)), поэтому один
+  // и тот же адрес технически может существовать в двух компаниях. Раньше
+  // здесь был `Promise<User | null>` с LIMIT 1 — то есть при коллизии
+  // логин молча выбирал произвольного пользователя и пускал не в тот
+  // тенант. Три случая (0 / 1 / больше одного) различает authenticate-user.ts.
+  findByEmailGlobal(email: string): Promise<User[]>;
   findByIdGlobal(id: string): Promise<User | null>;
   findById(companyId: string, id: string): Promise<User | null>;
 }

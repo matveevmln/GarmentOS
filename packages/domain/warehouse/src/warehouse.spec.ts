@@ -60,8 +60,8 @@ async function seedVariant(tx: DbOrTx) {
   );
   const productVariants = new DrizzleProductVariantRepository(tx);
   const variant = await createProductVariant(
-    { productVariants },
-    { productId: product.id, size: "M", color: "Петроль", skuCode: "HOODIE-PETROL-M" },
+    { productVariants, products },
+    { companyId: company.id, productId: product.id, size: "M", color: "Петроль", skuCode: "HOODIE-PETROL-M" },
   );
   return { company, variant };
 }
@@ -152,16 +152,27 @@ describe("domain/warehouse", () => {
 
       // Инвентаризация склада продаж находит расхождение (кто-то унёс 1 штуку без документа).
       const inventoryCounts = new DrizzleInventoryCountRepository(tx);
-      const count = await createInventoryCount({ inventoryCounts }, { warehouseId: salesWarehouse.id });
+      const count = await createInventoryCount(
+        { inventoryCounts, warehouses },
+        { companyId: company.id, warehouseId: salesWarehouse.id },
+      );
       const afterCount = await recordInventoryCountItem(
         { inventoryCounts, stock },
-        { inventoryCountId: count.id, productVariantId: variant.id, actualQuantity: 19 },
+        {
+          companyId: company.id,
+          inventoryCountId: count.id,
+          productVariantId: variant.id,
+          actualQuantity: 19,
+        },
       );
       expect(afterCount.items[0]?.expectedQuantity).toBe("20.000");
       expect(afterCount.items[0]?.actualQuantity).toBe("19.000");
       expect(afterCount.items[0]?.discrepancy).toBe("-1.000");
 
-      const completed = await completeInventoryCount({ inventoryCounts }, { inventoryCountId: count.id });
+      const completed = await completeInventoryCount(
+        { inventoryCounts },
+        { companyId: company.id, inventoryCountId: count.id },
+      );
       expect(completed.status).toBe("completed");
 
       const stockAfterCount = await stock.findStockItem(salesWarehouse.id, variant.id);
