@@ -443,13 +443,34 @@ export function AppShell() {
     window.addEventListener("touchcancel", end);
   }, []);
 
-  // Нативный non-passive listener: перехватываем жест раньше браузерного «назад».
+  // Нативный non-passive listener: перехватываем жест раньше браузерного
+  // «назад». Комментарий описывал намерение, но preventDefault() вызывался
+  // только внутри move() — то есть не раньше первого touchmove с
+  // достаточным горизонтальным сдвигом. К этому моменту системный edge-swipe
+  // (WKWebView/iOS Safari: UIScreenEdgePanGestureRecognizer, тот же left-edge
+  // хот-зоной ~20px, что и наша) уже успевал начать собственное распознавание
+  // и параллельно рендерить свой превью-снимок предыдущей страницы — отсюда
+  // визуальное наложение «двух экранов» при свайпе от левого края (баг из
+  // отчёта, IMG_9027/IMG_9029). overscroll-behavior-x: none (tokens.css)
+  // уже блокирует аналогичный жест в Chrome/Android, но WebKit его не
+  // учитывает для истории навигации — единственный работающий рычаг для
+  // Safari — preventDefault() именно на touchstart, синхронно, до того как
+  // системный распознаватель успеет включиться. Зона декоративная
+  // (aria-hidden, без интерактивных потомков, уже перехватывает тапы самим
+  // фактом наложения через z-40) — вызов preventDefault() здесь не отнимает
+  // ни одно реальное взаимодействие и не блокирует последующий нативный
+  // вертикальный скролл (тот управляется независимо,
+  // через touchmove, и move() уже корректно отпускает его при dy > dx).
+  // Кнопка «Назад» браузера, history.back() и programmatic navigate()
+  // не используют этот edge-жест и не затронуты.
   useEffect(() => {
     const el = edgeRef.current;
     if (!el) return;
     const onStart = (e: TouchEvent) => {
       const t = e.touches[0];
-      if (t) startGesture(t, "edge");
+      if (!t) return;
+      if (e.cancelable) e.preventDefault();
+      startGesture(t, "edge");
     };
     el.addEventListener("touchstart", onStart, { passive: false });
     return () => el.removeEventListener("touchstart", onStart);
