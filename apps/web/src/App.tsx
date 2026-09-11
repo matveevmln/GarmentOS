@@ -8,6 +8,7 @@ import { Toaster } from "./design-system/Toast/Toast";
 import { TooltipProvider } from "./design-system/Tooltip/Tooltip";
 import { CommandPalette } from "./design-system/CommandPalette/CommandPalette";
 import { DashboardPage } from "./pages/DashboardPage";
+import { NewBatchWizardPage } from "./pages/NewBatchWizardPage";
 import { WorkshopsPage } from "./pages/WorkshopsPage";
 import { SuppliersPage } from "./pages/SuppliersPage";
 import { MaterialsPage } from "./pages/MaterialsPage";
@@ -36,6 +37,7 @@ export function App() {
             <Route element={<AppShell />}>
               <Route index element={<Navigate to="/dashboard" replace />} />
               <Route path="/dashboard" element={<DashboardPage />} />
+              <Route path="/new-batch" element={<NewBatchWizardPage />} />
               <Route path="/workshops" element={<WorkshopsPage />} />
               <Route path="/suppliers" element={<SuppliersPage />} />
               <Route path="/materials" element={<MaterialsPage />} />

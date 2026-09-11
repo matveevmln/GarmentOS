@@ -17,6 +17,7 @@ import {
   IconSearch,
   IconSupplier,
   IconWarehouse,
+  IconWizard,
   IconWorkshop,
   IconCheck,
   IconDocument,
@@ -49,6 +50,9 @@ interface NavItem {
 // выдуманная функциональность, а не перенос оформления.
 const NAV_PRODUCTION: NavItem[] = [
   { to: "/dashboard", label: "Главная", icon: IconHome },
+  // Мастер новой партии (владелец проекта, 2026-09-11) — первым пунктом:
+  // это самый частый вход в систему, а не ещё один раздел среди прочих.
+  { to: "/new-batch", label: "Новая партия", icon: IconWizard },
   { to: "/production-orders", label: "Заказы пошива", icon: IconBatch, match: "/production-orders/*" },
   { to: "/products", label: "Модели", icon: IconModel, match: "/products/*" },
   { to: "/workshops", label: "Цеха", icon: IconWorkshop },
@@ -71,11 +75,14 @@ const NAV_OFFICE: NavItem[] = [{ to: "/documents", label: "Документы", 
 const NAV_SERVICE: NavItem[] = [{ to: "/pilot", label: "Pilot v1", icon: IconCheck }];
 
 // Нижняя навигация мобильного: четыре самых частых раздела + «Ещё».
+// «Материалы» уступили место мастеру партии (владелец проекта, 2026-09-11)
+// — сам материал остаётся одним из шагов внутри мастера, отдельный раздел
+// по-прежнему открывается через «Ещё».
 const MOBILE_NAV: NavItem[] = [
   { to: "/dashboard", label: "Главная", icon: IconHome },
+  { to: "/new-batch", label: "Партия", icon: IconWizard },
   { to: "/production-orders", label: "Заказы", icon: IconBatch, match: "/production-orders/*" },
   { to: "/products", label: "Модели", icon: IconModel, match: "/products/*" },
-  { to: "/materials", label: "Материалы", icon: IconMaterial },
 ];
 
 const ALL_NAV = [...NAV_PRODUCTION, ...NAV_SUPPLY, ...NAV_OFFICE, ...NAV_SERVICE];

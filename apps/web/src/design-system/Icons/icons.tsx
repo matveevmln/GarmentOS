@@ -89,6 +89,17 @@ export const IconFinance = (p: IconProps) => (
     <path d="M6 12h.01M18 12h.01" />
   </Base>
 );
+// Мастер новой партии (владелец проекта, 2026-09-11) — цепочка из трёх
+// связанных точек, та же метафора «связующей памяти между шагами», ради
+// которой мастер и появился.
+export const IconWizard = (p: IconProps) => (
+  <Base {...p}>
+    <circle cx="5" cy="6" r="1.6" />
+    <circle cx="12" cy="12" r="1.6" />
+    <circle cx="19" cy="18" r="1.6" />
+    <path d="M6.3 7.3 10.7 10.7M13.3 13.3 17.7 16.7" />
+  </Base>
+);
 export const IconStates = (p: IconProps) => (
   <Base {...p}>
     <rect x="3" y="3" width="7.5" height="7.5" rx="1" />
