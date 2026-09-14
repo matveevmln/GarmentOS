@@ -4,6 +4,7 @@ export type { Collection, CollectionSeason, CollectionStatus } from "./domain/co
 export type { Product, ProductStatus } from "./domain/product";
 export type { ProductVariant } from "./domain/product-variant";
 export type { ProductSize, ProductSizeDraft } from "./domain/product-size";
+export type { ProductAttribute, ProductAttributeDraft } from "./domain/product-attribute";
 export { DomainError } from "./domain/errors";
 
 export type {
@@ -11,7 +12,9 @@ export type {
   NewCollectionInput,
   NewProductInput,
   NewProductVariantInput,
+  ProductAttributeRepository,
   ProductCostsInput,
+  ProductDetailsInput,
   ProductRepository,
   ProductSizeRepository,
   ProductVariantRepository,
@@ -29,6 +32,11 @@ export {
   type UpdateProductCostsInput,
 } from "./application/update-product-costs";
 export {
+  updateProductDetails,
+  type UpdateProductDetailsDeps,
+  type UpdateProductDetailsInput,
+} from "./application/update-product-details";
+export {
   addProductColor,
   replaceProductSizes,
   type AddProductColorDeps,
@@ -36,6 +44,15 @@ export {
   type ManageProductSizesDeps,
   type ReplaceProductSizesInput,
 } from "./application/manage-product-sizes";
+export {
+  addProductAttribute,
+  removeProductAttribute,
+  updateProductAttribute,
+  type AddProductAttributeInput,
+  type ManageProductAttributesDeps,
+  type RemoveProductAttributeInput,
+  type UpdateProductAttributeInput,
+} from "./application/manage-product-attributes";
 export {
   distributeQuantityByRatio,
   distributeQuantityBySize,
@@ -46,6 +63,7 @@ export {
 
 export {
   DrizzleCollectionRepository,
+  DrizzleProductAttributeRepository,
   DrizzleProductRepository,
   DrizzleProductSizeRepository,
   DrizzleProductVariantRepository,

@@ -9,6 +9,7 @@ export interface CreateProductInput {
   code: string;
   category?: string;
   season?: string;
+  description?: string;
   createdBy?: string;
 }
 
@@ -34,6 +35,7 @@ export async function createProduct(deps: CreateProductDeps, input: CreateProduc
     code,
     category: input.category ?? null,
     season: input.season ?? null,
+    description: input.description ?? null,
     status: "draft",
     createdBy: input.createdBy ?? null,
   });

@@ -7,6 +7,7 @@ import type { INestApplication } from "@nestjs/common";
 import { VersioningType } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import {
+  auditLog,
   bomItems,
   boms,
   companies,
@@ -85,6 +86,9 @@ describe("Costing — валютная безопасность внутри к�
         await db.delete(materials).where(eq(materials.companyId, company.id));
         await db.delete(suppliers).where(eq(suppliers.companyId, company.id));
         await db.delete(products).where(eq(products.companyId, company.id));
+        // Этап 2 («Паспорт модели») подключил audit_log к CatalogService —
+        // строки ссылаются на users.id, чистятся до удаления пользователей.
+        await db.delete(auditLog).where(eq(auditLog.companyId, company.id));
         const companyUsers = await db.select().from(users).where(eq(users.companyId, company.id));
         for (const user of companyUsers) {
           await db.delete(refreshTokens).where(eq(refreshTokens.userId, user.id));

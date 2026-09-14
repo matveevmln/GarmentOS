@@ -110,12 +110,12 @@ describe("сквозной сценарий: от модели до заказа
 
       const productVariants = new DrizzleProductVariantRepository(tx);
       const variantM = await createProductVariant(
-        { productVariants },
-        { productId: product.id, size: "M", color: "Петроль", skuCode: "HOODIE-PETROL-2026-M", createdBy: owner.id },
+        { productVariants, products },
+        { companyId: company.id, productId: product.id, size: "M", color: "Петроль", skuCode: "HOODIE-PETROL-2026-M", createdBy: owner.id },
       );
       const variantL = await createProductVariant(
-        { productVariants },
-        { productId: product.id, size: "L", color: "Петроль", skuCode: "HOODIE-PETROL-2026-L", createdBy: owner.id },
+        { productVariants, products },
+        { companyId: company.id, productId: product.id, size: "L", color: "Петроль", skuCode: "HOODIE-PETROL-2026-L", createdBy: owner.id },
       );
 
       // Шаг 2 — Materials & Procurement: поставщик ткани прислал в Telegram

@@ -34,7 +34,7 @@ export interface BomItemDraft {
 // (docs/DATABASE_SCHEMA.md, раздел 7).
 export function assertHasItems(items: BomItemDraft[]): void {
   if (items.length === 0) {
-    throw new DomainError("Спецификация (BOM) должна содержать хотя бы один материал", "BOM_EMPTY");
+    throw new DomainError("Нормы расхода материалов должны содержать хотя бы один материал", "BOM_EMPTY");
   }
 }
 
@@ -60,7 +60,7 @@ export function assertValidItem(item: BomItemDraft): void {
 export function assertCanApprove(status: BomStatus): void {
   if (status !== "draft") {
     throw new DomainError(
-      `Нельзя утвердить BOM в статусе "${status}" — утверждение доступно только для черновика`,
+      `Нельзя утвердить нормы расхода материалов в статусе "${status}" — утверждение доступно только для черновика`,
       "BOM_NOT_DRAFT",
     );
   }

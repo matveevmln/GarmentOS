@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post } from "@nestjs/common";
+import { Body, Controller, Get, HttpStatus, NotFoundException, Param, Patch, Post } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
 import { createZodDto } from "nestjs-zod";
 import {
@@ -54,5 +54,22 @@ export class WorkshopsController {
   async list(@CurrentUser() currentUser: AuthenticatedRequestUser): Promise<WorkshopResponseDto[]> {
     const workshops = await this.contractManufacturingService.listActiveWorkshops(currentUser.companyId);
     return workshops.map((workshop) => workshopResponseSchema.parse(workshop));
+  }
+
+  // Карточка спецификации (Этап 2 — «Паспорт модели») открывается по прямой
+  // ссылке и показывает выбранный цех сама по себе, без предзагруженного
+  // списка — недостающий минимальный эндпоинт, не переделка существующего
+  // контракта (список/создание/правка выше не затронуты).
+  @RequirePermissions("contract_manufacturing.read")
+  @Get(":id")
+  async findById(
+    @Param("id") id: string,
+    @CurrentUser() currentUser: AuthenticatedRequestUser,
+  ): Promise<WorkshopResponseDto> {
+    const workshop = await this.contractManufacturingService.findWorkshopById(currentUser.companyId, id);
+    if (!workshop) {
+      throw new NotFoundException({ statusCode: HttpStatus.NOT_FOUND, code: "WORKSHOP_NOT_FOUND", message: `Цех ${id} не найден` });
+    }
+    return workshopResponseSchema.parse(workshop);
   }
 }

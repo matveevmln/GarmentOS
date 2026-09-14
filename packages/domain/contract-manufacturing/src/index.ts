@@ -34,6 +34,11 @@ export {
   type CreateProductionOrderInput,
 } from "./application/create-production-order";
 export {
+  createProductionOrderFromSpecification,
+  type CreateProductionOrderFromSpecificationDeps,
+  type CreateProductionOrderFromSpecificationInput,
+} from "./application/create-production-order-from-specification";
+export {
   confirmProductionOrder,
   type ConfirmProductionOrderDeps,
   type ConfirmProductionOrderInput,

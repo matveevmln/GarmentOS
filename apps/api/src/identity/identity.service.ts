@@ -154,4 +154,11 @@ export class IdentityService {
   async findCompanyById(id: string): Promise<Company | null> {
     return this.companies.findById(id);
   }
+
+  // Номер производственной партии (Этап 3 «Production Master») — сквозной
+  // счётчик компании, резервируется атомарно в момент создания партии из
+  // утверждённой спецификации.
+  async reserveNextProductionOrderNumber(companyId: string): Promise<number> {
+    return this.companies.reserveNextProductionOrderNumber(companyId);
+  }
 }

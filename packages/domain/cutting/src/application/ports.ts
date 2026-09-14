@@ -28,6 +28,10 @@ export interface NewCuttingOrderInput {
 export interface CuttingOrderMaterialFactInput {
   materialId: string;
   consumedQuantity: number;
+  // Возврат материала на склад после кроя (Этап 3) — необязателен, по
+  // умолчанию 0 (ничего не возвращено). Независим от consumedQuantity: оба
+  // числа — самостоятельные исторические факты.
+  returnedQuantity?: number;
   rollNote?: string | null;
 }
 
@@ -61,10 +65,19 @@ export interface ProductionOrderSnapshotPort {
   } | null>;
 }
 
-// Списание и корректировка остатка — тоже через порт, чтобы раскрой не зависел
-// от модуля Warehouse напрямую.
+// Списание, приход и корректировка остатка — тоже через порт, чтобы раскрой
+// не зависел от модуля Warehouse напрямую.
 export interface MaterialStockPort {
   consume(
+    warehouseId: string,
+    materialId: string,
+    quantity: number,
+    meta: { referenceType: string; referenceId: string; createdBy: string | null },
+  ): Promise<void>;
+  // Возврат материала на склад (Этап 3) — реальный физический приход, тот же
+  // механизм учёта, что и приёмка закупки (material_stock_movements,
+  // type='receipt'), с отдельным referenceType для истории движений.
+  receive(
     warehouseId: string,
     materialId: string,
     quantity: number,

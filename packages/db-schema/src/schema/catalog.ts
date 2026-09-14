@@ -1,4 +1,4 @@
-import { integer, numeric, pgEnum, pgTable, text, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { index, integer, numeric, pgEnum, pgTable, text, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import { auditColumns, id, softDelete } from "./_shared";
 import { companies, users } from "./identity";
 
@@ -50,6 +50,11 @@ export const products = pgTable(
     code: text("code").notNull(),
     category: text("category"),
     season: text("season"),
+    // Свободный текст паспорта модели (Этап 2 — «Паспорт модели», владелец
+    // проекта, 2026-09-12) — состав/особенности пошива и т.п. в прозе;
+    // структурированные пары «название/значение» (плотность, посадка...)
+    // живут отдельно в product_attributes ниже, description не заменяет их.
+    description: text("description"),
     status: productStatusEnum("status").notNull().default("draft"),
     // Ссылка на текущий файл техпака/спецификации через StorageAdapter.
     // Архив версий/доп. соглашений — через таблицу documents (common.ts).
@@ -125,4 +130,28 @@ export const productSizes = pgTable(
     ...auditColumns,
   },
   (table) => [uniqueIndex("product_sizes_product_size_idx").on(table.productId, table.size)],
+);
+
+// Характеристики модели (Этап 2 — «Паспорт модели», владелец проекта,
+// 2026-09-12, требование №3: "Состав: 95% хлопок...", "Плотность: 260 г/м²"
+// и т.п.) — обычная дочерняя таблица «имя/значение/порядок», не JSON-колонка:
+// список характеристик у разных моделей разный и заранее не перечислим
+// (владелец явно попросил не "зашивать конкретные значения в код"), но при
+// этом должен нормально листаться, сортироваться и участвовать в истории
+// (audit_log пишет readable-диф, что стандартный JSON-blob делает плохо).
+// Companyid не нужен — принадлежность выражена через productId, тот же
+// паттерн, что product_sizes выше и product_variants в contract-manufacturing.
+export const productAttributes = pgTable(
+  "product_attributes",
+  {
+    id: id(),
+    productId: uuid("product_id")
+      .notNull()
+      .references(() => products.id),
+    name: text("name").notNull(),
+    value: text("value").notNull(),
+    sortOrder: integer("sort_order").notNull().default(0),
+    ...auditColumns,
+  },
+  (table) => [index("product_attributes_product_idx").on(table.productId)],
 );

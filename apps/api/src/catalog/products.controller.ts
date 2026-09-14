@@ -1,14 +1,18 @@
-import { Body, Controller, Get, HttpStatus, NotFoundException, Param, Patch, Post, Put, Query } from "@nestjs/common";
+import { Body, Controller, Delete, Get, HttpStatus, NotFoundException, Param, Patch, Post, Put, Query } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
 import { createZodDto } from "nestjs-zod";
 import {
   addProductColorSchema,
   createProductSchema,
   findProductByNameQuerySchema,
+  productAttributeDraftSchema,
+  productAttributeResponseSchema,
   productResponseSchema,
   productSizeResponseSchema,
   replaceProductSizesSchema,
   updateProductCostsSchema,
+  updateProductDetailsSchema,
+  type ProductAttributeResponseDto,
   type ProductResponseDto,
   type ProductSizeResponseDto,
 } from "@garmentos/shared-types";
@@ -19,8 +23,10 @@ import { CatalogService } from "./catalog.service";
 class CreateProductDto extends createZodDto(createProductSchema) {}
 class FindProductByNameQueryDto extends createZodDto(findProductByNameQuerySchema) {}
 class UpdateProductCostsDto extends createZodDto(updateProductCostsSchema) {}
+class UpdateProductDetailsDto extends createZodDto(updateProductDetailsSchema) {}
 class ReplaceProductSizesDto extends createZodDto(replaceProductSizesSchema) {}
 class AddProductColorDto extends createZodDto(addProductColorSchema) {}
+class ProductAttributeDraftDto extends createZodDto(productAttributeDraftSchema) {}
 
 @ApiTags("products")
 @Controller("products")
@@ -33,7 +39,7 @@ export class ProductsController {
     @Body() body: CreateProductDto,
     @CurrentUser() currentUser: AuthenticatedRequestUser,
   ): Promise<ProductResponseDto> {
-    const product = await this.catalogService.createProduct(currentUser.companyId, body);
+    const product = await this.catalogService.createProduct(currentUser, body);
     return productResponseSchema.parse(product);
   }
 
@@ -74,7 +80,20 @@ export class ProductsController {
     @Body() body: UpdateProductCostsDto,
     @CurrentUser() currentUser: AuthenticatedRequestUser,
   ): Promise<ProductResponseDto> {
-    const product = await this.catalogService.updateProductCosts(currentUser.companyId, id, body);
+    const product = await this.catalogService.updateProductCosts(currentUser, id, body);
+    return productResponseSchema.parse(product);
+  }
+
+  // Название/категория/описание паспорта модели (Этап 2 — «Паспорт модели»,
+  // владелец проекта, 2026-09-12) — отдельно от себестоимости выше.
+  @RequirePermissions("catalog.write")
+  @Patch(":id")
+  async updateDetails(
+    @Param("id") id: string,
+    @Body() body: UpdateProductDetailsDto,
+    @CurrentUser() currentUser: AuthenticatedRequestUser,
+  ): Promise<ProductResponseDto> {
+    const product = await this.catalogService.updateProductDetails(currentUser, id, body);
     return productResponseSchema.parse(product);
   }
 
@@ -83,8 +102,11 @@ export class ProductsController {
   // меняются вместе, частичное обновление оставило бы ряд противоречивым.
   @RequirePermissions("catalog.read")
   @Get(":id/sizes")
-  async listSizes(@Param("id") id: string): Promise<ProductSizeResponseDto[]> {
-    const sizes = await this.catalogService.listProductSizes(id);
+  async listSizes(
+    @Param("id") id: string,
+    @CurrentUser() currentUser: AuthenticatedRequestUser,
+  ): Promise<ProductSizeResponseDto[]> {
+    const sizes = await this.catalogService.listProductSizes(currentUser.companyId, id);
     return sizes.map((size) =>
       productSizeResponseSchema.parse({
         size: size.size,
@@ -101,7 +123,7 @@ export class ProductsController {
     @Body() body: ReplaceProductSizesDto,
     @CurrentUser() currentUser: AuthenticatedRequestUser,
   ): Promise<ProductSizeResponseDto[]> {
-    const sizes = await this.catalogService.replaceProductSizes(currentUser.companyId, id, body);
+    const sizes = await this.catalogService.replaceProductSizes(currentUser, id, body);
     return sizes.map((size) =>
       productSizeResponseSchema.parse({
         size: size.size,
@@ -120,7 +142,54 @@ export class ProductsController {
     @Body() body: AddProductColorDto,
     @CurrentUser() currentUser: AuthenticatedRequestUser,
   ): Promise<{ created: number; skipped: number }> {
-    return this.catalogService.addProductColor(currentUser.companyId, id, body, currentUser.id);
+    return this.catalogService.addProductColor(currentUser, id, body);
+  }
+
+  // Характеристики паспорта модели (Этап 2, требование №3) — «Состав»,
+  // «Плотность» и т.п. Растут по одной строке через «+ Добавить
+  // характеристику», не заменяются целиком в отличие от размерного ряда.
+  @RequirePermissions("catalog.read")
+  @Get(":id/attributes")
+  async listAttributes(
+    @Param("id") id: string,
+    @CurrentUser() currentUser: AuthenticatedRequestUser,
+  ): Promise<ProductAttributeResponseDto[]> {
+    const attributes = await this.catalogService.listProductAttributes(currentUser.companyId, id);
+    return attributes.map((attribute) => productAttributeResponseSchema.parse(attribute));
+  }
+
+  @RequirePermissions("catalog.write")
+  @Post(":id/attributes")
+  async addAttribute(
+    @Param("id") id: string,
+    @Body() body: ProductAttributeDraftDto,
+    @CurrentUser() currentUser: AuthenticatedRequestUser,
+  ): Promise<ProductAttributeResponseDto> {
+    const attribute = await this.catalogService.addProductAttribute(currentUser, id, body);
+    return productAttributeResponseSchema.parse(attribute);
+  }
+
+  @RequirePermissions("catalog.write")
+  @Patch(":id/attributes/:attributeId")
+  async updateAttribute(
+    @Param("id") id: string,
+    @Param("attributeId") attributeId: string,
+    @Body() body: ProductAttributeDraftDto,
+    @CurrentUser() currentUser: AuthenticatedRequestUser,
+  ): Promise<ProductAttributeResponseDto> {
+    const attribute = await this.catalogService.updateProductAttribute(currentUser, id, attributeId, body);
+    return productAttributeResponseSchema.parse(attribute);
+  }
+
+  @RequirePermissions("catalog.write")
+  @Delete(":id/attributes/:attributeId")
+  async removeAttribute(
+    @Param("id") id: string,
+    @Param("attributeId") attributeId: string,
+    @CurrentUser() currentUser: AuthenticatedRequestUser,
+  ): Promise<{ removed: true }> {
+    await this.catalogService.removeProductAttribute(currentUser, id, attributeId);
+    return { removed: true };
   }
 
   @RequirePermissions("catalog.read")

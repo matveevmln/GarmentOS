@@ -49,8 +49,8 @@ async function seedVariant(tx: DbOrTx) {
   );
   const productVariants = new DrizzleProductVariantRepository(tx);
   const variant = await createProductVariant(
-    { productVariants },
-    { productId: product.id, size: "M", color: "Петроль", skuCode: "HOODIE-PETROL-M" },
+    { productVariants, products },
+    { companyId: company.id, productId: product.id, size: "M", color: "Петроль", skuCode: "HOODIE-PETROL-M" },
   );
   return { company, variant };
 }

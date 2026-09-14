@@ -1,4 +1,4 @@
-import { boolean, type AnyPgColumn, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { boolean, type AnyPgColumn, integer, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { auditColumns, id } from "./_shared";
 
@@ -29,6 +29,15 @@ export const companies = pgTable(
     // bootstrap-сценарий от повторного/параллельного создания дубля
     // (docs/AUTH_ARCHITECTURE.md, раздел 9; аудит идемпотентности bootstrap).
     bootstrapKey: text("bootstrap_key"),
+    // Сквозной номер производственной партии внутри компании (Этап 3
+    // «Production Master», владелец проекта, 2026-09-12) — независим от
+    // workshops.nextSpecificationNumber (тот — по цеху, для спецификаций).
+    // Явно НЕ по цеху, НЕ по спецификации, НЕ с ежегодным сбросом: простой
+    // последовательный integer, резервируется атомарно через UPDATE...RETURNING
+    // (тот же паттерн, что и nextSpecificationNumber). Человекочитаемый номер
+    // с годом ("ПР-2026-0001") формируется в UI из этого integer + года
+    // создания партии — год не хранится как часть счётчика.
+    nextProductionOrderNumber: integer("next_production_order_number").notNull().default(1),
     ...auditColumns,
   },
   (table) => [

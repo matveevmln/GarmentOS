@@ -27,6 +27,12 @@ export interface CompanyRepository {
   // будущего использует его, оставляя bootstrapKey не заданным (NULL).
   createIfAbsentByBootstrapKey(bootstrapKey: string, input: NewCompanyInput): Promise<Company | null>;
   findByBootstrapKey(bootstrapKey: string): Promise<Company | null>;
+  // Атомарно резервирует следующий номер производственной партии (Этап 3
+  // «Production Master», владелец проекта, 2026-09-12) — сквозной счётчик
+  // внутри компании, независимый от workshops.nextSpecificationNumber
+  // (тот — по цеху, для спецификаций). Возвращает номер ДО инкремента, тот
+  // же паттерн, что и reserveNextSpecificationNumber.
+  reserveNextProductionOrderNumber(companyId: string): Promise<number>;
 }
 
 export interface NewUserInput {

@@ -3,7 +3,7 @@ import { Reflector } from "@nestjs/core";
 import { listUserPermissions, type UserRoleRepository } from "@garmentos/domain-identity";
 import { USER_ROLE_REPOSITORY } from "../identity/identity.tokens";
 import type { AuthenticatedRequestUser } from "./current-user.decorator";
-import { PERMISSIONS_KEY } from "./require-permissions.decorator";
+import { PERMISSIONS_ANY_KEY, PERMISSIONS_KEY } from "./require-permissions.decorator";
 import { IS_PUBLIC_KEY } from "./public.decorator";
 
 interface RequestWithUser {
@@ -34,7 +34,13 @@ export class PermissionsGuard implements CanActivate {
       context.getHandler(),
       context.getClass(),
     ]);
-    if (!required || required.length === 0) return true;
+    const requiredAny = this.reflector.getAllAndOverride<string[]>(PERMISSIONS_ANY_KEY, [
+      context.getHandler(),
+      context.getClass(),
+    ]);
+    const hasAllRequirement = required && required.length > 0;
+    const hasAnyRequirement = requiredAny && requiredAny.length > 0;
+    if (!hasAllRequirement && !hasAnyRequirement) return true;
 
     const request = context.switchToHttp().getRequest<RequestWithUser>();
     if (!request.user) {
@@ -44,9 +50,16 @@ export class PermissionsGuard implements CanActivate {
     }
 
     const granted = await listUserPermissions({ userRoles: this.userRoles }, { userId: request.user.id });
-    const missing = required.filter((permission) => !granted.includes(permission));
-    if (missing.length > 0) {
-      throw new ForbiddenException(`Недостаточно прав: требуется ${missing.join(", ")}`);
+
+    if (hasAllRequirement) {
+      const missing = required.filter((permission) => !granted.includes(permission));
+      if (missing.length > 0) {
+        throw new ForbiddenException(`Недостаточно прав: требуется ${missing.join(", ")}`);
+      }
+    }
+
+    if (hasAnyRequirement && !requiredAny.some((permission) => granted.includes(permission))) {
+      throw new ForbiddenException(`Недостаточно прав: требуется одно из ${requiredAny.join(", ")}`);
     }
 
     return true;

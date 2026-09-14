@@ -3,12 +3,14 @@ import {
   captureProductionOrderCostSnapshot,
   confirmProductionOrder,
   createProductionOrderDraft,
+  createProductionOrderFromSpecification,
   createWorkshop,
   receiveProductionOrder as receiveProductionOrderUseCase,
   updateProductionOrderStatus as updateProductionOrderStatusUseCase,
   updateProductionOrderStatusFromWorkshop,
   updateWorkshop,
   type BomApprovalPort,
+  type CreateProductionOrderFromSpecificationInput,
   type ProductionOrder,
   type ProductionOrderRepository,
   type Workshop,
@@ -119,7 +121,7 @@ export class ContractManufacturingService {
     if (variants.length === 0) {
       throw new CatalogDomainError(`У модели ${input.productId} нет ни одного SKU`, "PRODUCT_HAS_NO_VARIANTS");
     }
-    const ratios = await this.loadSizeRatios(input.productId);
+    const ratios = await this.loadSizeRatios(companyId, input.productId);
 
     // Цвета делятся поровну (не по правилу размерных тиров — оно осмысленно
     // только для размеров, не для цветов), внутри каждого цвета — по
@@ -160,8 +162,8 @@ export class ContractManufacturingService {
   // Пустой результат означает «ряд не задан» — тогда применяется запасное
   // равномерное деление, а вызывающий явно об этом сообщает пользователю
   // (числа финансово значимые, молча угадывать пропорцию нельзя).
-  private async loadSizeRatios(productId: string): Promise<Map<string, number>> {
-    const sizes = await this.catalogService.listProductSizes(productId);
+  private async loadSizeRatios(companyId: string, productId: string): Promise<Map<string, number>> {
+    const sizes = await this.catalogService.listProductSizes(companyId, productId);
     return new Map(sizes.map((size) => [size.size, Number(size.ratioWeight)]));
   }
 
@@ -192,7 +194,7 @@ export class ContractManufacturingService {
     if (variants.length === 0) {
       throw new CatalogDomainError(`У модели ${input.productId} нет ни одного SKU`, "PRODUCT_HAS_NO_VARIANTS");
     }
-    const ratios = await this.loadSizeRatios(input.productId);
+    const ratios = await this.loadSizeRatios(companyId, input.productId);
 
     // Порядок размеров — из раскладки модели; размеры без раскладки идут
     // следом в порядке появления среди вариантов.
@@ -255,6 +257,38 @@ export class ContractManufacturingService {
 
   async listProductionOrders(companyId: string): Promise<ProductionOrder[]> {
     return this.productionOrders.listByCompany(companyId);
+  }
+
+  // Партии, уже созданные из этой утверждённой спецификации (Этап 3) — нужно
+  // SpecificationService, чтобы посчитать доступный остаток по строкам
+  // (1 спецификация → N партий, в т.ч. частичных по количеству).
+  async listProductionOrdersBySpecification(companyId: string, specificationId: string): Promise<ProductionOrder[]> {
+    return this.productionOrders.listBySpecification(companyId, specificationId);
+  }
+
+  // Все партии одной модели (Model-first Minimal Core, ПРОМПТ №06.1) —
+  // история производства модели включает партии, созданные и через
+  // спецификацию, и вручную/до Этапа 3 (у обоих productId заполнен всегда).
+  async listProductionOrdersByProduct(companyId: string, productId: string): Promise<ProductionOrder[]> {
+    return this.productionOrders.listByProduct(companyId, productId);
+  }
+
+  // Создание партии из утверждённой спецификации (Этап 3 «Production
+  // Master», владелец проекта, 2026-09-12) — auto-confirm: партия сразу
+  // получает status="placed" и готовый cost_snapshot (Вариант B), без
+  // отдельного шага "Подтвердить". Вызывающий код (SpecificationService)
+  // уже проверил статус спецификации, посчитал остаток по строкам,
+  // подобрал approved BOM и собрал cost_snapshot/номер партии — этот метод
+  // только проводит доменные инварианты (сумма по размерам, approved BOM) и
+  // атомарно создаёт запись.
+  async createProductionOrderFromSpecification(
+    companyId: string,
+    input: Omit<CreateProductionOrderFromSpecificationInput, "companyId">,
+  ): Promise<ProductionOrder> {
+    return createProductionOrderFromSpecification(
+      { productionOrders: this.productionOrders, workshops: this.workshops, bomApproval: this.bomApproval },
+      { ...input, companyId },
+    );
   }
 
   async findWorkshopById(companyId: string, id: string): Promise<Workshop | null> {

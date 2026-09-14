@@ -64,7 +64,7 @@ export class CostingService {
       throw new NotFoundException({
         statusCode: 404,
         code: "BOM_NOT_FOUND",
-        message: `У модели "${product.name}" нет утверждённого BOM — расчёт стоимости невозможен`,
+        message: `У модели "${product.name}" нет утверждённой спецификации норм расхода материалов — расчёт стоимости невозможен`,
       });
     }
 

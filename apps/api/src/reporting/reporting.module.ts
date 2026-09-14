@@ -3,6 +3,7 @@ import { BomModule } from "../bom/bom.module";
 import { CatalogModule } from "../catalog/catalog.module";
 import { ContractManufacturingModule } from "../contract-manufacturing/contract-manufacturing.module";
 import { DocumentModule } from "../document/document.module";
+import { WarehouseModule } from "../warehouse/warehouse.module";
 import { AttentionController } from "./attention.controller";
 import { AttentionService } from "./attention.service";
 import { BatchPassportController } from "./batch-passport.controller";
@@ -11,6 +12,8 @@ import { CostingController } from "./costing.controller";
 import { CostingService } from "./costing.service";
 import { PilotDashboardController } from "./pilot-dashboard.controller";
 import { PilotDashboardService } from "./pilot-dashboard.service";
+import { ProductProductionController } from "./product-production.controller";
+import { ProductProductionService } from "./product-production.service";
 
 // Reporting/BI (docs/ARCHITECTURE.md) — агрегированная аналитика поверх
 // остальных модулей, только чтение. Экраны: «Внимание сегодня»
@@ -18,9 +21,15 @@ import { PilotDashboardService } from "./pilot-dashboard.service";
 // «Паспорт партии» (batch-passport.service.ts, owner 2026-08-03), «Pilot
 // Dashboard» (pilot-dashboard.service.ts, owner 2026-08-04).
 @Module({
-  imports: [CatalogModule, BomModule, ContractManufacturingModule, DocumentModule],
-  controllers: [AttentionController, CostingController, BatchPassportController, PilotDashboardController],
-  providers: [AttentionService, CostingService, BatchPassportService, PilotDashboardService],
+  imports: [CatalogModule, BomModule, ContractManufacturingModule, DocumentModule, WarehouseModule],
+  controllers: [
+    AttentionController,
+    CostingController,
+    BatchPassportController,
+    PilotDashboardController,
+    ProductProductionController,
+  ],
+  providers: [AttentionService, CostingService, BatchPassportService, PilotDashboardService, ProductProductionService],
   // CostingService нужен ProductionOrderOrchestrationService для фиксации
   // Snapshot партии при подтверждении заказа (owner, 2026-08-03 — «Паспорт
   // партии», docs/PRODUCTION_BATCH_LIFECYCLE_ARCHITECTURE.md).

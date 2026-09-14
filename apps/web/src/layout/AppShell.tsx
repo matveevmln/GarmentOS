@@ -17,7 +17,6 @@ import {
   IconSearch,
   IconSupplier,
   IconWarehouse,
-  IconWizard,
   IconWorkshop,
   IconCheck,
   IconDocument,
@@ -48,14 +47,19 @@ interface NavItem {
 // реальным экраном. «Финансы» из группы «Учёт» по-прежнему не переносятся:
 // у раздела нет ни маршрута, ни API — пункт меню, ведущий в никуда, это
 // выдуманная функциональность, а не перенос оформления.
+// Model-first Minimal Core (владелец проекта, 2026-09-12, ПРОМПТ №06.1) —
+// пользовательское меню сужено до пяти пунктов вокруг цепочки Модель →
+// Спецификация → Партия. «Новая партия» (мастер) убрана из меню: основной
+// путь создания партии теперь — через утверждённую спецификацию
+// (POST /specifications/:id/production-order, Этап 3), страница и её
+// маршрут (/new-batch) НЕ удалены — прежний ручной путь остаётся доступен
+// по прямой ссылке, только не выведен в навигацию.
 const NAV_PRODUCTION: NavItem[] = [
   { to: "/dashboard", label: "Главная", icon: IconHome },
-  // Мастер новой партии (владелец проекта, 2026-09-11) — первым пунктом:
-  // это самый частый вход в систему, а не ещё один раздел среди прочих.
-  { to: "/new-batch", label: "Новая партия", icon: IconWizard },
-  { to: "/production-orders", label: "Заказы пошива", icon: IconBatch, match: "/production-orders/*" },
   { to: "/products", label: "Модели", icon: IconModel, match: "/products/*" },
+  { to: "/specifications", label: "Спецификации", icon: IconDocument, match: "/specifications/*" },
   { to: "/workshops", label: "Цеха", icon: IconWorkshop },
+  { to: "/production-orders", label: "Заказы пошива", icon: IconBatch, match: "/production-orders/*" },
 ];
 
 const NAV_SUPPLY: NavItem[] = [
@@ -74,15 +78,14 @@ const NAV_OFFICE: NavItem[] = [{ to: "/documents", label: "Документы", 
 // 0.5) — временный пункт, убрать после завершения пилота.
 const NAV_SERVICE: NavItem[] = [{ to: "/pilot", label: "Pilot v1", icon: IconCheck }];
 
-// Нижняя навигация мобильного: четыре самых частых раздела + «Ещё».
-// «Материалы» уступили место мастеру партии (владелец проекта, 2026-09-11)
-// — сам материал остаётся одним из шагов внутри мастера, отдельный раздел
-// по-прежнему открывается через «Ещё».
+// Нижняя навигация мобильного (ПРОМПТ №06.1 §6): Главная/Модели/
+// Спецификации/Заказы + «Ещё» — та же цепочка Модель → Спецификация →
+// Партия, что и в десктопном меню.
 const MOBILE_NAV: NavItem[] = [
   { to: "/dashboard", label: "Главная", icon: IconHome },
-  { to: "/new-batch", label: "Партия", icon: IconWizard },
-  { to: "/production-orders", label: "Заказы", icon: IconBatch, match: "/production-orders/*" },
   { to: "/products", label: "Модели", icon: IconModel, match: "/products/*" },
+  { to: "/specifications", label: "Спецификации", icon: IconDocument, match: "/specifications/*" },
+  { to: "/production-orders", label: "Заказы", icon: IconBatch, match: "/production-orders/*" },
 ];
 
 const ALL_NAV = [...NAV_PRODUCTION, ...NAV_SUPPLY, ...NAV_OFFICE, ...NAV_SERVICE];
@@ -232,10 +235,14 @@ function SidebarBody({
         ) : null}
       </div>
 
+      {/* Model-first Minimal Core (ПРОМПТ №06.1 §6): группы «Снабжение»
+          (Материалы/Закупки/Склады/Поставщики/Импорт документов) и «Учёт»
+          (Документы) скрыты из пользовательского меню — их backend/маршруты
+          не удалены (§16 отчёта), скрыт только пункт навигации. Тот же
+          SidebarBody используется в мобильном drawer'е (edge-swipe панель
+          ниже) — правка одного места скрывает группы в обоих. */}
       <nav className="flex-1 overflow-y-auto pb-4">
         <NavGroup label="Производство" items={NAV_PRODUCTION} collapsed={collapsed} mobile={mobile} onNavigate={onNavigate} />
-        <NavGroup label="Снабжение" items={NAV_SUPPLY} collapsed={collapsed} mobile={mobile} onNavigate={onNavigate} />
-        <NavGroup label="Учёт" items={NAV_OFFICE} collapsed={collapsed} mobile={mobile} onNavigate={onNavigate} />
         <NavGroup label="Служебное" items={NAV_SERVICE} collapsed={collapsed} mobile={mobile} onNavigate={onNavigate} />
       </nav>
 

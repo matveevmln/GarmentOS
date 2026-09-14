@@ -2,6 +2,7 @@ import type { Collection, CollectionSeason } from "../domain/collection";
 import type { Product, ProductStatus } from "../domain/product";
 import type { ProductVariant } from "../domain/product-variant";
 import type { ProductSize, ProductSizeDraft } from "../domain/product-size";
+import type { ProductAttribute, ProductAttributeDraft } from "../domain/product-attribute";
 
 export interface NewCollectionInput {
   companyId: string;
@@ -23,6 +24,7 @@ export interface NewProductInput {
   code: string;
   category: string | null;
   season: string | null;
+  description: string | null;
   status: ProductStatus;
   createdBy: string | null;
 }
@@ -34,9 +36,20 @@ export interface ProductCostsInput {
   otherProductionCostCurrency: string | null;
 }
 
+// Правки паспорта модели, не относящиеся к себестоимости (та живёт отдельно
+// в ProductCostsInput выше — уже устоявшееся разделение "создание" vs
+// "плановая себестоимость"). undefined-поле — «не трогать», а не «очистить»:
+// PATCH с одним полем не должен стирать остальные.
+export interface ProductDetailsInput {
+  name?: string;
+  category?: string | null;
+  description?: string | null;
+}
+
 export interface ProductRepository {
   create(input: NewProductInput): Promise<Product>;
   updateCosts(companyId: string, id: string, input: ProductCostsInput): Promise<Product>;
+  updateDetails(companyId: string, id: string, input: ProductDetailsInput): Promise<Product>;
   findByCode(companyId: string, code: string): Promise<Product | null>;
   findById(companyId: string, id: string): Promise<Product | null>;
   // Регистронезависимый поиск по названию модели — нужен для разбора
@@ -62,8 +75,16 @@ export interface NewProductVariantInput {
 
 // Размерный ряд заменяется целиком: порядок и веса меняются вместе, поэтому
 // частичного обновления нет — иначе ряд мог бы остаться противоречивым.
+//
+// У product_sizes, как и у product_variants выше, нет собственной колонки
+// company_id — listByProduct обязан применить join к products (найдено
+// аудитом IDOR перед Этапом 2 — «Паспорт модели»: GET /products/:id/sizes
+// отдавал размерный ряд чужой компании по одному лишь productId).
+// replaceForProduct companyId не принимает — единственный вызывающий,
+// replaceProductSizes (manage-product-sizes.ts), уже проверяет
+// products.findById(companyId, productId) до вызова.
 export interface ProductSizeRepository {
-  listByProduct(productId: string): Promise<ProductSize[]>;
+  listByProduct(companyId: string, productId: string): Promise<ProductSize[]>;
   replaceForProduct(productId: string, sizes: ProductSizeDraft[]): Promise<ProductSize[]>;
 }
 
@@ -87,4 +108,18 @@ export interface ProductVariantRepository {
   // Template Engine).
   findById(companyId: string, id: string): Promise<ProductVariant | null>;
   listByProduct(companyId: string, productId: string): Promise<ProductVariant[]>;
+}
+
+// Характеристики модели (Этап 2 — «Паспорт модели»). Как и у product_sizes
+// выше, нет своей company_id — listByProduct обязан join'ить products, а
+// мутации принимают companyId только там, где ещё не было предварительной
+// проверки владения продуктом (create/update/remove вызываются из use case,
+// который уже проверил products.findById(companyId, productId) — тот же
+// паттерн, что replaceForProduct у ProductSizeRepository).
+export interface ProductAttributeRepository {
+  listByProduct(companyId: string, productId: string): Promise<ProductAttribute[]>;
+  findById(productId: string, attributeId: string): Promise<ProductAttribute | null>;
+  create(productId: string, draft: ProductAttributeDraft): Promise<ProductAttribute>;
+  update(attributeId: string, draft: ProductAttributeDraft): Promise<ProductAttribute>;
+  remove(attributeId: string): Promise<void>;
 }

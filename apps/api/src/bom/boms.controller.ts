@@ -49,7 +49,7 @@ export class BomsController {
       throw new NotFoundException({
         statusCode: HttpStatus.NOT_FOUND,
         code: "BOM_NOT_FOUND",
-        message: "Утверждённый BOM для этой модели не найден",
+        message: "Утверждённые нормы расхода материалов для этой модели не найдены",
       });
     }
     return bomResponseSchema.parse(bom);

@@ -121,7 +121,7 @@ export class ProductionOrderOrchestrationService {
     const bom = await this.bomService.getApproved(companyId, { productId: product.id });
     if (!bom) {
       throw new ProductionRequestOrchestrationError(
-        `У модели "${parsed.modelName}" нет утверждённого BOM`,
+        `У модели "${parsed.modelName}" нет утверждённой спецификации норм расхода материалов`,
         "BOM_NOT_FOUND",
       );
     }
@@ -183,7 +183,7 @@ export class ProductionOrderOrchestrationService {
       const bom = await this.bomService.getApproved(companyId, { productId: product.id });
       bomFound = !!bom;
       if (bom) bomItems = bom.items;
-      if (!bomFound) warnings.push(`У модели "${parsed.modelName}" нет утверждённого BOM`);
+      if (!bomFound) warnings.push(`У модели "${parsed.modelName}" нет утверждённой спецификации норм расхода материалов`);
     }
 
     const workshops = await this.contractManufacturingService.listActiveWorkshops(companyId);

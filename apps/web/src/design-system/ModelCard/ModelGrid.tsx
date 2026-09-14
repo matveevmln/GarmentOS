@@ -4,7 +4,22 @@ import { Button } from "../Button/Button";
 import { EmptyState } from "../Feedback/EmptyState";
 import { StatusBadge } from "../StatusBadge/StatusBadge";
 import { ModelMark } from "../Blocks/ModelMark";
+import { usePhotoUrl } from "../Blocks/BatchCard";
 import { IconModel } from "../Icons/icons";
+
+// Фото модели на витрине (визуальная переработка 2026-09-13): если фото
+// заведено — показываем его, иначе остаётся типографический знак ModelMark
+// (прежнее поведение, docs/UI_MIGRATION_PLAN.md этап 7). Высота совпадает с
+// ModelMark, поэтому сетка не «прыгает» между моделями с фото и без.
+function ModelPhoto({ photoDocumentId, code }: { photoDocumentId: string | null; code: string }) {
+  const url = usePhotoUrl(photoDocumentId);
+  if (!url) return <ModelMark code={code} />;
+  return (
+    <div className="h-[88px] overflow-hidden rounded-[10px] border border-border bg-secondary">
+      <img src={url} alt="" className="h-full w-full object-cover" />
+    </div>
+  );
+}
 
 // Витрина моделей — переоформлена по ModelsScreen GitHub-прототипа
 // (docs/UI_MIGRATION_PLAN.md §0, этап 7): карточка = типографический знак
@@ -30,6 +45,10 @@ interface ModelGridProps<T> {
   getStatus?: (item: T) => string | null;
   /** Правая подпись в строке названия (категория, сезон). */
   getMeta?: (item: T) => ReactNode;
+  /** Фото модели (Document Engine). Без него — типографический знак. */
+  getPhotoDocumentId?: (item: T) => string | null;
+  /** Производственная активность модели: «3 партии · 1 в работе». */
+  getActivity?: (item: T) => ReactNode;
   onItemClick: (item: T) => void;
   emptyTitle?: string;
   emptyHint?: string;
@@ -45,6 +64,8 @@ export function ModelGrid<T>({
   getCode,
   getStatus,
   getMeta,
+  getPhotoDocumentId,
+  getActivity,
   onItemClick,
   emptyTitle = "Пока нет ни одной модели",
   emptyHint,
@@ -89,7 +110,7 @@ export function ModelGrid<T>({
             }}
             className="focus-ring cursor-pointer p-4 transition-colors hover:border-primary/30 md:p-5"
           >
-            <ModelMark code={getCode?.(item) ?? key} />
+            <ModelPhoto photoDocumentId={getPhotoDocumentId?.(item) ?? null} code={getCode?.(item) ?? key} />
             <div className="mt-3 flex items-start justify-between gap-2">
               <div className="min-w-0">
                 <div className="truncate text-[13px] font-semibold">{getTitle(item)}</div>
@@ -99,9 +120,10 @@ export function ModelGrid<T>({
               </div>
               {getMeta ? <span className="num shrink-0 text-[12px] text-muted-foreground">{getMeta(item)}</span> : null}
             </div>
-            {status ? (
-              <div className="mt-3 border-t border-border pt-3">
-                <StatusBadge status={status} />
+            {status || getActivity ? (
+              <div className="mt-3 flex items-center justify-between gap-2 border-t border-border pt-3">
+                {status ? <StatusBadge status={status} /> : <span />}
+                {getActivity ? <span className="t-meta truncate">{getActivity(item)}</span> : null}
               </div>
             ) : null}
           </Card>

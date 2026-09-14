@@ -356,7 +356,7 @@ async function run(): Promise<void> {
 
     for (let i = 0; i < PRODUCT_DEFS.length; i++) {
       const def = PRODUCT_DEFS[i];
-      const product = await catalog.createProduct(company.id, {
+      const product = await catalog.createProduct(currentUser, {
         collectionId: def.collectionKey ? collectionByKey[def.collectionKey] : undefined,
         name: def.name,
         code: def.code,

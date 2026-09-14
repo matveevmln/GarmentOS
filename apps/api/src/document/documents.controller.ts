@@ -22,7 +22,7 @@ import {
   type DocumentResponseDto,
 } from "@garmentos/shared-types";
 import { CurrentUser, type AuthenticatedRequestUser } from "../auth/current-user.decorator";
-import { RequirePermissions } from "../auth/require-permissions.decorator";
+import { RequireAnyPermission } from "../auth/require-permissions.decorator";
 import { AuditService } from "../audit/audit.service";
 import { DocumentService } from "./document.service";
 
@@ -46,9 +46,22 @@ interface UploadedFileLike {
 }
 
 // Показ документов, привязанных к сущности (например, спецификация,
-// привязанная к production_order) — минимум, нужный вертикальному сценарию
-// Итерации 7 (docs/ROADMAP.md), не универсальный Entity Timeline
-// (docs/INBOX_ARCHITECTURE.md, раздел 7.3 — это задел на будущее).
+// привязанная к production_order, или фото модели) — минимум, нужный
+// вертикальному сценарию Итерации 7 (docs/ROADMAP.md), не универсальный
+// Entity Timeline (docs/INBOX_ARCHITECTURE.md, раздел 7.3 — это задел на
+// будущее).
+//
+// Права — RequireAnyPermission (Этап 2 — «Паспорт модели», 2026-09-12):
+// этот контроллер обслуживает документы сразу нескольких доменов (фото
+// модели — catalog.*, спецификация — specification.*, накладные/акты
+// партии — contract_manufacturing.*), а не только производство, как было
+// изначально. Достаточно права ЛЮБОГО из этих трёх модулей — сам документ
+// всё равно тенант-изолирован через companyId в DocumentService, здесь
+// проверяется только "человек вообще имеет доступ к документообороту",
+// а не "к какому именно из трёх модулей".
+const DOCUMENT_READ_PERMISSIONS = ["contract_manufacturing.read", "catalog.read", "specification.read"];
+const DOCUMENT_WRITE_PERMISSIONS = ["contract_manufacturing.write", "catalog.write", "specification.write"];
+
 @ApiTags("documents")
 @Controller("documents")
 export class DocumentsController {
@@ -57,7 +70,7 @@ export class DocumentsController {
     private readonly auditService: AuditService,
   ) {}
 
-  @RequirePermissions("contract_manufacturing.read")
+  @RequireAnyPermission(...DOCUMENT_READ_PERMISSIONS)
   @Get()
   async listForEntity(
     @Query() query: ListDocumentsForEntityQueryDto,
@@ -75,7 +88,7 @@ export class DocumentsController {
   // и ничего больше. Сопоставление данных документа с данными партии —
   // отдельный шаг поверх document_derivatives, он показывает расхождение
   // пользователю, а не переписывает записи молча.
-  @RequirePermissions("contract_manufacturing.write")
+  @RequireAnyPermission(...DOCUMENT_WRITE_PERMISSIONS)
   @Post()
   @UseInterceptors(FileInterceptor("file", { limits: { fileSize: MAX_UPLOAD_BYTES } }))
   async upload(
@@ -129,7 +142,7 @@ export class DocumentsController {
   // редиректом — это работало только с публичным бакетом, то есть договоры
   // компании читал бы любой, кто знает адрес. Теперь оба случая идут одним
   // путём: адаптер хранилища возвращает байты, права уже проверены.
-  @RequirePermissions("contract_manufacturing.read")
+  @RequireAnyPermission(...DOCUMENT_READ_PERMISSIONS)
   @Get(":id/file")
   async downloadFile(
     @Param("id") id: string,

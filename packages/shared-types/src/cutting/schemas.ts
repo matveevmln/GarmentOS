@@ -37,6 +37,10 @@ export type IssueCuttingOrderDto = z.infer<typeof issueCuttingOrderSchema>;
 export const cuttingFactMaterialSchema = z.object({
   materialId: z.string().uuid(),
   consumedQuantity: z.number().min(0),
+  // Возврат материала на склад (Этап 3, владелец проекта, 2026-09-12) —
+  // независимый факт от consumedQuantity: план/выдано/факт/возврат — четыре
+  // самостоятельных числа. Необязателен, по умолчанию ничего не возвращено.
+  returnedQuantity: z.number().min(0).optional(),
   rollNote: z.string().nullable().optional(),
 });
 
@@ -63,6 +67,9 @@ export const cuttingOrderMaterialResponseSchema = z.object({
   requiredQuantity: z.number(),
   allocatedQuantity: z.number().nullable(),
   consumedQuantity: z.number().nullable(),
+  // Возврат на склад (Этап 3) — null, пока факт кроя (и возврат вместе с
+  // ним) ещё не вносился.
+  returnedQuantity: z.number().nullable(),
   rollNote: z.string().nullable(),
 });
 

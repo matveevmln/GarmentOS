@@ -68,6 +68,13 @@
   --color-warning: var(--warning);
   --color-danger: var(--danger);
   --color-surface: var(--surface);
+  --color-batch-line: var(--batch-line);
+  --color-batch-action: var(--batch-action);
+  --color-batch-size: var(--batch-size);
+  --color-batch-ink: var(--batch-ink);
+  --color-batch-paper: var(--batch-paper);
+  --color-batch-copper: var(--batch-copper);
+  --color-batch-track: var(--batch-track);
   /* Пакет @fontsource-variable/onest регистрирует @font-face под именем
      "Onest Variable" (переменное начертание), а не "Onest". Без первого
      имени в стеке браузер молча падал на системный sans-serif — проверено
@@ -175,6 +182,31 @@
   --glass-bg: color-mix(in oklab, var(--card) 72%, transparent);
   --glass-border: color-mix(in oklab, var(--foreground) 8%, transparent);
   --glass-blur: 18px;
+
+  /* ====== Токены: карточка партии ======
+   * Перенесены из визуальной лаборатории Lovable (проект "GarmentOS").
+   * --batch-line/--batch-action/--batch-size — из первого прохода
+   * (ПРОМПТ №08, светлая карточка «ТЕКУЩАЯ») — используются только
+   * компонентом Breakdown (раскладка по цветам/размерам), который
+   * визуально не менялся между итерациями и остался общим для обоих
+   * состояний карточки.
+   *
+   * --batch-ink/--batch-paper/--batch-copper/--batch-track — ПРОМПТ №08.2
+   * (владелец проекта, 2026-09-14): явное исправление — верным эталоном
+   * оказалась не светлая «ТЕКУЩАЯ», а тёмная «АЛЬТЕРНАТИВА»
+   * (src/components/gos/production-lab.tsx, AlternativeBatchCard, тот же
+   * Lovable-проект) — тёмная шапка с фото модели поверх светлого тела с
+   * метриками. Без префикса alt- — теперь это единственная, канонична
+   * карточка, а не альтернатива чему-либо. --batch-shell (фон прежней
+   * карточки-контейнера) удалён — с заменой контейнера на .batch-hero/
+   * .batch-body он больше нигде не используется. */
+  --batch-line: oklch(0.91 0.008 250);
+  --batch-action: oklch(0.55 0.23 277);
+  --batch-size: oklch(0.56 0.035 250);
+  --batch-ink: oklch(0.19 0.012 55);
+  --batch-paper: oklch(0.985 0.006 82);
+  --batch-copper: oklch(0.64 0.145 48);
+  --batch-track: oklch(0.89 0.009 72);
 }
 
 
@@ -215,8 +247,9 @@
 
 @utility num {
   font-family: var(--font-mono);
-  font-variant-numeric: tabular-nums;
-  font-feature-settings: "tnum";
+  font-variant-numeric: tabular-nums lining-nums;
+  font-feature-settings: "tnum", "lnum";
+  word-spacing: -0.18em;
 }
 
 /* Editorial-заголовок: Inter Tight, плотный трекинг, оптический вес */
@@ -323,13 +356,20 @@
 }
 
 /* Ключевая цифра: суммы, количества, KPI */
+/* word-spacing: разделитель разрядов — неразрывный пробел (ru-RU,
+   Intl.NumberFormat). В моноширинном шрифте он занимает полную ширину
+   знакоместа, и «1 000» читалось как «1   000» — два числа вместо одного.
+   Сжимаем сам пробел, не трогая ни строку, ни tabular-nums: цифры
+   по-прежнему выравниваются столбиком. Никаких точек внутри числа при
+   этом не появляется — разделитель остаётся пробелом. */
 @utility t-figure {
   font-family: var(--font-mono);
   font-size: 26px;
   font-weight: 500;
   line-height: 1.05;
   letter-spacing: -0.02em;
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: tabular-nums lining-nums;
+  word-spacing: -0.36em;
 }
 
 /* Числовое значение внутри строки данных */
@@ -337,8 +377,9 @@
   font-family: var(--font-mono);
   font-size: 13px;
   font-weight: 500;
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: tabular-nums lining-nums;
   letter-spacing: -0.01em;
+  word-spacing: -0.18em;
 }
 
 
@@ -842,6 +883,22 @@
   }
 }
 
+/* Тёмный hero главного KPI (ПРОМПТ №09, владелец проекта, 2026-09-14) —
+ * перенесено дословно из production-lab.tsx (ProductionHome, актуальный
+ * маршрут "/" в Lovable) — единственный настоящий тёмный hero-паттерн вне
+ * BatchCard в текущей версии Lovable. Используется один раз, на Главной,
+ * для главного производственного показателя — не декорация, а та же
+ * логика dark-акцента: тёмным выделяется единственный самый важный блок
+ * экрана, всё остальное остаётся светлым. */
+@utility production-summary {
+  background-image: radial-gradient(
+    80% 160% at 0% 0%,
+    color-mix(in oklab, var(--sidebar-primary) 18%, transparent),
+    transparent 62%
+  );
+  box-shadow: var(--shadow-3);
+}
+
 
 /* Фокус внутри тёмного рельса: подложка и цвет от токенов сайдбара */
 [data-rail] {
@@ -886,3 +943,201 @@
 .rdp-button_next {
   box-shadow: none;
 }
+
+/* ====== Карточка производственной партии ======
+ *
+ * ПРОМПТ №08.2 (владелец проекта, 2026-09-14) — исправление: ПРОМПТ №08
+ * перенёс светлую карточку «ТЕКУЩАЯ» из визуальной лаборатории Lovable
+ * (проект "GarmentOS"); владелец проекта явно указал, что верный эталон —
+ * тёмная «АЛЬТЕРНАТИВА» (src/components/gos/production-lab.tsx,
+ * AlternativeBatchCard, src/styles.css того же проекта). Классы
+ * перенесены дословно, без префикса alt- — теперь это единственная,
+ * канонична карточка. Тёмная шапка (фото + модель + номер) поверх
+ * светлого тела (метрики/цвета/тумблер/раскладка) — раскладка
+ * (.swatch-dot/.breakdown-color/.size-pill ниже) визуально не входит в
+ * эту замену: в самом Lovable-прототипе она общая для обеих карточек и
+ * не менялась между итерациями.
+ */
+
+.batch-card {
+  background: var(--batch-paper);
+  border: 1px solid color-mix(in oklab, var(--batch-ink) 12%, transparent);
+  box-shadow:
+    0 1px 0 color-mix(in oklab, var(--card) 80%, transparent) inset,
+    0 22px 48px -28px color-mix(in oklab, var(--batch-ink) 48%, transparent);
+  transition:
+    transform var(--dur-3) var(--ease-out),
+    box-shadow var(--dur-3) var(--ease-out),
+    border-color var(--dur-2) var(--ease-out);
+}
+.batch-card:hover {
+  transform: translateY(-2px);
+  border-color: color-mix(in oklab, var(--batch-copper) 35%, transparent);
+  box-shadow: 0 28px 58px -30px color-mix(in oklab, var(--batch-ink) 55%, transparent);
+}
+
+/* Тёмная шапка — фото модели, название, номер партии, статус. Диагональная
+ * штриховка (::after) и медный радиальный блик — фирменные детали
+ * референса, не декоративное излишество: они дают карточке ощущение
+ * глубины без тяжёлой тени. */
+.batch-hero {
+  position: relative;
+  overflow: hidden;
+  background:
+    radial-gradient(80% 140% at 100% 0%, color-mix(in oklab, var(--batch-copper) 22%, transparent), transparent 62%),
+    var(--batch-ink);
+}
+.batch-hero::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  opacity: 0.12;
+  pointer-events: none;
+  background-image: repeating-linear-gradient(90deg, transparent 0 9px, color-mix(in oklab, var(--card) 28%, transparent) 10px);
+  mask-image: linear-gradient(90deg, transparent, black 72%);
+}
+.batch-hero-thumb {
+  width: 68px;
+  height: 78px;
+  border-radius: 10px;
+  border-color: color-mix(in oklab, var(--card) 22%, transparent);
+  box-shadow: 0 12px 26px -14px color-mix(in oklab, var(--batch-ink) 80%, transparent);
+}
+
+.batch-kicker,
+.batch-label {
+  display: block;
+  font-size: 9px;
+  font-weight: 600;
+  line-height: 1.2;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.batch-kicker {
+  color: color-mix(in oklab, var(--sidebar-foreground) 50%, transparent);
+}
+.batch-label {
+  color: var(--muted-foreground);
+}
+
+/* Бейдж статуса поверх тёмной шапки — переопределяет свой обычный тон
+ * (StatusBadge окрашивает по статусу на светлом фоне) на нейтральную
+ * полупрозрачную белую пилюлю: селектор той же специфичности, что и
+ * утилиты тона, но объявлен ниже по каскаду — как и в референсе. Статус
+ * при этом остаётся настоящим (реальный текст/tone из STATUS_MAP), меняется
+ * только его цвет здесь. */
+.batch-status-badge {
+  background: color-mix(in oklab, var(--card) 10%, transparent);
+  border-color: color-mix(in oklab, var(--card) 14%, transparent);
+  color: var(--sidebar-foreground);
+}
+
+.batch-body {
+  background: var(--batch-paper);
+}
+
+.batch-quantity {
+  color: var(--batch-ink);
+  font-size: 38px;
+  font-weight: 600;
+  line-height: 0.94;
+  letter-spacing: -0.045em;
+}
+
+.batch-swatch {
+  box-shadow: 0 1px 4px color-mix(in oklab, var(--batch-ink) 22%, transparent);
+}
+
+.batch-toggle {
+  border: 1px solid var(--border);
+  background: color-mix(in oklab, var(--card) 68%, transparent);
+  box-shadow: var(--shadow-1);
+  transition:
+    border-color var(--dur-2) var(--ease-out),
+    background-color var(--dur-2) var(--ease-out),
+    transform var(--dur-1) var(--ease-out);
+}
+.batch-toggle:hover {
+  border-color: color-mix(in oklab, var(--batch-copper) 38%, var(--border));
+}
+.batch-toggle:active {
+  transform: scale(0.985);
+}
+.batch-toggle:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.batch-toggle-track {
+  background: var(--batch-track);
+  box-shadow: inset 0 1px 2px color-mix(in oklab, var(--batch-ink) 14%, transparent);
+  transition: background-color var(--dur-2) var(--ease-out);
+}
+.batch-toggle-track > span {
+  background: var(--card);
+  box-shadow: 0 2px 6px color-mix(in oklab, var(--batch-ink) 25%, transparent);
+  transition: transform var(--dur-3) var(--ease-emphasis);
+}
+.batch-toggle-track.is-on {
+  background: var(--success);
+}
+.batch-toggle-track.is-on > span {
+  transform: translateX(22px);
+}
+
+.batch-expand {
+  background: color-mix(in oklab, var(--batch-copper) 5%, var(--batch-paper));
+  color: var(--batch-ink);
+  transition:
+    background-color var(--dur-2) var(--ease-out),
+    color var(--dur-2) var(--ease-out);
+}
+.batch-expand:hover {
+  background: color-mix(in oklab, var(--batch-copper) 11%, var(--batch-paper));
+  color: var(--primary);
+}
+
+@media (max-width: 480px) {
+  .batch-card:hover {
+    transform: none;
+  }
+  .batch-quantity {
+    font-size: 36px;
+  }
+}
+
+.swatch-dot {
+  box-shadow:
+    0 0 0 2px var(--card),
+    0 0 0 3px color-mix(in oklab, var(--foreground) 8%, transparent);
+}
+
+.breakdown-color {
+  background: var(--card);
+  border-top: 1px solid var(--batch-line);
+}
+.batch-breakdown .breakdown-color:first-child {
+  border-top: 0;
+}
+
+.size-pill {
+  border-color: color-mix(in oklab, var(--batch-size) 34%, var(--batch-line));
+  box-shadow: 0 1px 2px color-mix(in oklab, var(--foreground) 7%, transparent);
+  transition:
+    border-color var(--dur-2) var(--ease-out),
+    box-shadow var(--dur-2) var(--ease-out),
+    transform var(--dur-1) var(--ease-out);
+}
+.size-pill > span:first-child {
+  background: var(--batch-size);
+  color: var(--card);
+}
+.size-pill:hover {
+  border-color: color-mix(in oklab, var(--batch-action) 30%, var(--border));
+  box-shadow: var(--shadow-2);
+}
+
+.batch-sheet-summary {
+  background: transparent;
+}
+

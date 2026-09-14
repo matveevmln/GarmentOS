@@ -10,7 +10,16 @@ import { attachDocument, type AttachDocumentResult } from "./attach-document";
 
 export interface GenerateSpecificationDocumentInput {
   companyId: string;
-  productionOrderId: string;
+  // Сущность, к которой привязывается сгенерированный PDF — исторически
+  // всегда был production_order (Итерация 7), с Этапа 2 («Паспорт модели»,
+  // владелец проекта, 2026-09-12) генерируется и для новой самостоятельной
+  // сущности specifications (packages/domain/specification). entityId также
+  // используется как часть ключа файла в хранилище — переименовано из
+  // productionOrderId вместе с обобщением, оба существующих вызывающих
+  // (generateSpecification для production_order, regenerateSpecificationDocument)
+  // обновлены на новые имена полей без изменения поведения.
+  entityType: string;
+  entityId: string;
   uploadedBy: string | null;
   data: SpecificationDocumentData;
   // Разные цеха/компании в будущем используют разные шаблоны (docs/DOCUMENT_ENGINE_ARCHITECTURE.md,
@@ -48,7 +57,7 @@ export async function generateSpecificationDocument(
 ): Promise<AttachDocumentResult> {
   const template = input.template ?? DEFAULT_SPECIFICATION_TEMPLATE;
   const pdfBytes = await deps.renderer.renderSpecification(template, input.data);
-  const key = `specifications/${input.companyId}/${input.productionOrderId}-${Date.now()}.pdf`;
+  const key = `specifications/${input.companyId}/${input.entityId}-${Date.now()}.pdf`;
   const { url } = await deps.storage.upload(key, pdfBytes, "application/pdf");
 
   const supersedesDocumentIds = input.supersedesDocumentIds ?? [];
@@ -61,7 +70,7 @@ export async function generateSpecificationDocument(
       title: `Спецификация №${input.data.fields.specNumber ?? ""}`.trim(),
       uploadedBy: input.uploadedBy,
       supersedesDocumentId: supersedesDocumentIds[0] ?? null,
-      links: [{ entityType: "production_order", entityId: input.productionOrderId, source: "ai" }],
+      links: [{ entityType: input.entityType, entityId: input.entityId, source: "ai" }],
     },
   );
 

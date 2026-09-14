@@ -1,11 +1,12 @@
 import { Inject, Injectable, NotFoundException } from "@nestjs/common";
-import { invoices as invoicesTable, type Database } from "@garmentos/db-schema";
+import { invoices as invoicesTable, specifications as specificationsTable, type Database } from "@garmentos/db-schema";
 import type { BatchPassportResponseDto, ProductionOrderCostSnapshot } from "@garmentos/shared-types";
 import { and, eq } from "drizzle-orm";
 import { CatalogService } from "../catalog/catalog.service";
 import { ContractManufacturingService } from "../contract-manufacturing/contract-manufacturing.service";
 import { DATABASE_CONNECTION } from "../database/database.module";
 import { DocumentService } from "../document/document.service";
+import { WarehouseService } from "../warehouse/warehouse.service";
 
 function daysOverdue(dueDate: string | null, today: Date): number | null {
   if (!dueDate) return null;
@@ -26,6 +27,7 @@ export class BatchPassportService {
     private readonly contractManufacturingService: ContractManufacturingService,
     private readonly catalogService: CatalogService,
     private readonly documentService: DocumentService,
+    private readonly warehouseService: WarehouseService,
     @Inject(DATABASE_CONNECTION) private readonly db: Database,
   ) {}
 
@@ -39,7 +41,7 @@ export class BatchPassportService {
       });
     }
 
-    const [product, workshop, variants, documents, invoiceRows] = await Promise.all([
+    const [product, workshop, variants, documents, invoiceRows, specificationRow] = await Promise.all([
       this.catalogService.findProductById(companyId, order.productId),
       this.contractManufacturingService.findWorkshopById(companyId, order.workshopId),
       this.catalogService.listProductVariants(companyId, order.productId),
@@ -48,6 +50,16 @@ export class BatchPassportService {
         .select({ id: invoicesTable.id, status: invoicesTable.status, amount: invoicesTable.amount, dueDate: invoicesTable.dueDate })
         .from(invoicesTable)
         .where(and(eq(invoicesTable.companyId, companyId), eq(invoicesTable.productionOrderId, order.id))),
+      // Спецификация-источник (Этап 3) — прямой запрос вместо
+      // SpecificationService: SpecificationModule импортирует ReportingModule
+      // (ради CostingService), обратный импорт создал бы цикл модулей.
+      order.specificationId
+        ? this.db
+            .select({ id: specificationsTable.id, specNumber: specificationsTable.specNumber })
+            .from(specificationsTable)
+            .where(and(eq(specificationsTable.companyId, companyId), eq(specificationsTable.id, order.specificationId)))
+            .limit(1)
+        : Promise.resolve([]),
     ]);
     if (!product) {
       throw new NotFoundException({ statusCode: 404, code: "PRODUCT_NOT_FOUND", message: `Модель ${order.productId} не найдена` });
@@ -92,11 +104,19 @@ export class BatchPassportService {
     }
     timeline.sort((a, b) => a.occurredAt.getTime() - b.occurredAt.getTime());
 
+    const requirement = computeMaterialRequirement(snapshot, Number(order.plannedQuantity));
+    const onHandByMaterial = await this.aggregateMaterialOnHand(
+      companyId,
+      requirement.map((row) => row.materialId),
+    );
+
     return {
       id: order.id,
       status: order.status,
       plannedQuantity: order.plannedQuantity,
       agreedUnitPrice: order.agreedUnitPrice,
+      orderNumber: order.orderNumber,
+      specification: specificationRow[0] ? { id: specificationRow[0].id, specNumber: specificationRow[0].specNumber } : null,
       dueDate: order.dueDate,
       daysOverdue: order.status === "received" || order.status === "cancelled" ? null : daysOverdue(order.dueDate, new Date()),
       createdAt: order.createdAt,
@@ -113,8 +133,30 @@ export class BatchPassportService {
       documents,
       invoices: invoiceRows.map((row) => ({ id: row.id, status: row.status, amount: Number(row.amount), dueDate: row.dueDate })),
       timeline,
-      materialRequirement: computeMaterialRequirement(snapshot, Number(order.plannedQuantity)),
+      materialRequirement: requirement.map((row) => {
+        const onHand = onHandByMaterial.get(row.materialId) ?? 0;
+        const isAvailable = onHand >= row.totalRequired;
+        return { ...row, onHand, deficit: isAvailable ? 0 : row.totalRequired - onHand, isAvailable };
+      }),
     };
+  }
+
+  // Остаток материала — АГРЕГАТ ПО ВСЕМ СКЛАДАМ КОМПАНИИ (Этап 3, владелец
+  // проекта, 2026-09-12) — временная модель до появления понятия «склад
+  // партии»; UI обязан явно подписать это как «Остаток по всем складам».
+  // Переиспользует существующий WarehouseService.listMaterialStock (P0-3) по
+  // каждому складу — новой агрегирующей таблицы не заводит.
+  private async aggregateMaterialOnHand(companyId: string, materialIds: string[]): Promise<Map<string, number>> {
+    const totals = new Map<string, number>();
+    if (materialIds.length === 0) return totals;
+    const warehouses = await this.warehouseService.listWarehouses(companyId);
+    for (const warehouse of warehouses) {
+      const items = await this.warehouseService.listMaterialStock(companyId, warehouse.id);
+      for (const item of items) {
+        totals.set(item.materialId, (totals.get(item.materialId) ?? 0) + Number(item.quantityOnHand));
+      }
+    }
+    return totals;
   }
 }
 
@@ -125,10 +167,14 @@ export class BatchPassportService {
 // Партии, подтверждённые до появления норм в снимке, дают пустой список —
 // подставлять текущие нормы модели нельзя, это ровно то, от чего защищает
 // весь механизм: старая партия не должна пересчитываться задним числом.
+export type MaterialRequirementBase = Array<
+  Omit<BatchPassportResponseDto["materialRequirement"][number], "onHand" | "deficit" | "isAvailable">
+>;
+
 export function computeMaterialRequirement(
   snapshot: ProductionOrderCostSnapshot | null,
   plannedQuantity: number,
-): BatchPassportResponseDto["materialRequirement"] {
+): MaterialRequirementBase {
   const norms = snapshot?.materialNorms ?? [];
   return norms.map((norm) => {
     const consumptionPerUnit = norm.quantityPerUnit * (1 + norm.wastePercent / 100);

@@ -48,9 +48,15 @@ export interface MetricItem {
   onSelect?: () => void;
 }
 
-export function MetricStrip({ items }: { items: MetricItem[] }) {
+/** compact — плотный режим для вторичных показателей (визуальная
+ *  переработка 2026-09-13): на карточке модели четыре крупных плитки
+ *  занимали почти весь первый экран мобильного и отодвигали сам список
+ *  партий — то, ради чего экран открывают. На Главной показатели остаются
+ *  крупными: там они и есть содержание экрана. Компонент один, меняется
+ *  только плотность — это режим той же системы, а не второй компонент. */
+export function MetricStrip({ items, compact = false }: { items: MetricItem[]; compact?: boolean }) {
   return (
-    <div className="stagger grid grid-cols-2 gap-3 md:gap-4 lg:grid-cols-4">
+    <div className={cn("stagger grid grid-cols-2 gap-3", compact ? "gap-2 sm:grid-cols-4" : "md:gap-4 lg:grid-cols-4")}>
       {items.map((m) => {
         const Tag = m.onSelect ? "button" : "div";
         return (
@@ -58,7 +64,8 @@ export function MetricStrip({ items }: { items: MetricItem[] }) {
             key={m.label}
             {...(m.onSelect ? { type: "button" as const, onClick: m.onSelect } : {})}
             className={cn(
-              "surface-card hairline-accent lift group relative flex flex-col overflow-hidden rounded-[12px] px-4 py-4 text-left md:px-5 md:py-5",
+              "surface-card hairline-accent lift group relative flex flex-col overflow-hidden rounded-[12px] text-left",
+              compact ? "px-3 py-3" : "px-4 py-4 md:px-5 md:py-5",
               m.tone ? "accent-surface" : "surface-grad",
               "hover:elev-3 hover:border-primary/25",
               m.onSelect && "focus-ring",
@@ -81,7 +88,8 @@ export function MetricStrip({ items }: { items: MetricItem[] }) {
             <CountUp
               value={m.value}
               className={cn(
-                "t-figure mt-4 text-[38px] md:text-[46px]",
+                "t-figure",
+                compact ? "mt-2 text-[24px]" : "mt-4 text-[38px] md:text-[46px]",
                 m.tone === "danger" && "text-danger",
                 m.tone === "warning" && "text-warning",
               )}
@@ -89,7 +97,8 @@ export function MetricStrip({ items }: { items: MetricItem[] }) {
 
             <span
               className={cn(
-                "mt-4 block h-[2px] w-10 rounded-full transition-all duration-300 group-hover:w-16",
+                "block h-[2px] w-10 rounded-full transition-all duration-300 group-hover:w-16",
+                compact ? "mt-2 w-7" : "mt-4",
                 m.tone === "danger"
                   ? "bg-danger/45"
                   : m.tone === "warning"

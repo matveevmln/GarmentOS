@@ -12,6 +12,10 @@ export interface Product {
   code: string;
   category: string | null;
   season: string | null;
+  // Свободный текст паспорта модели (Этап 2 — «Паспорт модели», владелец
+  // проекта, 2026-09-12) — не заменяет структурированные характеристики
+  // (ProductAttribute), а дополняет их прозой.
+  description: string | null;
   status: ProductStatus;
   techPackUrl: string | null;
   // Плановые составляющие себестоимости, не выводимые из BOM (см.

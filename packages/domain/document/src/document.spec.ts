@@ -171,7 +171,7 @@ describe("domain/document", () => {
 
       const result = await generateSpecificationDocument(
         { documents, documentLinks, documentDerivatives, storage, renderer },
-        { companyId: company.id, productionOrderId, uploadedBy: null, data },
+        { companyId: company.id, entityType: "production_order", entityId: productionOrderId, uploadedBy: null, data },
       );
 
       expect(result.document.docType).toBe("specification");
@@ -195,7 +195,7 @@ describe("domain/document", () => {
       // требование владельца проекта 2026-07-26.
       const regenerated = await regenerateSpecificationDocument(
         { documents, documentLinks, documentDerivatives, storage, renderer },
-        { companyId: company.id, productionOrderId, uploadedBy: null, sourceDocumentId: result.document.id },
+        { companyId: company.id, entityType: "production_order", entityId: productionOrderId, uploadedBy: null, sourceDocumentId: result.document.id },
       );
       expect(regenerated.document.id).not.toBe(result.document.id);
       expect(renderer.calls).toHaveLength(2);
@@ -219,13 +219,14 @@ describe("domain/document", () => {
       const productionOrderId = "44444444-4444-4444-4444-444444444444";
       const data = buildSpecificationData();
 
-      const v1 = await generateSpecificationDocument(deps, { companyId: company.id, productionOrderId, uploadedBy: null, data });
+      const v1 = await generateSpecificationDocument(deps, { companyId: company.id, entityType: "production_order", entityId: productionOrderId, uploadedBy: null, data });
       expect(v1.document.isCurrentVersion).toBe(true);
       expect(v1.document.supersedesDocumentId).toBeNull();
 
       const v2 = await generateSpecificationDocument(deps, {
         companyId: company.id,
-        productionOrderId,
+        entityType: "production_order",
+        entityId: productionOrderId,
         uploadedBy: null,
         data,
         supersedesDocumentIds: [v1.document.id],

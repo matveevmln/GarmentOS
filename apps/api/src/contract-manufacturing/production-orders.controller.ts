@@ -1,9 +1,10 @@
-import { Body, Controller, Get, HttpStatus, NotFoundException, Param, Post } from "@nestjs/common";
+import { Body, Controller, Get, HttpStatus, NotFoundException, Param, Post, Query } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
 import { createZodDto } from "nestjs-zod";
 import {
   createProductionOrderFromQuantitySchema,
   createProductionOrderSchema,
+  listProductionOrdersQuerySchema,
   previewProductionOrderVariantsResponseSchema,
   previewProductionOrderVariantsSchema,
   productionOrderResponseSchema,
@@ -21,6 +22,7 @@ class CreateProductionOrderFromQuantityDto extends createZodDto(createProduction
 class ReceiveProductionOrderDto extends createZodDto(receiveProductionOrderSchema) {}
 class PreviewProductionOrderVariantsDto extends createZodDto(previewProductionOrderVariantsSchema) {}
 class UpdateProductionOrderStatusDto extends createZodDto(updateProductionOrderStatusSchema) {}
+class ListProductionOrdersQueryDto extends createZodDto(listProductionOrdersQuerySchema) {}
 
 @ApiTags("production-orders")
 @Controller("production-orders")
@@ -122,10 +124,18 @@ export class ProductionOrdersController {
     return productionOrderResponseSchema.parse(productionOrder);
   }
 
+  // ?productId= — партии одной модели (Model-first Minimal Core, ПРОМПТ
+  // №06.1). Необязателен: без него список ведёт себя ровно как раньше
+  // (обратная совместимость).
   @RequirePermissions("contract_manufacturing.read")
   @Get()
-  async list(@CurrentUser() currentUser: AuthenticatedRequestUser): Promise<ProductionOrderResponseDto[]> {
-    const productionOrders = await this.contractManufacturingService.listProductionOrders(currentUser.companyId);
+  async list(
+    @Query() query: ListProductionOrdersQueryDto,
+    @CurrentUser() currentUser: AuthenticatedRequestUser,
+  ): Promise<ProductionOrderResponseDto[]> {
+    const productionOrders = query.productId
+      ? await this.contractManufacturingService.listProductionOrdersByProduct(currentUser.companyId, query.productId)
+      : await this.contractManufacturingService.listProductionOrders(currentUser.companyId);
     return productionOrders.map((order) => productionOrderResponseSchema.parse(order));
   }
 

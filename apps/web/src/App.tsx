@@ -15,6 +15,8 @@ import { MaterialsPage } from "./pages/MaterialsPage";
 import { WarehousesPage } from "./pages/WarehousesPage";
 import { ProductsPage } from "./pages/ProductsPage";
 import { ProductDetailPage } from "./pages/ProductDetailPage";
+import { SpecificationsPage } from "./pages/SpecificationsPage";
+import { SpecificationDetailPage } from "./pages/SpecificationDetailPage";
 import { PurchaseOrdersPage } from "./pages/PurchaseOrdersPage";
 import { ProductionOrdersPage } from "./pages/ProductionOrdersPage";
 import { BatchPassportPage } from "./pages/BatchPassportPage";
@@ -44,6 +46,8 @@ export function App() {
               <Route path="/warehouses" element={<WarehousesPage />} />
               <Route path="/products" element={<ProductsPage />} />
               <Route path="/products/:id" element={<ProductDetailPage />} />
+              <Route path="/specifications" element={<SpecificationsPage />} />
+              <Route path="/specifications/:id" element={<SpecificationDetailPage />} />
               <Route path="/purchase-orders" element={<PurchaseOrdersPage />} />
               <Route path="/production-orders" element={<ProductionOrdersPage />} />
               <Route path="/production-orders/:id" element={<BatchPassportPage />} />

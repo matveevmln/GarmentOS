@@ -25,6 +25,21 @@ export class CuttingMaterialStockAdapter implements MaterialStockPort {
     await this.warehouseService.consumeMaterialStock(warehouseId, materialId, quantity, meta, true);
   }
 
+  // Возврат материала на склад после кроя (Этап 3) — тот же механизм, что и
+  // приёмка закупки (material_stock_items/material_stock_movements), только
+  // с referenceType='cutting_order_return' для истории движений. Без
+  // currentUser/аудита внутри — тот же принцип, что у consume()/adjust()
+  // выше: аудит-запись "cutting_order.fact_recorded" уже пишет
+  // CuttingService целиком, включая возврат по каждому материалу.
+  async receive(
+    warehouseId: string,
+    materialId: string,
+    quantity: number,
+    meta: { referenceType: string; referenceId: string; createdBy: string | null },
+  ): Promise<void> {
+    await this.warehouseService.receiveMaterialStockInternal(warehouseId, materialId, quantity, meta);
+  }
+
   async adjust(
     warehouseId: string,
     materialId: string,

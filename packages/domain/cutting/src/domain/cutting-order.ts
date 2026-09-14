@@ -19,6 +19,10 @@ export interface CuttingOrderMaterial {
   requiredQuantity: string;
   allocatedQuantity: string | null;
   consumedQuantity: string | null;
+  // Возврат на склад после кроя (Этап 3, владелец проекта, 2026-09-12) —
+  // четвёртый независимый факт (план/выдано/факт/возврат), не подменяет и не
+  // корректирует consumedQuantity. null — возврат ещё не вносился.
+  returnedQuantity: string | null;
   rollNote: string | null;
   createdAt: Date;
   updatedAt: Date;

@@ -80,6 +80,15 @@ export const workshopResponseSchema = z.object({
 });
 export type WorkshopResponseDto = z.infer<typeof workshopResponseSchema>;
 
+// Фильтр списка заказов пошива по модели (Model-first Minimal Core, ПРОМПТ
+// №06.1) — «партии этой модели» на карточке модели и в общем списке.
+// Необязателен: без него список ведёт себя ровно как раньше (обратная
+// совместимость).
+export const listProductionOrdersQuerySchema = z.object({
+  productId: z.string().uuid().optional(),
+});
+export type ListProductionOrdersQueryDto = z.infer<typeof listProductionOrdersQuerySchema>;
+
 export const productionOrderStatusSchema = z.enum([
   "draft",
   "placed",
@@ -302,6 +311,11 @@ export const productionOrderResponseSchema = z.object({
   // обычного заказа.
   sourceProductionOrderId: z.string().uuid().nullable(),
   receivedAt: z.date().nullable(),
+  // Спецификация-источник и номер партии (Этап 3 «Production Master»,
+  // владелец проекта, 2026-09-12) — null у партий, созданных вручную или до
+  // появления этого механизма.
+  specificationId: z.string().uuid().nullable(),
+  orderNumber: z.number().int().nullable(),
   costSnapshot: productionOrderCostSnapshotSchema.nullable(),
   createdBy: z.string().uuid().nullable(),
   createdAt: z.date(),

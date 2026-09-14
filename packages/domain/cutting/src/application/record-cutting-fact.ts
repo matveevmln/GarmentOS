@@ -8,13 +8,23 @@ import {
 import type { CuttingOrderRepository, MaterialStockPort } from "./ports";
 
 export const CUTTING_REFERENCE_TYPE = "cutting_order";
+// Отдельный referenceType для возврата (Этап 3) — тот же material_stock_movements,
+// но история движений остаётся читаемой: "приход из кроя" не перепутать с
+// "приход из закупки" при одинаковом referenceId=cuttingOrderId.
+export const CUTTING_RETURN_REFERENCE_TYPE = "cutting_order_return";
 
 export interface CuttingFactInput {
   companyId: string;
   cuttingOrderId: string;
   /** Склад, с которого реально брали материал — выбирается явно, не угадывается. */
   warehouseId: string;
-  materials: Array<{ materialId: string; consumedQuantity: number; rollNote?: string | null }>;
+  materials: Array<{
+    materialId: string;
+    consumedQuantity: number;
+    /** Возврат на склад (Этап 3) — необязателен, по умолчанию 0. */
+    returnedQuantity?: number;
+    rollNote?: string | null;
+  }>;
   results: Array<{ productVariantId: string; actualQuantity: number }>;
   recordedBy?: string | null;
 }
@@ -48,6 +58,9 @@ function validate(input: CuttingFactInput, order: CuttingOrder): void {
       );
     }
     assertNonNegativeQuantity(row.consumedQuantity, "Фактический расход материала");
+    if (row.returnedQuantity !== undefined) {
+      assertNonNegativeQuantity(row.returnedQuantity, "Возврат материала на склад");
+    }
   }
 
   const knownVariants = new Set(order.results.map((row) => row.productVariantId));
@@ -83,21 +96,32 @@ export async function recordCuttingFact(
 
   const shortages: StockShortage[] = [];
   for (const row of input.materials) {
-    if (row.consumedQuantity === 0) continue;
-    const onHand = await deps.materialStock.quantityOnHand(input.warehouseId, row.materialId);
-    if (onHand < row.consumedQuantity) {
-      shortages.push({
-        materialId: row.materialId,
-        onHandBefore: onHand,
-        consumed: row.consumedQuantity,
-        shortage: row.consumedQuantity - onHand,
+    if (row.consumedQuantity > 0) {
+      const onHand = await deps.materialStock.quantityOnHand(input.warehouseId, row.materialId);
+      if (onHand < row.consumedQuantity) {
+        shortages.push({
+          materialId: row.materialId,
+          onHandBefore: onHand,
+          consumed: row.consumedQuantity,
+          shortage: row.consumedQuantity - onHand,
+        });
+      }
+      await deps.materialStock.consume(input.warehouseId, row.materialId, row.consumedQuantity, {
+        referenceType: CUTTING_REFERENCE_TYPE,
+        referenceId: order.id,
+        createdBy: input.recordedBy ?? null,
       });
     }
-    await deps.materialStock.consume(input.warehouseId, row.materialId, row.consumedQuantity, {
-      referenceType: CUTTING_REFERENCE_TYPE,
-      referenceId: order.id,
-      createdBy: input.recordedBy ?? null,
-    });
+    // Возврат — независимый физический приход, не компенсация расхода выше
+    // (владелец проекта, 2026-09-12: план/выдано/факт/возврат — четыре
+    // самостоятельных факта).
+    if (row.returnedQuantity && row.returnedQuantity > 0) {
+      await deps.materialStock.receive(input.warehouseId, row.materialId, row.returnedQuantity, {
+        referenceType: CUTTING_RETURN_REFERENCE_TYPE,
+        referenceId: order.id,
+        createdBy: input.recordedBy ?? null,
+      });
+    }
   }
 
   const withFact = await deps.cuttingOrders.recordFact(order.id, input.materials, input.results);
@@ -109,8 +133,10 @@ export async function recordCuttingFact(
 }
 
 export interface CorrectCuttingFactResult extends CuttingFactResult {
-  /** Что именно изменилось — для записи в журнал изменений. */
+  /** Что именно изменилось (расход) — для записи в журнал изменений. */
   corrections: Array<{ materialId: string; before: number; after: number; delta: number }>;
+  /** Что изменилось в возврате (Этап 3) — отдельно от расхода. */
+  returnCorrections: Array<{ materialId: string; before: number; after: number; delta: number }>;
 }
 
 // Исправление уже внесённого факта (владелец проекта, 2026-08-30: «нельзя
@@ -131,8 +157,12 @@ export async function correctCuttingFact(
   const previous = new Map(
     order.materials.map((row) => [row.materialId, row.consumedQuantity === null ? 0 : Number(row.consumedQuantity)]),
   );
+  const previousReturned = new Map(
+    order.materials.map((row) => [row.materialId, row.returnedQuantity === null ? 0 : Number(row.returnedQuantity)]),
+  );
 
   const corrections: CorrectCuttingFactResult["corrections"] = [];
+  const returnCorrections: CorrectCuttingFactResult["returnCorrections"] = [];
   const shortages: StockShortage[] = [];
   for (const row of input.materials) {
     const before = previous.get(row.materialId) ?? 0;
@@ -141,27 +171,43 @@ export async function correctCuttingFact(
     // — материал возвращается. Знак корректировки остатка обратен знаку
     // изменения расхода.
     const delta = before - after;
-    if (Math.abs(delta) < 0.0005) continue;
-
-    corrections.push({ materialId: row.materialId, before, after, delta: after - before });
-    if (delta < 0) {
-      const onHand = await deps.materialStock.quantityOnHand(input.warehouseId, row.materialId);
-      if (onHand < -delta) {
-        shortages.push({
-          materialId: row.materialId,
-          onHandBefore: onHand,
-          consumed: -delta,
-          shortage: -delta - onHand,
-        });
+    if (Math.abs(delta) >= 0.0005) {
+      corrections.push({ materialId: row.materialId, before, after, delta: after - before });
+      if (delta < 0) {
+        const onHand = await deps.materialStock.quantityOnHand(input.warehouseId, row.materialId);
+        if (onHand < -delta) {
+          shortages.push({
+            materialId: row.materialId,
+            onHandBefore: onHand,
+            consumed: -delta,
+            shortage: -delta - onHand,
+          });
+        }
       }
+      await deps.materialStock.adjust(input.warehouseId, row.materialId, delta, {
+        referenceType: CUTTING_REFERENCE_TYPE,
+        referenceId: order.id,
+        createdBy: input.recordedBy ?? null,
+      });
     }
-    await deps.materialStock.adjust(input.warehouseId, row.materialId, delta, {
-      referenceType: CUTTING_REFERENCE_TYPE,
-      referenceId: order.id,
-      createdBy: input.recordedBy ?? null,
-    });
+
+    // Возврат — независимая корректировка (Этап 3): выросло возвращённое
+    // количество — остаток растёт на разницу; уменьшилось — списывается
+    // разница обратно. Знак корректировки совпадает со знаком изменения
+    // возврата (в отличие от расхода выше, где он обратный).
+    const returnBefore = previousReturned.get(row.materialId) ?? 0;
+    const returnAfter = row.returnedQuantity ?? 0;
+    const returnDelta = returnAfter - returnBefore;
+    if (Math.abs(returnDelta) >= 0.0005) {
+      returnCorrections.push({ materialId: row.materialId, before: returnBefore, after: returnAfter, delta: returnDelta });
+      await deps.materialStock.adjust(input.warehouseId, row.materialId, returnDelta, {
+        referenceType: CUTTING_RETURN_REFERENCE_TYPE,
+        referenceId: order.id,
+        createdBy: input.recordedBy ?? null,
+      });
+    }
   }
 
   const updated = await deps.cuttingOrders.recordFact(order.id, input.materials, input.results);
-  return { cuttingOrder: updated, shortages, corrections };
+  return { cuttingOrder: updated, shortages, corrections, returnCorrections };
 }

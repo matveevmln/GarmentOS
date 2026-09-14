@@ -47,26 +47,48 @@ const CUTTING_LABEL: Record<CuttingStageState, string> = {
 export function ProductionStepper({
   current,
   cutting = "none",
+  hasSpecification = false,
+  materialsChecked = false,
 }: {
   current: ProductionStage;
   cutting?: CuttingStageState;
+  // «Спецификация» (Этап 3 «Production Master», владелец проекта,
+  // 2026-09-12) — псевдо-этап, показывается только у партий, созданных из
+  // утверждённой спецификации (production_orders.specification_id). Не
+  // значение production_order_status — партия уже существует к моменту,
+  // когда этот шаг может быть показан, поэтому он всегда «пройден».
+  hasSpecification?: boolean;
+  // «Ткань» — псевдо-этап, показывается только когда у партии зафиксированы
+  // нормы расхода (снимок партии). Дефицит материала информационный и не
+  // блокирует прогресс (владелец проекта, 2026-08-30/2026-09-12) — поэтому
+  // этот шаг тоже всегда «пройден», когда показан, независимо от дефицита.
+  materialsChecked?: boolean;
 }) {
   const baseIdx = PRODUCTION_STAGES.indexOf(current);
+  // Спецификация/Ткань — необязательный префикс перед существующей шкалой
+  // (владелец проекта: «не переписывать ProductionStepper, расширить
+  // существующую модель псевдо-этапов»). НЕ значения production_order_status.
+  const prefix: Array<{ key: string; label: string; sub?: string }> = [];
+  if (hasSpecification) prefix.push({ key: "specification", label: "Спецификация" });
+  if (materialsChecked) prefix.push({ key: "materials", label: "Ткань" });
+
   // Раскрой вставляется после «Размещён» (индекс 1) — визуально, не в enum.
-  const stages: Array<{ key: string; label: string; sub?: string }> = [];
+  const stages: Array<{ key: string; label: string; sub?: string }> = [...prefix];
   PRODUCTION_STAGES.forEach((stage, i) => {
     stages.push({ key: stage, label: statusMeta(stage).label });
     if (i === 1) stages.push({ key: "cutting", label: "Раскрой", sub: CUTTING_LABEL[cutting] });
   });
   // Позиция на шкале: до раскроя — как раньше; сам раскрой считается текущим,
-  // пока заказ ещё «Размещён», а задание не завершено.
+  // пока заказ ещё «Размещён», а задание не завершено. Префикс всегда
+  // «пройден» к этому моменту, поэтому просто сдвигает итоговый индекс.
   const cuttingIndex = 2;
   const idx =
-    baseIdx <= 1
+    prefix.length +
+    (baseIdx <= 1
       ? baseIdx === 1 && cutting !== "none" && cutting !== "done"
         ? cuttingIndex
         : baseIdx
-      : baseIdx + 1;
+      : baseIdx + 1);
 
   return (
     <ol className="flex flex-col md:flex-row md:items-stretch">

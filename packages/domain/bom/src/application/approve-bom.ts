@@ -19,7 +19,7 @@ export interface ApproveBomDeps {
 export async function approveBom(deps: ApproveBomDeps, input: ApproveBomInput): Promise<Bom> {
   const bom = await deps.boms.findById(input.companyId, input.bomId);
   if (!bom) {
-    throw new DomainError(`BOM ${input.bomId} не найден в этой компании`, "BOM_NOT_FOUND");
+    throw new DomainError(`Нормы расхода материалов ${input.bomId} не найдены в этой компании`, "BOM_NOT_FOUND");
   }
   assertCanApprove(bom.status);
 

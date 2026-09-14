@@ -1,4 +1,5 @@
 import { auditLog, type DbOrTx } from "@garmentos/db-schema";
+import { and, desc, eq } from "drizzle-orm";
 import type { AuditEntry } from "../domain/audit-entry";
 import type { AuditLogRepository, NewAuditEntryInput } from "../application/ports";
 
@@ -27,5 +28,14 @@ export class DrizzleAuditLogRepository implements AuditLogRepository {
     const [row] = await this.db.insert(auditLog).values(input).returning();
     if (!row) throw new Error("INSERT audit_log не вернул строку");
     return toAuditEntry(row);
+  }
+
+  async listForEntity(companyId: string, entityType: string, entityId: string): Promise<AuditEntry[]> {
+    const rows = await this.db
+      .select()
+      .from(auditLog)
+      .where(and(eq(auditLog.companyId, companyId), eq(auditLog.entityType, entityType), eq(auditLog.entityId, entityId)))
+      .orderBy(desc(auditLog.occurredAt));
+    return rows.map(toAuditEntry);
   }
 }

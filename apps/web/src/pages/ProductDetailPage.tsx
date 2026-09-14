@@ -4,30 +4,69 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import {
   createProductVariantSchema,
+  type AuditEntryResponseDto,
   type BomItemDraft,
   type BomResponseDto,
   type CreateProductVariantDto,
+  type DocumentResponseDto,
   type MaterialResponseDto,
+  type ProductAttributeResponseDto,
+  type ProductProductionResponseDto,
   type ProductResponseDto,
   type ProductSizeResponseDto,
   type ProductVariantResponseDto,
+  type SpecificationResponseDto,
 } from "@garmentos/shared-types";
-import { apiRequest, ApiError } from "../api/client";
+import { apiDownload, apiRequest, apiUpload, ApiError } from "../api/client";
 import { useCrudResource } from "../api/useCrudResource";
-import { DataTable, Td, MobileListItem } from "../design-system/Blocks";
+import { BatchCard, ColorDot, DataTable, MetricStrip, Td, MobileListItem } from "../design-system/Blocks";
 import { EmptyState } from "../design-system/Feedback/EmptyState";
 import { StatusBadge } from "../design-system/StatusBadge/StatusBadge";
+import { FilterTabs, type FilterOption } from "../design-system/Tabs/FilterTabs";
 import { Field } from "../design-system/Form/Field";
 import { PageHeader, Breadcrumbs } from "../design-system/PageHeader/PageHeader";
 import { Card, CardContent, CardHeader, CardTitle, SectionLabel } from "../design-system/Card/Card";
 import { Input } from "../design-system/Input/Input";
+import { Textarea } from "../design-system/Textarea/Textarea";
 import { Combobox } from "../design-system/Select/Combobox";
 import { NumberInput } from "../design-system/Input/NumberInput";
 import { Button } from "../design-system/Button/Button";
+import { Upload } from "../design-system/Upload/Upload";
 import { SkeletonList } from "../design-system/Feedback/Skeleton";
 import { ErrorState } from "../design-system/Feedback/ErrorState";
 import { toast } from "../design-system/Toast/Toast";
-import { unitLabel } from "../lib/format";
+import { currencyLabel, formatDate, formatMoney, formatQuantity, unitLabel } from "../lib/format";
+
+// Вкладки карточки модели (Model-first Minimal Core, владелец проекта,
+// 2026-09-12, ПРОМПТ №06.1) — «Производство» открывается первой: 9 из 10
+// заходов на модель — «что с ней сейчас», а не «поправить описание».
+// Остальные три вкладки — прежнее содержимое страницы без изменений,
+// просто скрытое за FilterTabs вместо непрерывного скролла из 6 карточек.
+const PRODUCT_TABS: FilterOption<"production" | "passport" | "materials" | "history">[] = [
+  { value: "production", label: "Производство" },
+  { value: "passport", label: "Паспорт" },
+  { value: "materials", label: "Материалы" },
+  { value: "history", label: "История" },
+];
+
+// Человекочитаемые подписи событий «Истории» (Этап 2 — «Паспорт модели»,
+// владелец проекта, 2026-09-12) — audit_log хранит технический action-код,
+// карточка модели показывает его понятным термином, не программистским.
+const HISTORY_ACTION_LABELS: Record<string, string> = {
+  "product.created": "Модель создана",
+  "product.details_updated": "Изменены название/категория/описание",
+  "product.costs_updated": "Изменена плановая себестоимость",
+  "product.sizes_replaced": "Изменён размерный ряд",
+  "product.color_added": "Добавлен цвет",
+  "product.attribute_added": "Добавлена характеристика",
+  "product.attribute_updated": "Изменена характеристика",
+  "product.attribute_removed": "Удалена характеристика",
+  "document.uploaded": "Загружен документ",
+};
+
+function historyActionLabel(action: string): string {
+  return HISTORY_ACTION_LABELS[action] ?? action;
+}
 
 // Шестой из 7 перенесённых экранов (docs/DESIGN_SYSTEM_MAP.md, задача #72).
 // Честная находка при переносе: этот экран технически отвечает на 3 разных
@@ -66,6 +105,176 @@ export function ProductDetailPage() {
   const [newColor, setNewColor] = useState("");
   const [newColorCode, setNewColorCode] = useState("");
   const [isAddingColor, setIsAddingColor] = useState(false);
+
+  // Паспорт модели (Этап 2, владелец проекта, 2026-09-12): фото, описание,
+  // характеристики, история — каждый блок своим независимым состоянием, как
+  // и остальные секции этой страницы (размеры/BOM выше).
+  const [photoDoc, setPhotoDoc] = useState<DocumentResponseDto | null>(null);
+  const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
+  const [photoFiles, setPhotoFiles] = useState<File[]>([]);
+
+  const [descriptionDraft, setDescriptionDraft] = useState("");
+  const [isSavingDescription, setIsSavingDescription] = useState(false);
+
+  const [attributes, setAttributes] = useState<ProductAttributeResponseDto[]>([]);
+  const [newAttrName, setNewAttrName] = useState("");
+  const [newAttrValue, setNewAttrValue] = useState("");
+  const [isAddingAttribute, setIsAddingAttribute] = useState(false);
+  const [editingAttrId, setEditingAttrId] = useState<string | null>(null);
+  const [editAttrName, setEditAttrName] = useState("");
+  const [editAttrValue, setEditAttrValue] = useState("");
+
+  const [history, setHistory] = useState<AuditEntryResponseDto[]>([]);
+
+  const [activeTab, setActiveTab] = useState<(typeof PRODUCT_TABS)[number]["value"]>("production");
+
+  // История производства модели (ПРОМПТ №06.1) — агрегаты считаются на
+  // backend (Zero Input): фронтенд не пересчитывает «всего произведено» из
+  // списка партий, который может быть неполным.
+  const [production, setProduction] = useState<ProductProductionResponseDto | null>(null);
+  const [productionError, setProductionError] = useState(false);
+  const loadProduction = () => {
+    if (!id) return;
+    setProductionError(false);
+    void apiRequest<ProductProductionResponseDto>(`/products/${id}/production`)
+      .then(setProduction)
+      .catch(() => setProductionError(true));
+  };
+  useEffect(loadProduction, [id]);
+
+  const [productSpecs, setProductSpecs] = useState<SpecificationResponseDto[] | null>(null);
+  const loadProductSpecs = () => {
+    if (!id) return;
+    void apiRequest<SpecificationResponseDto[]>(`/specifications?productId=${id}`)
+      .then((specs) => setProductSpecs([...specs].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())))
+      .catch(() => setProductSpecs([]));
+  };
+  useEffect(loadProductSpecs, [id]);
+
+  const loadPhoto = () => {
+    if (!id) return;
+    void apiRequest<DocumentResponseDto[]>(`/documents?entityType=product&entityId=${id}`)
+      .then((docs) => setPhotoDoc(docs.find((d) => d.docType === "photo_product" && d.isCurrentVersion) ?? null))
+      .catch(() => setPhotoDoc(null));
+  };
+  useEffect(loadPhoto, [id]);
+
+  const loadAttributes = () => {
+    if (!id) return;
+    void apiRequest<ProductAttributeResponseDto[]>(`/products/${id}/attributes`).then(setAttributes).catch(() => setAttributes([]));
+  };
+  useEffect(loadAttributes, [id]);
+
+  const loadHistory = () => {
+    if (!id) return;
+    void apiRequest<AuditEntryResponseDto[]>(`/audit-log?entityType=product&entityId=${id}`).then(setHistory).catch(() => setHistory([]));
+  };
+  useEffect(loadHistory, [id]);
+
+  const uploadPhoto = async () => {
+    if (!id) return;
+    const file = photoFiles[0];
+    if (!file) return;
+    setIsUploadingPhoto(true);
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      form.append("docType", "photo_product");
+      form.append("entityType", "product");
+      form.append("entityId", id);
+      await apiUpload<DocumentResponseDto>("/documents", form);
+      setPhotoFiles([]);
+      loadPhoto();
+      loadHistory();
+      toast.success("Фото модели загружено");
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Не удалось загрузить фото");
+    } finally {
+      setIsUploadingPhoto(false);
+    }
+  };
+
+  const [photoPreviewUrl, setPhotoPreviewUrl] = useState<string | null>(null);
+  useEffect(() => {
+    setPhotoPreviewUrl(null);
+    const photoId = photoDoc?.id;
+    if (!photoId) return;
+    void apiDownload(`/documents/${photoId}/file`)
+      .then((blob) => setPhotoPreviewUrl(URL.createObjectURL(blob)))
+      .catch(() => toast.error("Не удалось загрузить фото"));
+  }, [photoDoc?.id]);
+
+  const saveDescription = async () => {
+    if (!id) return;
+    setIsSavingDescription(true);
+    try {
+      const updated = await apiRequest<ProductResponseDto>(`/products/${id}`, {
+        method: "PATCH",
+        body: { description: descriptionDraft.trim() || null },
+      });
+      setProduct(updated);
+      loadHistory();
+      toast.success("Описание сохранено");
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Не удалось сохранить описание");
+    } finally {
+      setIsSavingDescription(false);
+    }
+  };
+
+  const addAttribute = async () => {
+    if (!id || !newAttrName.trim() || !newAttrValue.trim()) return;
+    setIsAddingAttribute(true);
+    try {
+      await apiRequest<ProductAttributeResponseDto>(`/products/${id}/attributes`, {
+        method: "POST",
+        body: { name: newAttrName.trim(), value: newAttrValue.trim() },
+      });
+      setNewAttrName("");
+      setNewAttrValue("");
+      loadAttributes();
+      loadHistory();
+      toast.success("Характеристика добавлена");
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Не удалось добавить характеристику");
+    } finally {
+      setIsAddingAttribute(false);
+    }
+  };
+
+  const startEditAttribute = (attribute: ProductAttributeResponseDto) => {
+    setEditingAttrId(attribute.id);
+    setEditAttrName(attribute.name);
+    setEditAttrValue(attribute.value);
+  };
+
+  const saveEditedAttribute = async () => {
+    if (!id || !editingAttrId) return;
+    try {
+      await apiRequest<ProductAttributeResponseDto>(`/products/${id}/attributes/${editingAttrId}`, {
+        method: "PATCH",
+        body: { name: editAttrName.trim(), value: editAttrValue.trim() },
+      });
+      setEditingAttrId(null);
+      loadAttributes();
+      loadHistory();
+      toast.success("Характеристика изменена");
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Не удалось изменить характеристику");
+    }
+  };
+
+  const removeAttribute = async (attributeId: string) => {
+    if (!id) return;
+    try {
+      await apiRequest(`/products/${id}/attributes/${attributeId}`, { method: "DELETE" });
+      loadAttributes();
+      loadHistory();
+      toast.success("Характеристика удалена");
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Не удалось удалить характеристику");
+    }
+  };
 
   const loadSizes = () => {
     if (!id) return;
@@ -161,7 +370,10 @@ export function ProductDetailPage() {
     if (!id) return;
     setProductError(false);
     Promise.all([
-      apiRequest<ProductResponseDto>(`/products/${id}`).then(setProduct),
+      apiRequest<ProductResponseDto>(`/products/${id}`).then((loaded) => {
+        setProduct(loaded);
+        setDescriptionDraft(loaded.description ?? "");
+      }),
       apiRequest<MaterialResponseDto[]>("/materials").then(setMaterials),
       reloadBoms(),
     ]).catch(() => setProductError(true));
@@ -253,6 +465,18 @@ export function ProductDetailPage() {
     }
   };
 
+  // Готовность модели к производству (ПРОМПТ №06.1 §5) — три сигнала,
+  // которые уже загружены этой же страницей: заказ пошива физически
+  // невозможен без фото (образец для цеха), хотя бы одного варианта
+  // размер×цвет и утверждённых норм расхода. Ничего не считается заново на
+  // backend — это композиция уже загруженных данных, не новая бизнес-логика.
+  const readinessChecks: Array<{ label: string; ok: boolean }> = [
+    { label: "фото", ok: photoDoc !== null },
+    { label: "цвета и размеры", ok: variants.length > 0 },
+    { label: "утверждённые нормы расхода", ok: currentBomId !== null },
+  ];
+  const missingForReadiness = readinessChecks.filter((check) => !check.ok).map((check) => check.label);
+
   if (productError) {
     return <ErrorState title="Не удалось загрузить модель" onRetry={loadProduct} />;
   }
@@ -264,9 +488,23 @@ export function ProductDetailPage() {
       <PageHeader
         title={product.name}
         subtitle={
-          <span className="flex items-center gap-2">
-            <span className="num">Артикул {product.code}</span>
-            <StatusBadge status={product.status} />
+          <span className="flex flex-col gap-1">
+            <span className="flex items-center gap-2">
+              <span className="num">Артикул {product.code}</span>
+              <StatusBadge status={product.status} />
+            </span>
+            {/* Строка агрегатов (§10 отчёта Model-first) — «4 партии · 3 600
+                шт · 1 в работе», сразу под заголовком, а не только внутри
+                вкладки «Производство». */}
+            {production && production.aggregates.batchCount > 0 ? (
+              <span className="num text-[12px] text-muted-foreground">
+                {formatQuantity(production.aggregates.batchCount, "партии")} ·{" "}
+                {formatQuantity(production.aggregates.totalProduced, "шт")} ·{" "}
+                {production.aggregates.inProgress > 0
+                  ? `${production.aggregates.inProgress} в работе`
+                  : `${production.aggregates.completed} завершено`}
+              </span>
+            ) : null}
           </span>
         }
         breadcrumbs={
@@ -279,6 +517,255 @@ export function ProductDetailPage() {
           />
         }
       />
+
+      <div className="mb-5">
+        <FilterTabs options={PRODUCT_TABS} value={activeTab} onChange={setActiveTab} />
+      </div>
+
+      {activeTab === "production" && (
+        <div className="flex flex-col gap-4">
+          {missingForReadiness.length === 0 ? (
+            <div className="rounded-[12px] border border-success/30 bg-success/[0.06] px-4 py-3 text-[13px] font-medium text-success">
+              Модель готова к производству
+            </div>
+          ) : (
+            <div className="rounded-[12px] border border-warning/30 bg-warning/[0.06] px-4 py-3 text-[13px] font-medium text-warning">
+              Не хватает: {missingForReadiness.join(", ")}
+            </div>
+          )}
+
+          {productionError ? (
+            <ErrorState title="Не удалось загрузить историю производства" onRetry={loadProduction} />
+          ) : !production ? (
+            <SkeletonList rows={2} />
+          ) : (
+            <>
+              {production.aggregates.batchCount > 0 && (
+                <MetricStrip
+                  compact
+                  items={[
+                    { label: "Произведено", value: production.aggregates.totalProduced },
+                    { label: "Партий", value: production.aggregates.batchCount },
+                    { label: "Завершено", value: production.aggregates.completed },
+                    { label: "В работе", value: production.aggregates.inProgress },
+                  ]}
+                />
+              )}
+
+              <Card>
+                <CardHeader>
+                  <CardTitle>Спецификации</CardTitle>
+                </CardHeader>
+                <CardContent className="flex flex-col gap-2">
+                  {!productSpecs ? (
+                    <SkeletonList rows={2} />
+                  ) : productSpecs.length === 0 ? (
+                    <EmptyState
+                      compact
+                      title="Пока нет ни одной спецификации"
+                      description="Спецификация — первый шаг производства: цех, количество и цена."
+                      action={
+                        <Button size="sm" onClick={() => void navigate("/specifications")}>
+                          + Создать спецификацию
+                        </Button>
+                      }
+                    />
+                  ) : (
+                    <>
+                      <ul className="m-0 flex list-none flex-col gap-0 p-0">
+                        {productSpecs.map((spec) => (
+                          <li
+                            key={spec.id}
+                            className="interactive flex cursor-pointer items-center justify-between gap-3 border-b border-border py-2.5 last:border-none"
+                            onClick={() => void navigate(`/specifications/${spec.id}`)}
+                          >
+                            <span className="text-[13px] font-medium">
+                              {spec.specNumber ? `Спецификация №${spec.specNumber}` : "Черновик"}
+                            </span>
+                            <span className="num flex items-center gap-2 text-[12px] text-muted-foreground">
+                              {formatQuantity(Math.round(Number(spec.totalQuantity)), "шт")} ·{" "}
+                              {formatMoney(Number(spec.totalSum), currencyLabel(spec.totalSumCurrency))}
+                              <StatusBadge status={spec.status} />
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                      <Button size="sm" variant="secondary" className="self-start" onClick={() => void navigate("/specifications")}>
+                        + Создать спецификацию
+                      </Button>
+                    </>
+                  )}
+                </CardContent>
+              </Card>
+
+              <div>
+                <SectionLabel>История производства</SectionLabel>
+                {production.batches.length === 0 ? (
+                  <div className="mt-2">
+                    <EmptyState
+                      compact
+                      title="Пока нет ни одной производственной партии"
+                      description="Партия создаётся из утверждённой спецификации."
+                    />
+                  </div>
+                ) : (
+                  // 2 колонки — с lg (1024px), не с md (768px, ПРОМПТ №08.3):
+                  // см. тот же комментарий в ProductionOrdersPage.tsx.
+                  <div className="mt-2 grid grid-cols-1 items-start gap-3 lg:grid-cols-2">
+                    {production.batches.map((batch) => (
+                      <BatchCard
+                        key={batch.id}
+                        data={batch}
+                        onClick={() => void navigate(`/production-orders/${batch.id}`)}
+                        onSpecificationClick={
+                          batch.specificationId ? () => void navigate(`/specifications/${batch.specificationId}`) : undefined
+                        }
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {activeTab === "passport" && (
+      <>
+      {/* Паспорт модели (Этап 2 — «Паспорт модели», владелец проекта,
+          2026-09-12): фото + описание рядом, крупная область фото — первое,
+          что видно на карточке модели. Фото хранится через существующий
+          Document Engine (docType=photo_product, entityType=product), не
+          отдельной таблицей. */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Фото и описание</CardTitle>
+        </CardHeader>
+        <CardContent className="grid grid-cols-1 gap-4 md:grid-cols-2">
+          <div className="flex flex-col gap-2">
+            {photoFiles.length === 0 &&
+              (photoDoc && photoPreviewUrl ? (
+                <div className="aspect-square w-full overflow-hidden rounded-[16px] border border-border bg-secondary">
+                  <img src={photoPreviewUrl} alt={product.name} className="h-full w-full object-contain" />
+                </div>
+              ) : (
+                <div className="flex aspect-square w-full flex-col items-center justify-center gap-2 rounded-[16px] border-2 border-dashed border-border bg-secondary/40 text-center">
+                  <span className="t-secondary">Фото модели пока нет</span>
+                </div>
+              ))}
+
+            <Upload
+              files={photoFiles}
+              onChange={(files) => setPhotoFiles(files.slice(-1))}
+              multiple={false}
+              label={photoDoc ? "Заменить фото — перетащите сюда или нажмите" : "Перетащите фото сюда или нажмите"}
+            />
+            {photoFiles.length > 0 && (
+              <Button type="button" size="sm" loading={isUploadingPhoto} className="self-start" onClick={() => void uploadPhoto()}>
+                Сохранить фото
+              </Button>
+            )}
+          </div>
+
+          <div className="flex flex-col gap-2">
+            <Field label="Описание модели">
+              <Textarea
+                value={descriptionDraft}
+                onChange={(event) => setDescriptionDraft(event.target.value)}
+                placeholder="Например: зимняя стёганая куртка на молнии, прямой силуэт"
+                rows={6}
+              />
+            </Field>
+            <Button
+              type="button"
+              size="sm"
+              className="self-start"
+              loading={isSavingDescription}
+              disabled={descriptionDraft === (product.description ?? "")}
+              onClick={() => void saveDescription()}
+            >
+              Сохранить описание
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Характеристики модели (требование №3): растут по одной строке через
+          «+ Добавить характеристику», не заменяются целиком в отличие от
+          размерного ряда ниже. */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Характеристики</CardTitle>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-3">
+          {attributes.length === 0 ? (
+            <EmptyState compact title="Характеристики ещё не добавлены" description="Например: состав ткани, плотность, посадка." />
+          ) : (
+            <ul className="m-0 flex list-none flex-col gap-2 p-0">
+              {attributes.map((attribute) =>
+                editingAttrId === attribute.id ? (
+                  <li key={attribute.id} className="flex flex-wrap items-end gap-2 rounded-[10px] border border-border bg-muted/40 p-2.5">
+                    <Field label="Название" className="min-w-[140px] flex-1">
+                      <Input value={editAttrName} onChange={(event) => setEditAttrName(event.target.value)} />
+                    </Field>
+                    <Field label="Значение" className="min-w-[160px] flex-1">
+                      <Input value={editAttrValue} onChange={(event) => setEditAttrValue(event.target.value)} />
+                    </Field>
+                    <div className="flex gap-1">
+                      <Button type="button" size="sm" onClick={() => void saveEditedAttribute()}>
+                        Сохранить
+                      </Button>
+                      <Button type="button" variant="secondary" size="sm" onClick={() => setEditingAttrId(null)}>
+                        Отмена
+                      </Button>
+                    </div>
+                  </li>
+                ) : (
+                  <li
+                    key={attribute.id}
+                    className="flex items-center justify-between gap-3 rounded-[10px] border border-border bg-card p-2.5"
+                  >
+                    <div className="min-w-0">
+                      <div className="text-[13px] font-medium">{attribute.name}</div>
+                      <div className="t-secondary truncate">{attribute.value}</div>
+                    </div>
+                    <div className="flex shrink-0 gap-1">
+                      <Button type="button" variant="secondary" size="sm" onClick={() => startEditAttribute(attribute)}>
+                        Изменить
+                      </Button>
+                      <Button type="button" variant="secondary" size="sm" onClick={() => void removeAttribute(attribute.id)}>
+                        Убрать
+                      </Button>
+                    </div>
+                  </li>
+                ),
+              )}
+            </ul>
+          )}
+
+          <div className="flex flex-wrap items-end gap-2 rounded-[10px] border border-border bg-muted/40 p-3.5">
+            <Field label="Название" className="min-w-[140px] flex-1">
+              <Input value={newAttrName} onChange={(event) => setNewAttrName(event.target.value)} placeholder="Состав" />
+            </Field>
+            <Field label="Значение" className="min-w-[180px] flex-1">
+              <Input
+                value={newAttrValue}
+                onChange={(event) => setNewAttrValue(event.target.value)}
+                placeholder="95% хлопок, 5% лайкра"
+              />
+            </Field>
+            <Button
+              type="button"
+              size="sm"
+              loading={isAddingAttribute}
+              disabled={!newAttrName.trim() || !newAttrValue.trim()}
+              onClick={() => void addAttribute()}
+            >
+              + Добавить характеристику
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Размерный ряд — источник порядка размеров и пропорции раскладки для
           НОВЫХ заказов. Уже созданные заказы правка не затрагивает: их
@@ -452,6 +939,32 @@ export function ProductDetailPage() {
           <CardTitle>Размеры и цвета</CardTitle>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
+          {/* Сводка цветов и размеров модели (визуальная переработка
+              2026-09-13) — те же образцы цвета, что и в раскладке партии:
+              цвет опознаётся одинаково во всей системе. Данные —
+              существующие варианты модели, новых полей не заводится. */}
+          {variants.length > 0 && (
+            <div className="flex flex-col gap-2 rounded-[10px] border border-border bg-muted/25 p-3">
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+                <span className="t-meta uppercase tracking-[0.07em]">Цвета</span>
+                {[...new Set(variants.map((row) => row.color))].map((color) => (
+                  <span key={color} className="flex items-center gap-1.5">
+                    <ColorDot color={color} />
+                    <span className="text-[12.5px] font-medium">{color}</span>
+                  </span>
+                ))}
+              </div>
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+                <span className="t-meta uppercase tracking-[0.07em]">Размеры</span>
+                {[...new Set(variants.map((row) => row.size))].map((size) => (
+                  <span key={size} className="num text-[12.5px] font-medium">
+                    {size}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
           <form
             className="flex flex-col gap-3 rounded-[10px] border border-border bg-muted/40 p-3.5 sm:flex-row sm:flex-wrap sm:items-end"
             onSubmit={(event) => void handleSubmit(onSubmitVariant)(event)}
@@ -519,7 +1032,10 @@ export function ProductDetailPage() {
           )}
         </CardContent>
       </Card>
+      </>
+      )}
 
+      {activeTab === "materials" && (
       <Card>
         <CardHeader>
           <CardTitle>Нормы расхода материалов</CardTitle>
@@ -646,6 +1162,32 @@ export function ProductDetailPage() {
           )}
         </CardContent>
       </Card>
+      )}
+
+      {activeTab === "history" && (
+      /* История (требование №6) — audit_log читается впервые, не только
+         пишется. События — тот же action-код, что фиксирует CatalogService,
+         переведённый в понятную формулировку. */
+      <Card>
+        <CardHeader>
+          <CardTitle>История</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {history.length === 0 ? (
+            <EmptyState compact title="Пока нет ни одного события" description="Здесь появятся изменения модели: создание, правки, характеристики." />
+          ) : (
+            <ul className="m-0 flex list-none flex-col gap-0 p-0">
+              {history.map((entry) => (
+                <li key={entry.id} className="flex items-center justify-between gap-3 border-b border-border py-2.5 last:border-none">
+                  <span className="text-[13px]">{historyActionLabel(entry.action)}</span>
+                  <span className="t-meta shrink-0">{formatDate(entry.occurredAt)}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </CardContent>
+      </Card>
+      )}
     </div>
   );
 }

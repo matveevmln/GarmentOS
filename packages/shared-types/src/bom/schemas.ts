@@ -14,7 +14,7 @@ export type BomItemDraft = z.infer<typeof bomItemDraftSchema>;
 
 export const createBomDraftSchema = z.object({
   productId: z.string().uuid(),
-  items: z.array(bomItemDraftSchema).min(1, "Спецификация (BOM) должна содержать хотя бы один материал"),
+  items: z.array(bomItemDraftSchema).min(1, "Нормы расхода материалов должны содержать хотя бы один материал"),
   createdBy: z.string().uuid().optional(),
 });
 export type CreateBomDraftDto = z.infer<typeof createBomDraftSchema>;

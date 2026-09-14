@@ -78,8 +78,8 @@ async function seedApprovedBomAndVariant(tx: DbOrTx) {
 
   const productVariants = new DrizzleProductVariantRepository(tx);
   const variant = await createProductVariant(
-    { productVariants },
-    { productId: product.id, size: "M", color: "Петроль", skuCode: "HOODIE-PETROL-M-PETROL" },
+    { productVariants, products },
+    { companyId: company.id, productId: product.id, size: "M", color: "Петроль", skuCode: "HOODIE-PETROL-M-PETROL" },
   );
 
   const materials = new DrizzleMaterialRepository(tx);
@@ -150,8 +150,8 @@ describe("domain/contract-manufacturing", () => {
       );
       const productVariants = new DrizzleProductVariantRepository(tx);
       const variant = await createProductVariant(
-        { productVariants },
-        { productId: product.id, size: "L", color: "Чёрный", skuCode: "JACKET-NORD-L-BLACK" },
+        { productVariants, products },
+        { companyId: company.id, productId: product.id, size: "L", color: "Чёрный", skuCode: "JACKET-NORD-L-BLACK" },
       );
       const materials = new DrizzleMaterialRepository(tx);
       const material = await createMaterial(
@@ -181,7 +181,7 @@ describe("domain/contract-manufacturing", () => {
             variants: [{ productVariantId: variant.id, quantity: 50 }],
           },
         ),
-      ).rejects.toThrow(/не утверждён/);
+      ).rejects.toThrow(/не утверждены/);
     });
   });
 

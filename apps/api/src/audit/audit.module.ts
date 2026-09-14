@@ -2,6 +2,7 @@ import { Global, Module } from "@nestjs/common";
 import type { Database } from "@garmentos/db-schema";
 import { DrizzleAuditLogRepository } from "@garmentos/domain-audit";
 import { DATABASE_CONNECTION } from "../database/database.module";
+import { AuditController } from "./audit.controller";
 import { AuditService } from "./audit.service";
 import { AUDIT_LOG_REPOSITORY } from "./audit.tokens";
 
@@ -11,6 +12,7 @@ import { AUDIT_LOG_REPOSITORY } from "./audit.tokens";
 // потребовал бы импортировать AuditModule в 11 местах без всякой пользы.
 @Global()
 @Module({
+  controllers: [AuditController],
   providers: [
     AuditService,
     {

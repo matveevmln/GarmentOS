@@ -6,7 +6,8 @@ import type { AttachDocumentResult } from "./attach-document";
 
 export interface RegenerateSpecificationDocumentInput {
   companyId: string;
-  productionOrderId: string;
+  entityType: string;
+  entityId: string;
   uploadedBy: string | null;
   // Документ, из чьего document_derivative (structured_data) берутся
   // исходные данные генерации.
@@ -48,7 +49,8 @@ export async function regenerateSpecificationDocument(
 
   return generateSpecificationDocument(deps, {
     companyId: input.companyId,
-    productionOrderId: input.productionOrderId,
+    entityType: input.entityType,
+    entityId: input.entityId,
     uploadedBy: input.uploadedBy,
     data: stored.data,
     template,

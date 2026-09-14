@@ -125,6 +125,21 @@ export class WarehouseService {
     return item;
   }
 
+  // Приход материала без аудит-контекста пользователя (Этап 3, владелец
+  // проекта, 2026-09-12) — тот же принцип, что и consumeMaterialStock ниже:
+  // вызывается из доменных сценариев (возврат материала после кроя), не
+  // напрямую по HTTP, поэтому нет AuthenticatedRequestUser для аудита —
+  // вызывающий код (CuttingService) сам пишет одну аудит-запись на всю
+  // операцию внесения факта, включая возврат.
+  async receiveMaterialStockInternal(
+    warehouseId: string,
+    materialId: string,
+    quantity: number,
+    meta: MaterialStockMovementMeta = {},
+  ): Promise<MaterialStockItem> {
+    return receiveMaterialStockUseCase({ materialStock: this.materialStock }, { warehouseId, materialId, quantity, meta });
+  }
+
   // Расход материала при подтверждении заказа пошива — вызывается из
   // ProductionOrderOrchestrationService (Telegram — тонкий интерфейс, эта
   // операция не имеет отдельного HTTP-эндпоинта и аутентифицированного

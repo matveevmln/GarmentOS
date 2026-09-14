@@ -19,7 +19,7 @@ export class ProductionRequestService {
   async parse(companyId: string, text: string): Promise<ParsedProductionRequest> {
     const fields = await this.aiClassifier.extractProductionRequestFields(text);
     const product = await this.catalogService.findProductByName(companyId, fields.modelName);
-    const sizes = product ? await this.catalogService.listProductSizes(product.id) : [];
+    const sizes = product ? await this.catalogService.listProductSizes(companyId, product.id) : [];
     const weights = new Map(sizes.map((size) => [size.size, Number(size.ratioWeight)]));
     return buildParsedProductionRequest(fields, weights);
   }

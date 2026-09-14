@@ -44,6 +44,7 @@ function buildOrder(overrides: Partial<CuttingOrder> = {}): CuttingOrder {
         requiredQuantity: "1300",
         allocatedQuantity: null,
         consumedQuantity: null,
+        returnedQuantity: null,
         rollNote: null,
         createdAt: now,
         updatedAt: now,
@@ -107,7 +108,12 @@ class FakeCuttingOrders implements CuttingOrderRepository {
       ...this.order,
       materials: this.order.materials.map((row) => {
         const fact = materials.find((item) => item.materialId === row.materialId);
-        return fact ? { ...row, consumedQuantity: String(fact.consumedQuantity) } : row;
+        if (!fact) return row;
+        return {
+          ...row,
+          consumedQuantity: String(fact.consumedQuantity),
+          ...(fact.returnedQuantity === undefined ? {} : { returnedQuantity: String(fact.returnedQuantity) }),
+        };
       }),
       results: this.order.results.map((row) => {
         const fact = results.find((item) => item.productVariantId === row.productVariantId);
@@ -121,6 +127,7 @@ class FakeCuttingOrders implements CuttingOrderRepository {
 class FakeStock implements MaterialStockPort {
   public onHand = 1300;
   public consumed: number[] = [];
+  public received: number[] = [];
   public adjusted: number[] = [];
 
   quantityOnHand(): Promise<number> {
@@ -129,6 +136,11 @@ class FakeStock implements MaterialStockPort {
   consume(_w: string, _m: string, quantity: number): Promise<void> {
     this.consumed.push(quantity);
     this.onHand -= quantity;
+    return Promise.resolve();
+  }
+  receive(_w: string, _m: string, quantity: number): Promise<void> {
+    this.received.push(quantity);
+    this.onHand += quantity;
     return Promise.resolve();
   }
   adjust(_w: string, _m: string, delta: number): Promise<void> {
@@ -299,6 +311,7 @@ describe("domain/cutting — факт кроя и склад", () => {
           requiredQuantity: "1300",
           allocatedQuantity: "1300",
           consumedQuantity: "1247",
+          returnedQuantity: null,
           rollNote: null,
           createdAt: new Date(),
           updatedAt: new Date(),

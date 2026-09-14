@@ -71,6 +71,13 @@ export interface NewProductionOrderInput {
   createdBy: string | null;
   variants: ProductionOrderVariantDraft[];
   sourceProductionOrderId: string | null;
+  // Опциональны (Этап 3, «Production Master») — существующий ручной путь
+  // (createProductionOrderDraft) их не передаёт, репозиторий пишет NULL.
+  // Заполняются только новым путём создания партии из утверждённой
+  // спецификации (createProductionOrderFromSpecification).
+  specificationId?: string | null;
+  orderNumber?: number | null;
+  costSnapshot?: Record<string, unknown> | null;
 }
 
 export interface ProductionOrderRepository {
@@ -97,6 +104,16 @@ export interface ProductionOrderRepository {
   // обновляется самый свежий незавершённый заказ этого цеха.
   findLatestActiveByWorkshop(companyId: string, workshopId: string): Promise<ProductionOrder | null>;
   listByCompany(companyId: string): Promise<ProductionOrder[]>;
+  // Партии, порождённые конкретной утверждённой спецификацией (Этап 3) —
+  // нужен, чтобы посчитать «сколько из спецификации уже размещено партиями»
+  // (1 спецификация → N партий, в т.ч. частичных по количеству).
+  listBySpecification(companyId: string, specificationId: string): Promise<ProductionOrder[]>;
+  // Все партии конкретной модели (Model-first Minimal Core, владелец
+  // проекта, 2026-09-12, ПРОМПТ №06.1) — история производства модели:
+  // партии, созданные и через спецификацию (specificationId заполнен), и
+  // вручную/до Этапа 3 (specificationId = null), все они ссылаются на
+  // модель напрямую через productId, который существовал ещё до Этапа 3.
+  listByProduct(companyId: string, productId: string): Promise<ProductionOrder[]>;
 }
 
 // Порт в модуль BOM — узкий срез, структурно совместимый с

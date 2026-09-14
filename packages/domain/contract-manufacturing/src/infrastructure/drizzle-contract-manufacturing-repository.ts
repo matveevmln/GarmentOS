@@ -76,6 +76,8 @@ function toProductionOrder(row: ProductionOrderRow, variants: ProductionOrderVar
     dueDate: row.dueDate,
     sourceProductionOrderId: row.sourceProductionOrderId,
     receivedAt: row.receivedAt,
+    specificationId: row.specificationId,
+    orderNumber: row.orderNumber,
     costSnapshot: row.costSnapshot as Record<string, unknown> | null,
     createdBy: row.createdBy,
     createdAt: row.createdAt,
@@ -175,6 +177,9 @@ export class DrizzleProductionOrderRepository implements ProductionOrderReposito
           dueDate: input.dueDate,
           createdBy: input.createdBy,
           sourceProductionOrderId: input.sourceProductionOrderId,
+          specificationId: input.specificationId ?? null,
+          orderNumber: input.orderNumber ?? null,
+          costSnapshot: input.costSnapshot ?? null,
         })
         .returning();
       if (!orderRow) throw new Error("INSERT production_orders не вернул строку");
@@ -307,6 +312,58 @@ export class DrizzleProductionOrderRepository implements ProductionOrderReposito
       .select()
       .from(productionOrders)
       .where(eq(productionOrders.companyId, companyId))
+      .orderBy(desc(productionOrders.createdAt));
+    if (orderRows.length === 0) return [];
+
+    const variantRows = await this.db
+      .select()
+      .from(productionOrderVariants)
+      .where(
+        inArray(
+          productionOrderVariants.productionOrderId,
+          orderRows.map((row) => row.id),
+        ),
+      );
+
+    return orderRows.map((orderRow) =>
+      toProductionOrder(
+        orderRow,
+        variantRows.filter((variant) => variant.productionOrderId === orderRow.id),
+      ),
+    );
+  }
+
+  async listBySpecification(companyId: string, specificationId: string): Promise<ProductionOrder[]> {
+    const orderRows = await this.db
+      .select()
+      .from(productionOrders)
+      .where(and(eq(productionOrders.companyId, companyId), eq(productionOrders.specificationId, specificationId)))
+      .orderBy(desc(productionOrders.createdAt));
+    if (orderRows.length === 0) return [];
+
+    const variantRows = await this.db
+      .select()
+      .from(productionOrderVariants)
+      .where(
+        inArray(
+          productionOrderVariants.productionOrderId,
+          orderRows.map((row) => row.id),
+        ),
+      );
+
+    return orderRows.map((orderRow) =>
+      toProductionOrder(
+        orderRow,
+        variantRows.filter((variant) => variant.productionOrderId === orderRow.id),
+      ),
+    );
+  }
+
+  async listByProduct(companyId: string, productId: string): Promise<ProductionOrder[]> {
+    const orderRows = await this.db
+      .select()
+      .from(productionOrders)
+      .where(and(eq(productionOrders.companyId, companyId), eq(productionOrders.productId, productId)))
       .orderBy(desc(productionOrders.createdAt));
     if (orderRows.length === 0) return [];
 

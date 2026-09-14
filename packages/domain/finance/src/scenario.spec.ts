@@ -98,8 +98,8 @@ describe("сквозной сценарий: со склада цеха до п�
       );
       const productVariants = new DrizzleProductVariantRepository(tx);
       const variant = await createProductVariant(
-        { productVariants },
-        { productId: product.id, size: "M", color: "Петроль", skuCode: "HOODIE-PETROL-2026-M" },
+        { productVariants, products },
+        { companyId: company.id, productId: product.id, size: "M", color: "Петроль", skuCode: "HOODIE-PETROL-2026-M" },
       );
 
       // Warehouse: цех передал готовую партию 30 шт на свой WIP-склад,

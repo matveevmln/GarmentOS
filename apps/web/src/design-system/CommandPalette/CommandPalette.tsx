@@ -12,6 +12,17 @@ import { cn } from "../utils";
 // Список действий растёт по мере появления новых экранов — сейчас только
 // навигация, создание сущностей добавится вместе с формами, которые их
 // создают (не заранее, принцип 3).
+// Быстрые действия (ПРОМПТ №06.1 §8, Model-first Minimal Core) — три
+// точки входа вокруг цепочки Модель → Спецификация → Партия, не общая
+// «Добавить запись»: создание каждой сущности ведёт на страницу, где эта
+// сущность реально создаётся. Снабжение (закупки/материалы/поставщики) сюда
+// сознательно не добавляется — оно скрыто из пользовательского меню.
+const CREATE_ACTIONS = [
+  { to: "/products", label: "+ Создать модель", icon: "box" },
+  { to: "/specifications", label: "+ Создать спецификацию", icon: "file" },
+  { to: "/production-orders", label: "+ Создать производственную партию", icon: "scissors" },
+];
+
 const ACTIONS = [
   { to: "/workshops", label: "Цеха", icon: "factory" },
   { to: "/suppliers", label: "Поставщики", icon: "users" },
@@ -79,6 +90,22 @@ export function CommandPalette() {
               <CommandPrimitive.Empty className="px-3 py-8 text-center text-[0.85rem] text-muted-foreground">
                 Ничего не найдено
               </CommandPrimitive.Empty>
+              <CommandPrimitive.Group>
+                {CREATE_ACTIONS.map((action) => (
+                  <CommandPrimitive.Item
+                    key={action.to}
+                    value={action.label}
+                    onSelect={() => {
+                      void navigate(action.to);
+                      setOpen(false);
+                    }}
+                    className="flex h-12 cursor-pointer select-none items-center gap-3 rounded-[12px] px-3 text-[0.92rem] font-medium text-primary data-[selected=true]:bg-secondary"
+                  >
+                    <Icon name={action.icon} style={{ width: 18, height: 18 }} />
+                    {action.label}
+                  </CommandPrimitive.Item>
+                ))}
+              </CommandPrimitive.Group>
               {ACTIONS.map((action) => (
                 <CommandPrimitive.Item
                   key={action.to}

@@ -32,6 +32,7 @@ function toMaterial(row: MaterialRow): CuttingOrderMaterial {
     requiredQuantity: row.requiredQuantity,
     allocatedQuantity: row.allocatedQuantity,
     consumedQuantity: row.consumedQuantity,
+    returnedQuantity: row.returnedQuantity,
     rollNote: row.rollNote,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
@@ -231,6 +232,10 @@ export class DrizzleCuttingOrderRepository implements CuttingOrderRepository {
           .update(cuttingOrderMaterials)
           .set({
             consumedQuantity: String(material.consumedQuantity),
+            // returnedQuantity не затирается, если его не прислали (Этап 3) —
+            // тот же принцип, что и rollNote ниже: отсутствие поля в запросе
+            // означает "не трогать", а не "обнулить".
+            ...(material.returnedQuantity === undefined ? {} : { returnedQuantity: String(material.returnedQuantity) }),
             // rollNote не затирается, если его не прислали: комментарий про
             // рулоны мог быть внесён ещё при выдаче в крой.
             ...(material.rollNote === undefined ? {} : { rollNote: material.rollNote }),

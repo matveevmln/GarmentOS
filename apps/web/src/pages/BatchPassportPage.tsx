@@ -45,7 +45,7 @@ import { MoneyInput, NumberInput } from "../design-system/Input/NumberInput";
 import { DatePicker } from "../design-system/Form/DatePicker";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../design-system/Select/Select";
 import { statusMeta } from "../lib/status";
-import { formatDate, formatMoney, formatQuantity, materialTypeLabel, unitLabel } from "../lib/format";
+import { formatBatchNumber, formatDate, formatMoney, formatQuantity, materialTypeLabel, unitLabel } from "../lib/format";
 import { computeProductionOrderBatchSum, computeTotalReceivedQuantity } from "../lib/production-order-pricing";
 import { cn } from "../design-system/utils";
 import { toast } from "../design-system/Toast/Toast";
@@ -146,6 +146,9 @@ export function BatchPassportPage() {
   const [allocations, setAllocations] = useState<Record<string, number | undefined>>({});
   const [rollNotes, setRollNotes] = useState<Record<string, string>>({});
   const [consumed, setConsumed] = useState<Record<string, number | undefined>>({});
+  // Возврат материала на склад после кроя (Этап 3, владелец проекта,
+  // 2026-09-12) — независимый факт от расхода, план не переписывается.
+  const [returned, setReturned] = useState<Record<string, number | undefined>>({});
   const [actuals, setActuals] = useState<Record<string, number | undefined>>({});
   const [shortages, setShortages] = useState<CuttingFactResponseDto["shortages"]>([]);
   // ОТК (P4, владелец проекта, 2026-09-06) — отдельный результат, не статус
@@ -376,6 +379,7 @@ export function BatchPassportPage() {
             materials: order.materials.map((material) => ({
               materialId: material.materialId,
               consumedQuantity: consumed[material.materialId] ?? material.consumedQuantity ?? 0,
+              returnedQuantity: returned[material.materialId] ?? material.returnedQuantity ?? 0,
               rollNote: rollNotes[material.materialId] ?? material.rollNote,
             })),
             results: order.results.map((row) => ({
@@ -578,6 +582,11 @@ export function BatchPassportPage() {
   // подтверждении заказа. Стоимости разных валютных контуров (ткань в USD,
   // фурнитура в сомах) не складываются в одно число: итог считается отдельно
   // по каждой валюте (docs/PRINCIPLES.md, принцип 21).
+  // Псевдо-этапы «Спецификация»/«Ткань» (Этап 3) — показываются только когда
+  // есть данные: старые партии без специи/норм не получают выдуманных шагов.
+  const hasSpecificationStage = passport.specification !== null;
+  const hasMaterialsStage = passport.materialRequirement.length > 0;
+
   const requirement = passport.materialRequirement;
   const requirementTotals = new Map<string, number>();
   for (const row of requirement) {
@@ -826,6 +835,26 @@ export function BatchPassportPage() {
                     <span className="t-meta">закупочной цены нет — стоимость не считается</span>
                   )}
                 </div>
+                {/* Остаток и дефицит (Этап 3, владелец проекта, 2026-09-12) —
+                    агрегат ПО ВСЕМ СКЛАДАМ КОМПАНИИ (временная модель до
+                    появления понятия «склад партии»), явно подписан как
+                    таковой. Дефицит информационный — не блокирует ни
+                    создание партии, ни создание раскроя. */}
+                <div className="mt-2 flex flex-wrap items-baseline gap-x-6 gap-y-1">
+                  <span>
+                    <span className="eyebrow text-[10px]">На складе (по всем складам компании)</span>
+                    <span className="num ml-2 text-[13px] font-medium">
+                      {formatQuantity(row.onHand, unitLabel(row.unit), 2)}
+                    </span>
+                  </span>
+                  {row.isAvailable ? (
+                    <span className="text-[12px] font-medium text-success">Доступно</span>
+                  ) : (
+                    <span className="text-[12px] font-medium text-warning">
+                      Недостаточно — дефицит {formatQuantity(row.deficit, unitLabel(row.unit), 2)}
+                    </span>
+                  )}
+                </div>
               </div>
             ))}
           </div>
@@ -1006,6 +1035,16 @@ export function BatchPassportPage() {
                         <NumberInput
                           value={consumed[material.materialId] ?? material.consumedQuantity ?? undefined}
                           onChange={(value) => setConsumed((prev) => ({ ...prev, [material.materialId]: value }))}
+                          min={0}
+                          decimals={2}
+                        />
+                      </Field>
+                    ) : null}
+                    {isIssued || isCompleted ? (
+                      <Field label="Возврат на склад" className="min-w-[130px]">
+                        <NumberInput
+                          value={returned[material.materialId] ?? material.returnedQuantity ?? undefined}
+                          onChange={(value) => setReturned((prev) => ({ ...prev, [material.materialId]: value }))}
                           min={0}
                           decimals={2}
                         />
@@ -1234,11 +1273,24 @@ export function BatchPassportPage() {
             ]}
           />
         }
-        title={passport.product.name}
+        title={passport.orderNumber ? formatBatchNumber(passport.orderNumber, passport.createdAt) : passport.product.name}
         subtitle={
           <span className="num">
+            {passport.orderNumber ? `${passport.product.name} · ` : ""}
             {passport.workshop.name} · {formatQuantity(plannedQuantity, "изделий")} · срок{" "}
             {formatDate(passport.dueDate)}
+            {passport.specification && (
+              <>
+                {" · "}
+                <button
+                  type="button"
+                  className="underline decoration-dotted underline-offset-2 hover:text-primary"
+                  onClick={() => void navigate(`/specifications/${passport.specification!.id}`)}
+                >
+                  Спецификация {passport.specification.specNumber ? `№${passport.specification.specNumber}` : ""}
+                </button>
+              </>
+            )}
           </span>
         }
         actions={
@@ -1422,11 +1474,16 @@ export function BatchPassportPage() {
       <Card className="mt-4 p-4 md:p-5">
         <div className="flex items-center justify-between gap-3">
           <CardTitle className="text-[16px]">Производство</CardTitle>
-          <span className="t-meta shrink-0">6 этапов</span>
+          <span className="t-meta shrink-0">{6 + (hasSpecificationStage ? 1 : 0) + (hasMaterialsStage ? 1 : 0)} этапов</span>
         </div>
         <div className="mt-4">
           {isProductionStage(passport.status) ? (
-            <ProductionStepper current={passport.status} cutting={cuttingStage} />
+            <ProductionStepper
+              current={passport.status}
+              cutting={cuttingStage}
+              hasSpecification={hasSpecificationStage}
+              materialsChecked={hasMaterialsStage}
+            />
           ) : (
             <p className="t-secondary">Заказ отменён — партия вышла из производственной шкалы.</p>
           )}

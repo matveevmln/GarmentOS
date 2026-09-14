@@ -17,10 +17,20 @@ export class LocalFileStorageAdapter implements StorageAdapter {
     this.baseDir = resolve(baseDir);
   }
 
-  async upload(key: string, data: Uint8Array, _contentType: string): Promise<{ url: string }> {
+  // contentType хранится рядом, в sidecar-файле "<key>.meta.json" — раньше
+  // download() всегда возвращал жёстко "application/pdf" (единственное, что
+  // когда-либо загружалось до фото модели, Этап 2 — «Паспорт модели»).
+  // Загруженное фото (image/jpeg и т.п.) отдавалось бы браузеру под чужим
+  // MIME-типом — найдено e2e-тестом при добавлении docType=photo_product.
+  private metaPath(filePath: string): string {
+    return `${filePath}.meta.json`;
+  }
+
+  async upload(key: string, data: Uint8Array, contentType: string): Promise<{ url: string }> {
     const filePath = join(this.baseDir, key);
     await mkdir(dirname(filePath), { recursive: true });
     await writeFile(filePath, data);
+    await writeFile(this.metaPath(filePath), JSON.stringify({ contentType }));
     return { url: `file://${filePath}` };
   }
 
@@ -33,7 +43,16 @@ export class LocalFileStorageAdapter implements StorageAdapter {
     if (!filePath.startsWith(this.baseDir)) return null;
     try {
       const data = await readFile(filePath);
-      return { data: new Uint8Array(data), contentType: "application/pdf" };
+      // Файлы, загруженные до появления sidecar-метаданных, остаются PDF —
+      // единственным типом, существовавшим до этого изменения.
+      let contentType = "application/pdf";
+      try {
+        const meta = JSON.parse(await readFile(this.metaPath(filePath), "utf-8")) as { contentType?: string };
+        if (meta.contentType) contentType = meta.contentType;
+      } catch {
+        // sidecar отсутствует — старый файл, оставляем запасной PDF.
+      }
+      return { data: new Uint8Array(data), contentType };
     } catch {
       return null;
     }

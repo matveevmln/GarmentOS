@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { type AnyPgColumn, boolean, check, date, index, integer, jsonb, numeric, pgEnum, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { type AnyPgColumn, boolean, check, date, index, integer, jsonb, numeric, pgEnum, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import { auditColumns, id, softDelete } from "./_shared";
 import { companies, users } from "./identity";
 import { products, productVariants } from "./catalog";
@@ -96,6 +96,29 @@ export const productionOrders = pgTable(
     // Фактическая дата завершения — без неё нельзя сравнить план (due_date) и
     // факт для рейтинга цеха и алертов о просрочке (USER_JOURNEY_AUDIT.md, пробел №5).
     receivedAt: timestamp("received_at", { withTimezone: true }),
+    // Спецификация-источник (Этап 3 «Production Master», владелец проекта,
+    // 2026-09-12) — партия, созданная кнопкой «Создать производственную
+    // партию» на утверждённой спецификации, ссылается на неё здесь. Связь
+    // 1:N (одна спецификация может породить несколько партий, в т.ч.
+    // частичных по количеству) — поэтому это FK на стороне партии, а не
+    // наоборот. NULL у партий, созданных вручную (существующий сценарий
+    // draft→confirm без спецификации) — оба пути сосуществуют.
+    //
+    // Без `.references()` намеренно: specification.ts импортирует workshops
+    // ИЗ этого файла, а specifications нужен ЭТОМУ файлу — прямой импорт в
+    // обе стороны создал бы циклическую зависимость модулей schema/*.ts.
+    // FK-ограничение на уровне БД всё равно есть — добавлено вручную в
+    // тексте миграции (ALTER TABLE ... ADD CONSTRAINT ... REFERENCES
+    // specifications(id)), см. drizzle/0029_*.sql.
+    specificationId: uuid("specification_id"),
+    // Номер партии (Этап 3) — независим от specNumber спецификации:
+    // сквозной внутри компании счётчик (companies.next_production_order_number,
+    // identity.ts), резервируется атомарно в момент создания партии из
+    // спецификации (владелец проекта: "НЕ предполагай, что номер партии
+    // обязан совпадать с номером спецификации"). NULL у партий, созданных
+    // до появления этого механизма, и у партий существующего ручного пути
+    // (draft→confirm) — им номер не присваивается.
+    orderNumber: integer("order_number"),
     // Snapshot партии (владелец проекта, 2026-08-03 — "Паспорт партии",
     // docs/PRODUCTION_BATCH_LIFECYCLE_ARCHITECTURE.md, раздел "Snapshot
     // партии"). Фиксируется ОДИН раз при подтверждении заказа (draft→placed):
@@ -123,6 +146,15 @@ export const productionOrders = pgTable(
       "production_orders_source_not_self_check",
       sql`${table.sourceProductionOrderId} is null or ${table.sourceProductionOrderId} != ${table.id}`,
     ),
+    // Уникальность номера партии — партиальный индекс (Этап 3, владелец
+    // проекта): не мешает множеству партий без номера (старые/ручные)
+    // сосуществовать, но гарантирует уникальность реального номера в рамках
+    // компании на уровне БД, не только атомарным счётчиком — тот же паттерн,
+    // что specifications_workshop_number_idx.
+    uniqueIndex("production_orders_company_order_number_idx")
+      .on(table.companyId, table.orderNumber)
+      .where(sql`${table.orderNumber} IS NOT NULL`),
+    index("production_orders_specification_idx").on(table.specificationId),
   ],
 );
 

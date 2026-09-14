@@ -77,7 +77,7 @@ export async function addProductColor(
     throw new DomainError(`Модель ${input.productId} не найдена в этой компании`, "PRODUCT_NOT_FOUND");
   }
 
-  const sizes = await deps.productSizes.listByProduct(input.productId);
+  const sizes = await deps.productSizes.listByProduct(input.companyId, input.productId);
   if (sizes.length === 0) {
     throw new DomainError(
       "У модели не задан размерный ряд — сначала укажите размеры и раскладку",

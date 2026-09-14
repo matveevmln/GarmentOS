@@ -72,6 +72,7 @@ export class CuttingService {
           requiredQuantity: Number(material.requiredQuantity),
           allocatedQuantity: material.allocatedQuantity === null ? null : Number(material.allocatedQuantity),
           consumedQuantity: material.consumedQuantity === null ? null : Number(material.consumedQuantity),
+          returnedQuantity: material.returnedQuantity === null ? null : Number(material.returnedQuantity),
           rollNote: material.rollNote,
         };
       }),

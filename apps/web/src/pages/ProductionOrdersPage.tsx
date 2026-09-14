@@ -2,28 +2,27 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   type BomResponseDto,
+  type DocumentResponseDto,
   type MaterialResponseDto,
   type ProductResponseDto,
   type ProductVariantResponseDto,
   type ProductionOrderResponseDto,
   type PreviewProductionOrderVariantsResponseDto,
   type ProductionOrderVariantDraft,
+  type SpecificationResponseDto,
   type WarehouseResponseDto,
   type WorkshopResponseDto,
 } from "@garmentos/shared-types";
 import { apiRequest, ApiError } from "../api/client";
 import { useCrudResource } from "../api/useCrudResource";
 import { FilterTabs, type FilterOption } from "../design-system/Tabs/FilterTabs";
-import { StatusBadge } from "../design-system/StatusBadge/StatusBadge";
-import { Card, CardContent, CardHeader, CardTitle } from "../design-system/Card/Card";
 import { Button } from "../design-system/Button/Button";
 import { PageHeader, Breadcrumbs } from "../design-system/PageHeader/PageHeader";
 import { SearchBar } from "../design-system/Search/SearchBar";
 import { EmptyState } from "../design-system/Feedback/EmptyState";
-import { DataTable, Td, MobileListItem } from "../design-system/Blocks";
-import { formatDate, formatMoney, formatQuantity, unitLabel } from "../lib/format";
-import { computeProductionOrderBatchSum } from "../lib/production-order-pricing";
-import { cn } from "../design-system/utils";
+import { Accordion, BatchCard } from "../design-system/Blocks";
+import { formatQuantity, unitLabel } from "../lib/format";
+import { buildBatchCardFromOrder } from "../lib/batch-card";
 import { Combobox } from "../design-system/Select/Combobox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../design-system/Select/Select";
 import { MoneyInput, NumberInput } from "../design-system/Input/NumberInput";
@@ -83,6 +82,14 @@ export function ProductionOrdersPage() {
   const [pendingOrderAction, setPendingOrderAction] = useState<string | null>(null);
   const [referenceError, setReferenceError] = useState(false);
 
+  // Данные для BatchCard (Model-first Minimal Core, ПРОМПТ №06.1): номер
+  // спецификации, фото модели, размер/цвет вариантов — по уникальным
+  // productId/specificationId, встретившимся в списке заказов, а не по
+  // одному запросу на строку (без N+1).
+  const [specifications, setSpecifications] = useState<SpecificationResponseDto[]>([]);
+  const [photoByProduct, setPhotoByProduct] = useState<Record<string, string | null>>({});
+  const [variantsByProduct, setVariantsByProduct] = useState<Record<string, ProductVariantResponseDto[]>>({});
+
   const loadReferences = () => {
     setReferenceError(false);
     Promise.all([
@@ -92,12 +99,31 @@ export function ProductionOrdersPage() {
       // Материалы нужны, чтобы показать потребность по нормам понятными
       // словами («ткань, 1 365 м»), а не идентификаторами.
       apiRequest<MaterialResponseDto[]>("/materials").then(setMaterials),
+      apiRequest<SpecificationResponseDto[]>("/specifications").then(setSpecifications),
     ]).catch(() => setReferenceError(true));
   };
 
   useEffect(() => {
     loadReferences();
   }, []);
+
+  useEffect(() => {
+    const missingProductIds = [...new Set(orders.map((order) => order.productId))].filter(
+      (productId) => !(productId in variantsByProduct),
+    );
+    if (missingProductIds.length === 0) return;
+    for (const productId of missingProductIds) {
+      void apiRequest<DocumentResponseDto[]>(`/documents?entityType=product&entityId=${productId}`)
+        .then((docs) => {
+          const photo = docs.find((doc) => doc.docType === "photo_product" && doc.isCurrentVersion) ?? null;
+          setPhotoByProduct((prev) => ({ ...prev, [productId]: photo?.id ?? null }));
+        })
+        .catch(() => setPhotoByProduct((prev) => ({ ...prev, [productId]: null })));
+      void apiRequest<ProductVariantResponseDto[]>(`/product-variants?productId=${productId}`)
+        .then((rows) => setVariantsByProduct((prev) => ({ ...prev, [productId]: rows })))
+        .catch(() => setVariantsByProduct((prev) => ({ ...prev, [productId]: [] })));
+    }
+  }, [orders]);
 
   useEffect(() => {
     if (!productId) {
@@ -334,25 +360,6 @@ export function ProductionOrdersPage() {
     );
   });
 
-  // «Сумма партии» — считается по строкам (P5-2): rework-строки бесплатны,
-  // new-строки — по согласованной с цехом цене. Для заказа без rework-строк
-  // результат тот же, что и раньше (agreedUnitPrice × plannedQuantity).
-  // Раньше здесь была цена из снимка за вычетом 175 — смысл этого вычета
-  // владельцем проекта не подтверждён, показатели на нём не строятся.
-  const batchAmount = (row: ProductionOrderResponseDto): number => computeProductionOrderBatchSum(row);
-
-  // Просрочка считается на клиенте из dueDate по тому же правилу, что и в
-  // apps/api/src/reporting/attention.service.ts: срок в прошлом и заказ не
-  // в терминальном статусе. Отдельного поля в списке API не отдаёт.
-  const overdueDays = (row: ProductionOrderResponseDto): number | null => {
-    if (!row.dueDate || row.status === "received" || row.status === "cancelled") return null;
-    const due = new Date(row.dueDate);
-    if (Number.isNaN(due.getTime())) return null;
-    const today = new Date();
-    const diff = Math.floor((today.setHours(0, 0, 0, 0) - due.setHours(0, 0, 0, 0)) / 86_400_000);
-    return diff > 0 ? diff : null;
-  };
-
   return (
     <div className="mx-auto max-w-[1400px]">
       <PageHeader
@@ -368,11 +375,14 @@ export function ProductionOrdersPage() {
           onRetry={loadReferences}
         />
       ) : (
-        <Card>
-          <CardHeader>
-            <CardTitle>Новый заказ пошива</CardTitle>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-4">
+        // Форма создания свёрнута (визуальная переработка 2026-09-13):
+        // на 390px она занимала весь первый экран, и список партий — то,
+        // ради чего этот экран открывают чаще всего — начинался ниже сгиба.
+        // Сама форма и её логика не изменены, только убрана из-под первого
+        // взгляда: создание заказа здесь — редкое действие, основной путь
+        // теперь Модель → Спецификация → Партия.
+        <Accordion title="Новый заказ пошива" hint="создать вручную">
+          <div className="flex flex-col gap-4">
             <label className="flex flex-col gap-1.5 text-[0.9rem] font-semibold text-muted-foreground">
               Модель
               <Combobox
@@ -642,8 +652,8 @@ export function ProductionOrdersPage() {
             >
               {isSubmitting ? "Создаём заказ..." : "Создать заказ пошива"}
             </Button>
-          </CardContent>
-        </Card>
+          </div>
+        </Accordion>
       )}
 
       {isLoading && <SkeletonList />}
@@ -664,7 +674,7 @@ export function ProductionOrdersPage() {
         <EmptyState
           compact
           title="Пока нет ни одного заказа пошива"
-          description="Создайте первый заказ в форме выше."
+          description="Партия создаётся из утверждённой спецификации — или вручную через «Новый заказ пошива» выше."
         />
       ) : !isLoading && visibleOrders.length === 0 ? (
         <EmptyState
@@ -684,176 +694,88 @@ export function ProductionOrdersPage() {
           }
         />
       ) : (
-        <>
-          {/* Таблица — планшет и десктоп */}
-          <div className="hidden md:block">
-            <DataTable
-              columns={[
-                { key: "model", label: "Модель" },
-                { key: "workshop", label: "Цех", width: "190px" },
-                { key: "qty", label: "Кол-во", align: "right", width: "100px" },
-                { key: "status", label: "Статус", width: "210px" },
-                { key: "amount", label: "Сумма", align: "right", width: "150px" },
-                { key: "due", label: "Срок", align: "right", width: "172px" },
-              ]}
-            >
-              {visibleOrders.map((row) => {
-                const amount = batchAmount(row);
-                const late = overdueDays(row);
-                return (
-                  <tr key={row.id} onClick={() => void navigate(`/production-orders/${row.id}`)}>
-                    <Td className="t-object">{productName(row.productId)}</Td>
-                    <Td className="text-muted-foreground">{workshopName(row.workshopId)}</Td>
-                    <Td align="right" className="num">
-                      {formatQuantity(Number(row.plannedQuantity))}
-                    </Td>
-                    {/* Действия живут в колонке статуса: у черновика —
-                        «Подтвердить», у размещённого/в работе — переход на
-                        следующий этап (P0-1, без Telegram), у готового к
-                        отгрузке — выбор склада и «Принять партию». Клик по
-                        ним не открывает паспорт (stopPropagation), как и
-                        раньше. */}
-                    <Td>
-                      <div className="flex items-center justify-start gap-2" onClick={(event) => event.stopPropagation()}>
-                        {row.status === "draft" ? (
-                          <Button
-                            type="button"
-                            size="sm"
-                            loading={pendingOrderAction === row.id}
-                            onClick={() => void confirmOrder(row.id)}
-                          >
-                            Подтвердить
-                          </Button>
-                        ) : row.status === "placed" ? (
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="secondary"
-                            loading={pendingOrderAction === row.id}
-                            onClick={() => void changeStatus(row.id, "in_progress")}
-                          >
-                            Начали шить
-                          </Button>
-                        ) : row.status === "in_progress" ? (
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="secondary"
-                            loading={pendingOrderAction === row.id}
-                            onClick={() => void changeStatus(row.id, "ready_for_pickup")}
-                          >
-                            Готово к отгрузке
-                          </Button>
-                        ) : row.status === "ready_for_pickup" ? (
-                          <Button type="button" size="sm" onClick={() => void openReceiveDialog(row)}>
-                            Принять
-                          </Button>
-                        ) : (
-                          <StatusBadge status={row.status} />
-                        )}
-                      </div>
-                    </Td>
-                    <Td align="right" className="t-amount">
-                      {formatMoney(amount, "руб")}
-                    </Td>
-                    <Td align="right">
-                      {row.dueDate ? (
-                        <span className="num">
-                          {formatDate(row.dueDate)}
-                          {late ? (
-                            <span className="mt-0.5 block whitespace-nowrap text-[11px] text-danger">
-                              просрочено на {late} дн.
-                            </span>
-                          ) : null}
-                        </span>
-                      ) : (
-                        <span className="text-muted-foreground">срока нет</span>
-                      )}
-                    </Td>
-                  </tr>
-                );
-              })}
-            </DataTable>
-          </div>
-
-          {/* Карточки — мобильная композиция прототипа */}
-          <div className="space-y-2 md:hidden">
-            {visibleOrders.map((row) => {
-              const amount = batchAmount(row);
-              const late = overdueDays(row);
-              return (
-                <MobileListItem
-                  key={row.id}
-                  onClick={() => void navigate(`/production-orders/${row.id}`)}
-                  footer={
-                    row.status === "draft" ||
-                    row.status === "placed" ||
-                    row.status === "in_progress" ||
-                    row.status === "ready_for_pickup" ? (
-                      <div className="mt-3 flex items-center gap-2 border-t border-border pt-3">
-                        {row.status === "draft" ? (
-                          <Button
-                            type="button"
-                            size="sm"
-                            loading={pendingOrderAction === row.id}
-                            onClick={() => void confirmOrder(row.id)}
-                          >
-                            Подтвердить
-                          </Button>
-                        ) : row.status === "placed" ? (
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="secondary"
-                            loading={pendingOrderAction === row.id}
-                            onClick={() => void changeStatus(row.id, "in_progress")}
-                          >
-                            Начали шить
-                          </Button>
-                        ) : row.status === "in_progress" ? (
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="secondary"
-                            loading={pendingOrderAction === row.id}
-                            onClick={() => void changeStatus(row.id, "ready_for_pickup")}
-                          >
-                            Готово к отгрузке
-                          </Button>
-                        ) : (
-                          <Button type="button" size="sm" onClick={() => void openReceiveDialog(row)}>
-                            Принять партию
-                          </Button>
-                        )}
-                      </div>
-                    ) : undefined
-                  }
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="text-[13px] font-medium">{productName(row.productId)}</div>
-                      <div className="mt-1 text-[12px] text-muted-foreground">{workshopName(row.workshopId)}</div>
-                    </div>
-                    <StatusBadge status={row.status} />
-                  </div>
-                  <dl className="num mt-2.5 grid grid-cols-2 gap-y-1.5 border-t border-border pt-2.5 text-[12px]">
-                    <dt className="text-muted-foreground">Количество</dt>
-                    <dd className="text-right">{formatQuantity(Number(row.plannedQuantity), "шт")}</dd>
-                    <dt className="text-muted-foreground">Сумма</dt>
-                    <dd className="t-amount text-right">
-                      {formatMoney(amount, "руб")}
-                    </dd>
-                    <dt className="text-muted-foreground">Срок</dt>
-                    <dd className={cn("text-right", late && "text-danger")}>
-                      {row.dueDate ? formatDate(row.dueDate) : "срока нет"}
-                      {late ? ` · просрочено на ${late} дн.` : ""}
-                    </dd>
-                  </dl>
-                </MobileListItem>
-              );
-            })}
-          </div>
-        </>
+        // BatchCard (Model-first Minimal Core, ПРОМПТ №06.1 §2) заменяет
+        // здесь и таблицу, и отдельную мобильную вёрстку — сама карточка уже
+        // адаптивна (Drawer/Accordion), поэтому одна сетка работает на всех
+        // экранах. Действия смены статуса — та же логика, что была в
+        // таблице/мобильных карточках, перенесена в слот `actions` без
+        // изменений.
+        //
+        // 2 колонки — с lg (1024px), не с md (768px, ПРОМПТ №08.3): на
+        // ширинах 768-1023px рельс навигации (260px) съедает столько места,
+        // что вторая колонка сжимает карточку сильнее, чем на мобильном в
+        // один столбец — «Срок» наезжал на «Объём партии», номер партии
+        // обрезался. Один столбец на этом промежутке — не хуже, а честнее.
+        //
+        // 3 колонки — с 2xl (1536px), не с xl (1280px, тот же промпт): на
+        // 1280px карточка в 3 столбца сужается до ~290px — при длинном
+        // статусе («Готово к отгрузке») номер партии обрезался («ПР-2026-
+        // 00…») в самой первой строке шапки, где обрезание недопустимо:
+        // это единственный на экране идентификатор партии.
+        <div className="grid grid-cols-1 items-start gap-3 lg:grid-cols-2 2xl:grid-cols-3">
+          {visibleOrders.map((row) => {
+            const variantsById = new Map(
+              (variantsByProduct[row.productId] ?? []).map((variant) => [variant.id, variant]),
+            );
+            const spec = row.specificationId ? specifications.find((s) => s.id === row.specificationId) : undefined;
+            const cardData = buildBatchCardFromOrder(
+              row,
+              productName(row.productId),
+              workshopName(row.workshopId),
+              photoByProduct[row.productId] ?? null,
+              spec?.specNumber ?? null,
+              variantsById,
+            );
+            return (
+              <BatchCard
+                key={row.id}
+                data={cardData}
+                onClick={() => void navigate(`/production-orders/${row.id}`)}
+                onSpecificationClick={row.specificationId ? () => void navigate(`/specifications/${row.specificationId}`) : undefined}
+                // Переключатель «Завершена» выполняет существующую операцию
+                // приёмки (POST /production-orders/:id/receive). Приёмка
+                // требует склада и фактических количеств по каждому
+                // размеру×цвету, поэтому открывается уже существующий диалог
+                // приёмки, а не отправляется запрос вслепую. Обратной
+                // операции в backend нет — переключатель после приёмки
+                // блокируется сам (lib/batch-completion.ts).
+                onRequestComplete={() => void openReceiveDialog(row)}
+                completionPending={pendingOrderAction === row.id}
+                actions={
+                  row.status === "draft" ? (
+                    <Button type="button" size="sm" loading={pendingOrderAction === row.id} onClick={() => void confirmOrder(row.id)}>
+                      Подтвердить
+                    </Button>
+                  ) : row.status === "placed" ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="secondary"
+                      loading={pendingOrderAction === row.id}
+                      onClick={() => void changeStatus(row.id, "in_progress")}
+                    >
+                      Начали шить
+                    </Button>
+                  ) : row.status === "in_progress" ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="secondary"
+                      loading={pendingOrderAction === row.id}
+                      onClick={() => void changeStatus(row.id, "ready_for_pickup")}
+                    >
+                      Готово к отгрузке
+                    </Button>
+                  ) : undefined
+                  // Отдельной кнопки «Принять партию» здесь больше нет:
+                  // в статусе "ready_for_pickup" эту же операцию выполняет
+                  // переключатель «Завершена». Две кнопки для одного
+                  // действия читались бы как два разных действия.
+                }
+              />
+            );
+          })}
+        </div>
       )}
 
       {/* Диалог фактической приёмки (P0-1) — план показывается рядом с

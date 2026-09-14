@@ -64,7 +64,27 @@ export class DocumentService {
     const supersedesDocumentIds = existing.filter((doc) => doc.isCurrentVersion && doc.docType === "specification").map((doc) => doc.id);
     return generateSpecificationDocument(
       { documents: this.documents, documentLinks: this.documentLinks, documentDerivatives: this.documentDerivatives, storage: this.storage, renderer: this.renderer },
-      { companyId, productionOrderId, uploadedBy, data, supersedesDocumentIds },
+      { companyId, entityType: "production_order", entityId: productionOrderId, uploadedBy, data, supersedesDocumentIds },
+    );
+  }
+
+  // Тот же генератор, что и generateSpecification выше, но привязанный к
+  // самостоятельной сущности specifications (Этап 2 — «Паспорт модели»,
+  // владелец проекта, 2026-09-12), а не к production_order — PDF собирается
+  // ИЗ УЖЕ ЗАМОРОЖЕННОГО snapshotJson утверждённой спецификации, вызывающая
+  // сторона (SpecificationService) сама строит SpecificationDocumentData из
+  // snapshot, сюда передаётся только готовый результат.
+  async generateSpecificationForSpecification(
+    companyId: string,
+    specificationId: string,
+    uploadedBy: string | null,
+    data: SpecificationDocumentData,
+  ): Promise<AttachDocumentResult> {
+    const existing = await this.listForEntity(companyId, "specification", specificationId);
+    const supersedesDocumentIds = existing.filter((doc) => doc.isCurrentVersion && doc.docType === "specification").map((doc) => doc.id);
+    return generateSpecificationDocument(
+      { documents: this.documents, documentLinks: this.documentLinks, documentDerivatives: this.documentDerivatives, storage: this.storage, renderer: this.renderer },
+      { companyId, entityType: "specification", entityId: specificationId, uploadedBy, data, supersedesDocumentIds },
     );
   }
 

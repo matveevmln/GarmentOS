@@ -1,5 +1,5 @@
 import { Inject, Injectable } from "@nestjs/common";
-import { recordAuditEntry, type AuditLogRepository, type AuditSource } from "@garmentos/domain-audit";
+import { recordAuditEntry, type AuditEntry, type AuditLogRepository, type AuditSource } from "@garmentos/domain-audit";
 import type { AuthenticatedRequestUser } from "../auth/current-user.decorator";
 import { AUDIT_LOG_REPOSITORY } from "./audit.tokens";
 
@@ -35,5 +35,11 @@ export class AuditService {
   // AI/Telegram/CLI действуют от имени человека, не от своего собственного).
   async recordForUser(currentUser: AuthenticatedRequestUser, params: RecordAuditParams): Promise<void> {
     await this.record(currentUser.companyId, currentUser.id, "http_api", params);
+  }
+
+  // «История» карточки сущности (Этап 2 — «Паспорт модели», владелец
+  // проекта, 2026-09-12) — до сих пор audit_log был write-only из apps/api.
+  async listForEntity(companyId: string, entityType: string, entityId: string): Promise<AuditEntry[]> {
+    return this.auditLog.listForEntity(companyId, entityType, entityId);
   }
 }

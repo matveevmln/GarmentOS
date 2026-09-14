@@ -79,6 +79,13 @@ export const cuttingOrderMaterials = pgTable(
     requiredQuantity: numeric("required_quantity", { precision: 12, scale: 3 }).notNull(),
     allocatedQuantity: numeric("allocated_quantity", { precision: 12, scale: 3 }),
     consumedQuantity: numeric("consumed_quantity", { precision: 12, scale: 3 }),
+    // Возврат материала со стройки в крое (Этап 3, владелец проекта,
+    // 2026-09-12) — реальный производственный факт, независимый от плана/
+    // выдано/факта: остаток ткани/фурнитуры, физически вернувшийся на склад
+    // после кроя (например, некроеный лишний рулон). NULL, пока факт кроя ещё
+    // не внесён или возврата не было — не то же самое, что 0 (0 — "внесли и
+    // вернули нисколько", NULL — "возврат ещё не фиксировался").
+    returnedQuantity: numeric("returned_quantity", { precision: 12, scale: 3 }),
     // Рулоны на этапе 5 — свободный текст («2 рулона: 700 + 600»), не
     // сущность: система не утверждает, что конкретный рулон предназначен
     // конкретному размеру (владелец проекта, 2026-08-30). Будущий учёт

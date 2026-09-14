@@ -52,6 +52,15 @@ export interface ProductionOrder {
   // источника (QC/snapshot/BOM) этой ссылкой не затрагиваются.
   sourceProductionOrderId: string | null;
   receivedAt: Date | null;
+  // Спецификация-источник (Этап 3 «Production Master», владелец проекта,
+  // 2026-09-12) — null у партий, созданных вручную (существующий сценарий).
+  // Contract Manufacturing не знает ничего о структуре спецификации — это
+  // просто opaque-ссылка (docs/PRINCIPLES.md, принцип 2).
+  specificationId: string | null;
+  // Номер партии — независимый сквозной счётчик компании
+  // (companies.next_production_order_number), не specNumber спецификации.
+  // null у партий без номера (созданных до этого механизма или вручную).
+  orderNumber: number | null;
   // Snapshot партии, зафиксированный при подтверждении (см. миграцию
   // cost_snapshot) — намеренно нетипизирован в домене: точную форму
   // (ProductionOrderCostSnapshot) знает только API-слой, который её же и
@@ -204,7 +213,7 @@ export function assertValidUnitPrice(agreedUnitPrice: number): void {
 export function assertBomIsApproved(isApproved: boolean, bomId: string): void {
   if (!isApproved) {
     throw new DomainError(
-      `Нельзя разместить заказ пошива: BOM ${bomId} не утверждён (approved) для этой модели`,
+      `Нельзя разместить заказ пошива: нормы расхода материалов ${bomId} не утверждены для этой модели`,
       "PRODUCTION_ORDER_BOM_NOT_APPROVED",
     );
   }

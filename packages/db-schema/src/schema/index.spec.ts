@@ -57,10 +57,13 @@ const EXPECTED_TABLES = [
   "inbox_suggestions",
   "telegram_invite_codes",
   "product_sizes",
+  "product_attributes",
   "cutting_orders",
   "cutting_order_materials",
   "cutting_order_results",
   "production_order_qc_results",
+  "specifications",
+  "specification_items",
 ];
 
 function collectTables(): Record<string, unknown> {
@@ -123,6 +126,12 @@ describe("schema", () => {
       "product_sizes",
       "cutting_order_materials",
       "cutting_order_results",
+      // Строка спецификации наследует тенант через FK на specifications, как
+      // bom_items — на boms.
+      "specification_items",
+      // Характеристика модели наследует тенант через FK на products — тот же
+      // паттерн, что product_sizes выше (Этап 2 — «Паспорт модели»).
+      "product_attributes",
     ]);
 
     for (const [key, table] of Object.entries(tables)) {

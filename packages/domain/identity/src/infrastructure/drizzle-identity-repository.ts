@@ -1,5 +1,5 @@
 import { companies, users, type DbOrTx } from "@garmentos/db-schema";
-import { and, eq, isNotNull } from "drizzle-orm";
+import { and, eq, isNotNull, sql } from "drizzle-orm";
 import type { Company } from "../domain/company";
 import type { User } from "../domain/user";
 import type { CompanyRepository, NewCompanyInput, NewUserInput, UserRepository } from "../application/ports";
@@ -66,6 +66,21 @@ export class DrizzleCompanyRepository implements CompanyRepository {
   async findByBootstrapKey(bootstrapKey: string): Promise<Company | null> {
     const [row] = await this.db.select().from(companies).where(eq(companies.bootstrapKey, bootstrapKey)).limit(1);
     return row ? toCompany(row) : null;
+  }
+
+  // Атомарный UPDATE...RETURNING — тот же паттерн, что и
+  // WorkshopRepository.reserveNextSpecificationNumber: исключает гонку при
+  // параллельном создании двух партий одной компании (Этап 3 «Production
+  // Master»). Возвращает именно тот номер, который нужно использовать сейчас
+  // (значение ДО инкремента), не значение счётчика после него.
+  async reserveNextProductionOrderNumber(companyId: string): Promise<number> {
+    const [row] = await this.db
+      .update(companies)
+      .set({ nextProductionOrderNumber: sql`${companies.nextProductionOrderNumber} + 1`, updatedAt: new Date() })
+      .where(eq(companies.id, companyId))
+      .returning({ nextProductionOrderNumber: companies.nextProductionOrderNumber });
+    if (!row) throw new Error(`UPDATE companies не нашёл строку id=${companyId}`);
+    return row.nextProductionOrderNumber - 1;
   }
 }
 

@@ -1,8 +1,15 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useNavigate } from "react-router-dom";
-import { createProductSchema, type CreateProductDto, type ProductResponseDto } from "@garmentos/shared-types";
+import {
+  createProductSchema,
+  type CreateProductDto,
+  type DocumentResponseDto,
+  type ProductionOrderResponseDto,
+  type ProductResponseDto,
+} from "@garmentos/shared-types";
+import { apiRequest } from "../api/client";
 import { useCrudResource } from "../api/useCrudResource";
 import { ModelGrid } from "../design-system/ModelCard/ModelGrid";
 import { SearchBar } from "../design-system/Search/SearchBar";
@@ -24,6 +31,45 @@ export function ProductsPage() {
   );
   const [query, setQuery] = useState("");
   const navigate = useNavigate();
+
+  // Витрина моделей стала production-first (визуальная переработка
+  // 2026-09-13): модель показывает не только паспортные поля, но и свою
+  // производственную активность. Партии берутся ОДНИМ запросом на весь
+  // список (не по запросу на модель) и считаются по тем же статусам, что и
+  // на Главной; «произведено» тут сознательно не дублируется — это число
+  // считает backend на карточке модели (GET /products/:id/production), и
+  // второй реализации того же правила в интерфейсе быть не должно.
+  const [orders, setOrders] = useState<ProductionOrderResponseDto[]>([]);
+  useEffect(() => {
+    void apiRequest<ProductionOrderResponseDto[]>("/production-orders")
+      .then(setOrders)
+      .catch(() => setOrders([]));
+  }, []);
+
+  const ACTIVE_STATUSES = new Set(["placed", "in_progress", "ready_for_pickup"]);
+  const activityByProduct = new Map<string, { batches: number; inProgress: number }>();
+  for (const order of orders) {
+    const current = activityByProduct.get(order.productId) ?? { batches: 0, inProgress: 0 };
+    current.batches += 1;
+    if (ACTIVE_STATUSES.has(order.status)) current.inProgress += 1;
+    activityByProduct.set(order.productId, current);
+  }
+
+  // Фото — из существующего Document Engine, по одному запросу на модель и
+  // строго один раз (без повторов при перерисовке фильтра).
+  const [photoByProduct, setPhotoByProduct] = useState<Record<string, string | null>>({});
+  useEffect(() => {
+    const missing = items.filter((item) => !(item.id in photoByProduct)).map((item) => item.id);
+    if (missing.length === 0) return;
+    for (const productId of missing) {
+      void apiRequest<DocumentResponseDto[]>(`/documents?entityType=product&entityId=${productId}`)
+        .then((docs) => {
+          const photo = docs.find((doc) => doc.docType === "photo_product" && doc.isCurrentVersion) ?? null;
+          setPhotoByProduct((prev) => ({ ...prev, [productId]: photo?.id ?? null }));
+        })
+        .catch(() => setPhotoByProduct((prev) => ({ ...prev, [productId]: null })));
+    }
+  }, [items]);
   const {
     register,
     handleSubmit,
@@ -92,6 +138,14 @@ export function ProductsPage() {
             getCode={(row) => row.code}
             getStatus={(row) => row.status}
             getMeta={(row) => row.category ?? null}
+            getPhotoDocumentId={(row) => photoByProduct[row.id] ?? null}
+            getActivity={(row) => {
+              const activity = activityByProduct.get(row.id);
+              if (!activity) return null;
+              return activity.inProgress > 0
+                ? `${formatQuantity(activity.batches, "партии")} · ${activity.inProgress} в работе`
+                : formatQuantity(activity.batches, "партии");
+            }}
             onItemClick={(row) => void navigate(`/products/${row.id}`)}
             emptyTitle="Пока нет ни одной модели"
             emptyHint="Добавьте первую модель — займёт меньше минуты."

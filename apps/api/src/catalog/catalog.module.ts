@@ -2,6 +2,7 @@ import { Module } from "@nestjs/common";
 import type { Database } from "@garmentos/db-schema";
 import {
   DrizzleCollectionRepository,
+  DrizzleProductAttributeRepository,
   DrizzleProductRepository,
   DrizzleProductSizeRepository,
   DrizzleProductVariantRepository,
@@ -12,6 +13,7 @@ import { ProductsController } from "./products.controller";
 import { ProductVariantsController } from "./product-variants.controller";
 import {
   COLLECTION_REPOSITORY,
+  PRODUCT_ATTRIBUTE_REPOSITORY,
   PRODUCT_REPOSITORY,
   PRODUCT_SIZE_REPOSITORY,
   PRODUCT_VARIANT_REPOSITORY,
@@ -40,6 +42,11 @@ import { CatalogService } from "./catalog.service";
     {
       provide: PRODUCT_VARIANT_REPOSITORY,
       useFactory: (db: Database) => new DrizzleProductVariantRepository(db),
+      inject: [DATABASE_CONNECTION],
+    },
+    {
+      provide: PRODUCT_ATTRIBUTE_REPOSITORY,
+      useFactory: (db: Database) => new DrizzleProductAttributeRepository(db),
       inject: [DATABASE_CONNECTION],
     },
   ],

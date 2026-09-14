@@ -79,3 +79,23 @@ export function formatPercent(share: number, decimals = 0): string {
     minimumFractionDigits: 0,
   }).format(share)}%`;
 }
+
+// Код валюты из API (PurchaseCurrency: USD/KGS/RUB) → отображаемая подпись
+// для formatMoney (тот же принцип, что "руб" в ProductionOrdersPage/
+// BatchPassportPage) — Этап 2, спецификация всегда несёт свой код валюты
+// (totalSumCurrency), его нельзя просто отбросить и подставить дефолт сом.
+const CURRENCY_LABELS: Record<string, string> = { RUB: "руб", KGS: "сом", USD: "$" };
+
+export function currencyLabel(code: string): string {
+  return CURRENCY_LABELS[code] ?? code;
+}
+
+// Человекочитаемый номер производственной партии (Этап 3 «Production
+// Master», владелец проекта, 2026-09-12) — «ПР-2026-0007»: в БД хранится
+// простой integer (companies.next_production_order_number), год берётся из
+// даты создания партии только для отображения и не является частью
+// счётчика (номер 2026 и 2027 годов не пересекается, но и не сбрасывается).
+export function formatBatchNumber(orderNumber: number, createdAt: string | Date): string {
+  const year = (typeof createdAt === "string" ? new Date(createdAt) : createdAt).getFullYear();
+  return `ПР-${year}-${String(orderNumber).padStart(4, "0")}`;
+}

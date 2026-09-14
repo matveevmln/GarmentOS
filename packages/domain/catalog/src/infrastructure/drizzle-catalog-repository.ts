@@ -1,15 +1,18 @@
-import { collections, productSizes, products, productVariants, type DbOrTx } from "@garmentos/db-schema";
+import { collections, productAttributes, productSizes, products, productVariants, type DbOrTx } from "@garmentos/db-schema";
 import { and, asc, eq, ilike } from "drizzle-orm";
 import type { Collection } from "../domain/collection";
 import type { Product } from "../domain/product";
 import type { ProductVariant } from "../domain/product-variant";
 import type { ProductSize, ProductSizeDraft } from "../domain/product-size";
+import type { ProductAttribute, ProductAttributeDraft } from "../domain/product-attribute";
 import type {
   CollectionRepository,
   NewCollectionInput,
   NewProductInput,
   NewProductVariantInput,
+  ProductAttributeRepository,
   ProductCostsInput,
+  ProductDetailsInput,
   ProductRepository,
   ProductSizeRepository,
   ProductVariantRepository,
@@ -18,6 +21,7 @@ import type {
 type CollectionRow = typeof collections.$inferSelect;
 type ProductRow = typeof products.$inferSelect;
 type ProductVariantRow = typeof productVariants.$inferSelect;
+type ProductAttributeRow = typeof productAttributes.$inferSelect;
 
 function toCollection(row: CollectionRow): Collection {
   return {
@@ -42,6 +46,7 @@ function toProduct(row: ProductRow): Product {
     code: row.code,
     category: row.category,
     season: row.season,
+    description: row.description,
     status: row.status,
     techPackUrl: row.techPackUrl,
     standardSewingCost: row.standardSewingCost,
@@ -67,6 +72,18 @@ function toProductVariant(row: ProductVariantRow): ProductVariant {
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
     deletedAt: row.deletedAt,
+  };
+}
+
+function toProductAttribute(row: ProductAttributeRow): ProductAttribute {
+  return {
+    id: row.id,
+    productId: row.productId,
+    name: row.name,
+    value: row.value,
+    sortOrder: row.sortOrder,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
   };
 }
 
@@ -107,6 +124,23 @@ export class DrizzleProductRepository implements ProductRepository {
         otherProductionCost: input.otherProductionCost,
         otherProductionCostCurrency: input.otherProductionCostCurrency,
       })
+      .where(and(eq(products.companyId, companyId), eq(products.id, id)))
+      .returning();
+    if (!row) throw new Error(`UPDATE products не вернул строку для id=${id}`);
+    return toProduct(row);
+  }
+
+  // undefined — «не трогать» (PATCH одним полем не должен стирать
+  // остальные), null — «явно очистить» (например, description: null).
+  async updateDetails(companyId: string, id: string, input: ProductDetailsInput): Promise<Product> {
+    const patch: Partial<typeof products.$inferInsert> = {};
+    if (input.name !== undefined) patch.name = input.name;
+    if (input.category !== undefined) patch.category = input.category;
+    if (input.description !== undefined) patch.description = input.description;
+
+    const [row] = await this.db
+      .update(products)
+      .set(patch)
       .where(and(eq(products.companyId, companyId), eq(products.id, id)))
       .returning();
     if (!row) throw new Error(`UPDATE products не вернул строку для id=${id}`);
@@ -233,13 +267,14 @@ function toProductSize(row: typeof productSizes.$inferSelect): ProductSize {
 export class DrizzleProductSizeRepository implements ProductSizeRepository {
   constructor(private readonly db: DbOrTx) {}
 
-  async listByProduct(productId: string): Promise<ProductSize[]> {
+  async listByProduct(companyId: string, productId: string): Promise<ProductSize[]> {
     const rows = await this.db
-      .select()
+      .select({ size: productSizes })
       .from(productSizes)
-      .where(eq(productSizes.productId, productId))
+      .innerJoin(products, eq(products.id, productSizes.productId))
+      .where(and(eq(products.companyId, companyId), eq(productSizes.productId, productId)))
       .orderBy(asc(productSizes.sortOrder));
-    return rows.map(toProductSize);
+    return rows.map((row) => toProductSize(row.size));
   }
 
   // Ряд заменяется целиком в одной транзакции: порядок и веса меняются
@@ -261,5 +296,62 @@ export class DrizzleProductSizeRepository implements ProductSizeRepository {
         .returning();
       return rows.map(toProductSize);
     });
+  }
+}
+
+export class DrizzleProductAttributeRepository implements ProductAttributeRepository {
+  constructor(private readonly db: DbOrTx) {}
+
+  async listByProduct(companyId: string, productId: string): Promise<ProductAttribute[]> {
+    const rows = await this.db
+      .select({ attribute: productAttributes })
+      .from(productAttributes)
+      .innerJoin(products, eq(products.id, productAttributes.productId))
+      .where(and(eq(products.companyId, companyId), eq(productAttributes.productId, productId)))
+      .orderBy(asc(productAttributes.sortOrder));
+    return rows.map((row) => toProductAttribute(row.attribute));
+  }
+
+  // Без companyId — вызывающий use case уже проверил владение продуктом
+  // через products.findById(companyId, productId) (тот же паттерн, что
+  // replaceForProduct у ProductSizeRepository).
+  async findById(productId: string, attributeId: string): Promise<ProductAttribute | null> {
+    const [row] = await this.db
+      .select()
+      .from(productAttributes)
+      .where(and(eq(productAttributes.productId, productId), eq(productAttributes.id, attributeId)))
+      .limit(1);
+    return row ? toProductAttribute(row) : null;
+  }
+
+  async create(productId: string, draft: ProductAttributeDraft): Promise<ProductAttribute> {
+    // Список характеристик у одной модели короткий (единицы-десятки строк) —
+    // выборка всех id ради next sortOrder не требует агрегатных функций и не
+    // рискует разойтись с диалектом count(), который здесь больше нигде не
+    // использовался.
+    const existing = await this.db
+      .select({ id: productAttributes.id })
+      .from(productAttributes)
+      .where(eq(productAttributes.productId, productId));
+    const [row] = await this.db
+      .insert(productAttributes)
+      .values({ productId, name: draft.name, value: draft.value, sortOrder: existing.length })
+      .returning();
+    if (!row) throw new Error("INSERT product_attributes не вернул строку");
+    return toProductAttribute(row);
+  }
+
+  async update(attributeId: string, draft: ProductAttributeDraft): Promise<ProductAttribute> {
+    const [row] = await this.db
+      .update(productAttributes)
+      .set({ name: draft.name, value: draft.value })
+      .where(eq(productAttributes.id, attributeId))
+      .returning();
+    if (!row) throw new Error(`UPDATE product_attributes не вернул строку для id=${attributeId}`);
+    return toProductAttribute(row);
+  }
+
+  async remove(attributeId: string): Promise<void> {
+    await this.db.delete(productAttributes).where(eq(productAttributes.id, attributeId));
   }
 }

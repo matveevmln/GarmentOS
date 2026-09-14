@@ -1,6 +1,14 @@
 import { useEffect, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
-import type { AttentionResponseDto } from "@garmentos/shared-types";
+import { useNavigate } from "react-router-dom";
+import type {
+  AttentionResponseDto,
+  DocumentResponseDto,
+  ProductResponseDto,
+  ProductVariantResponseDto,
+  ProductionOrderResponseDto,
+  SpecificationResponseDto,
+  WorkshopResponseDto,
+} from "@garmentos/shared-types";
 import { apiRequest, ApiError } from "../api/client";
 import { Card, CardTitle } from "../design-system/Card/Card";
 import { StatusBadge } from "../design-system/StatusBadge/StatusBadge";
@@ -8,55 +16,105 @@ import { PageHeader, Breadcrumbs } from "../design-system/PageHeader/PageHeader"
 import { SkeletonList } from "../design-system/Feedback/Skeleton";
 import { ErrorState } from "../design-system/Feedback/ErrorState";
 import { EmptyState } from "../design-system/Feedback/EmptyState";
-import { AttentionList, MetricStrip, MobileListItem, type AttentionItem } from "../design-system/Blocks";
-import { formatDate, formatMoney, formatQuantity, unitLabel } from "../lib/format";
+import { Button } from "../design-system/Button/Button";
+import { AttentionList, BatchCard, type AttentionItem } from "../design-system/Blocks";
+import { buildBatchCardFromOrder } from "../lib/batch-card";
+import { currencyLabel, formatDate, formatMoney, formatQuantity } from "../lib/format";
+import { cn } from "../design-system/utils";
 
-// Главная (docs/PRINCIPLES.md, принцип 22: «Главная → Что происходит
-// сейчас?»). Владелец бренда открывает GarmentOS утром и должен сразу
-// увидеть, что требует внимания сегодня.
-//
-// Композиция перенесена из GitHub-прототипа (HomeScreen) — единого
-// источника визуальной истины (docs/UI_MIGRATION_PLAN.md §0, этап 6):
-// шапка с хлебными крошками → MetricStrip → две колонки
-// xl:[1.55fr_1fr], слева карточка с тёмной шапкой «Требует внимания» и
-// таблица/мобильный список, справа две вторичные карточки.
-//
-// Данные — прежние, единственный запрос GET /attention. Ни одной новой
-// метрики не заведено: в MetricStrip те же четыре числа, что были в
-// KpiCard, а в списках — те же строки, что показывались и раньше.
+// Главная (Model-first Minimal Core, владелец проекта, 2026-09-12, ПРОМПТ
+// №06.1 §7) — переписана вокруг цепочки Модель → Спецификация → Партия.
+// Прежняя версия строилась на GET /attention (Закупки/Материалы/Счета —
+// снабжение и финансы, скрытые из пользовательского меню Этапом ПРОМПТа
+// №06.1) — GET /attention НЕ ИЗМЕНЁН, но из четырёх его полей здесь
+// используется только overdueProductionOrders («Требует внимания»
+// исторически про просроченный пошив, это остаётся). Остальные разделы
+// экрана — новые данные (заказы пошива, спецификации), потому что модуля
+// «последних событий»/«последних документов» из GitHub-прототипа в
+// apps/web нет (см. прежний комментарий на этом экране).
 
+const ACTIVE_STATUSES = new Set(["placed", "in_progress", "ready_for_pickup"]);
+const MAX_ACTIVE_BATCHES = 6;
+const MAX_RECENT_SPECS = 5;
 
 export function DashboardPage() {
   const navigate = useNavigate();
-  const [data, setData] = useState<AttentionResponseDto | null>(null);
+  const [attention, setAttention] = useState<AttentionResponseDto | null>(null);
+  const [orders, setOrders] = useState<ProductionOrderResponseDto[] | null>(null);
+  const [specs, setSpecs] = useState<SpecificationResponseDto[] | null>(null);
+  const [products, setProducts] = useState<ProductResponseDto[]>([]);
+  const [workshops, setWorkshops] = useState<WorkshopResponseDto[]>([]);
+  const [photoByProduct, setPhotoByProduct] = useState<Record<string, string | null>>({});
+  const [variantsByProduct, setVariantsByProduct] = useState<Record<string, ProductVariantResponseDto[]>>({});
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const load = () => {
     setIsLoading(true);
     setError(null);
-    apiRequest<AttentionResponseDto>("/attention")
-      .then((response) => setData(response))
+    Promise.all([
+      apiRequest<AttentionResponseDto>("/attention"),
+      apiRequest<ProductionOrderResponseDto[]>("/production-orders"),
+      apiRequest<SpecificationResponseDto[]>("/specifications"),
+      apiRequest<ProductResponseDto[]>("/products"),
+      apiRequest<WorkshopResponseDto[]>("/workshops"),
+    ])
+      .then(([attentionData, ordersData, specsData, productsData, workshopsData]) => {
+        setAttention(attentionData);
+        setOrders(ordersData);
+        setSpecs([...specsData].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()));
+        setProducts(productsData);
+        setWorkshops(workshopsData);
+      })
       .catch((err: unknown) => setError(err instanceof ApiError ? err.message : "Не удалось загрузить сводку"))
       .finally(() => setIsLoading(false));
   };
 
   useEffect(load, []);
 
+  const activeOrders = (orders ?? [])
+    .filter((order) => ACTIVE_STATUSES.has(order.status))
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+    .slice(0, MAX_ACTIVE_BATCHES);
+
+  // Фото/варианты модели — только для моделей активных партий (без N+1 на
+  // весь список заказов компании, тот же принцип, что в ProductionOrdersPage).
+  useEffect(() => {
+    const missingProductIds = [...new Set(activeOrders.map((order) => order.productId))].filter(
+      (productId) => !(productId in variantsByProduct),
+    );
+    if (missingProductIds.length === 0) return;
+    for (const productId of missingProductIds) {
+      void apiRequest<DocumentResponseDto[]>(`/documents?entityType=product&entityId=${productId}`)
+        .then((docs) => {
+          const photo = docs.find((doc) => doc.docType === "photo_product" && doc.isCurrentVersion) ?? null;
+          setPhotoByProduct((prev) => ({ ...prev, [productId]: photo?.id ?? null }));
+        })
+        .catch(() => setPhotoByProduct((prev) => ({ ...prev, [productId]: null })));
+      void apiRequest<ProductVariantResponseDto[]>(`/product-variants?productId=${productId}`)
+        .then((rows) => setVariantsByProduct((prev) => ({ ...prev, [productId]: rows })))
+        .catch(() => setVariantsByProduct((prev) => ({ ...prev, [productId]: [] })));
+    }
+  }, [orders]);
+
   if (isLoading) return <SkeletonList />;
-  if (error || !data) {
+  if (error || !attention) {
     return <ErrorState title="Не удалось загрузить сводку" description={error ?? undefined} onRetry={load} />;
   }
 
-  const totalAttentionItems =
-    data.overdueProductionOrders.length +
-    data.overduePurchaseOrders.length +
-    data.lowStockMaterials.length +
-    data.overdueInvoices.length;
+  const productName = (id: string) => products.find((p) => p.id === id)?.name ?? id;
+  const workshopName = (id: string) => workshops.find((w) => w.id === id)?.name ?? id;
 
-  // Список «Требует внимания» — просроченные заказы пошива. Переход по
-  // строке ведёт туда же, куда вела ссылка прежней вёрстки.
-  const attentionItems: AttentionItem[] = data.overdueProductionOrders.map((row) => ({
+  const activeAllOrders = (orders ?? []).filter((o) => ACTIVE_STATUSES.has(o.status));
+  const inProgressCount = activeAllOrders.length;
+  const inProgressQuantity = activeAllOrders.reduce((sum, o) => sum + Number(o.plannedQuantity), 0);
+  const readyForPickupCount = (orders ?? []).filter((o) => o.status === "ready_for_pickup").length;
+  // Считается по полному списку активных заказов, а не по activeOrders
+  // (обрезан до MAX_ACTIVE_BATCHES карточек ниже) — иначе число моделей
+  // занижалось бы при более чем 6 активных партиях.
+  const activeModelsCount = new Set(activeAllOrders.map((o) => o.productId)).size;
+
+  const attentionItems: AttentionItem[] = attention.overdueProductionOrders.map((row) => ({
     id: row.id,
     tone: "danger",
     title: row.productName,
@@ -64,174 +122,155 @@ export function DashboardPage() {
     meta: `на ${row.daysOverdue} дн.`,
   }));
 
+  const recentSpecs = (specs ?? []).slice(0, MAX_RECENT_SPECS);
+
   return (
     <div className="mx-auto max-w-[1400px]">
       <PageHeader
         title="Главная"
-        subtitle="Что требует внимания сегодня"
+        subtitle="Что происходит сейчас"
         breadcrumbs={<Breadcrumbs items={[{ label: "GarmentOS" }, { label: "Главная" }]} />}
+        actions={
+          <div className="flex flex-wrap gap-2">
+            <Button size="sm" variant="secondary" onClick={() => void navigate("/products")}>
+              + Модель
+            </Button>
+            <Button size="sm" variant="secondary" onClick={() => void navigate("/specifications")}>
+              + Спецификация
+            </Button>
+            <Button size="sm" onClick={() => void navigate("/production-orders")}>
+              + Партия
+            </Button>
+          </div>
+        }
       />
 
-      <MetricStrip
-        items={[
-          { label: "Просрочено пошива", value: data.overdueProductionOrders.length, tone: "danger" },
-          { label: "Просрочено закупок", value: data.overduePurchaseOrders.length, tone: "danger" },
-          { label: "Материалы заканчиваются", value: data.lowStockMaterials.length, tone: "warning" },
-          { label: "Просроченные счета", value: data.overdueInvoices.length, tone: "danger" },
-        ]}
-      />
-
-      {totalAttentionItems === 0 ? (
-        <div className="mt-5">
-          <EmptyState
-            title="Сегодня всё под контролем"
-            description="Просроченных партий, закупок и счетов нет."
-          />
+      {/* Тёмный hero главного показателя — перенесено дословно из
+          production-lab.tsx (ProductionHome, ПРОМПТ №09): единственный
+          настоящий dark-акцент вне BatchCard в актуальном Lovable — не
+          весь интерфейс тёмный, а только самый важный производственный
+          показатель на входе в систему. Мини-плитки справа (Активно/
+          Моделей/Просрочено) и подпись — те же данные, что раньше лежали
+          в светлом MetricStrip, посчитанные из уже загруженных заказов и
+          attention, ничего не выдумано. */}
+      <section className="production-summary overflow-hidden rounded-[16px] bg-sidebar p-5 text-sidebar-foreground md:p-7">
+        <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
+          <div>
+            <span className="eyebrow text-sidebar-foreground/45">Сейчас в работе</span>
+            <div className="num mt-3 text-[42px] font-medium leading-none sm:text-[52px]">
+              {formatQuantity(inProgressQuantity)}{" "}
+              <small className="text-[15px] font-normal text-sidebar-foreground/55">изделий</small>
+            </div>
+            <p className="mt-3 max-w-xl text-[13px] text-sidebar-foreground/60">
+              {inProgressCount === 0
+                ? "Активных партий пока нет."
+                : `${formatQuantity(inProgressCount, "партий")} в работе` +
+                  (readyForPickupCount > 0 ? `, из них ${formatQuantity(readyForPickupCount, "готовы")} к отгрузке` : "") +
+                  (attentionItems.length > 0 ? `; ${formatQuantity(attentionItems.length, "требуют")} внимания` : "") +
+                  "."}
+            </p>
+          </div>
+          <div className="grid grid-cols-3 gap-px overflow-hidden rounded-[12px] border border-sidebar-border bg-sidebar-border">
+            <div className="bg-sidebar-accent px-4 py-3">
+              <span className="micro text-sidebar-foreground/40">Активно</span>
+              <strong className="num mt-2 block text-[22px]">{inProgressCount}</strong>
+            </div>
+            <div className="bg-sidebar-accent px-4 py-3">
+              <span className="micro text-sidebar-foreground/40">Моделей</span>
+              <strong className="num mt-2 block text-[22px]">{activeModelsCount}</strong>
+            </div>
+            <div className="bg-sidebar-accent px-4 py-3">
+              <span className="micro text-sidebar-foreground/40">Просрочено</span>
+              <strong className={cn("num mt-2 block text-[22px]", attentionItems.length > 0 && "text-danger")}>
+                {attentionItems.length}
+              </strong>
+            </div>
+          </div>
         </div>
-      ) : (
-        <div className="stagger mt-5 grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.55fr)_minmax(0,1fr)]">
-          <div className="space-y-4">
-            {data.overdueProductionOrders.length > 0 && (
-              <Card className="elev-2 overflow-hidden">
-                {/* Тёмная шапка карточки — из прототипа: единственный
-                    акцентный блок на экране, чтобы взгляд шёл сюда первым. */}
-                <div className="flex items-center justify-between gap-3 bg-sidebar bg-[radial-gradient(120%_180%_at_0%_0%,color-mix(in_oklab,var(--sidebar-primary)_26%,transparent)_0%,transparent_62%)] px-4 py-4 text-sidebar-foreground md:px-5">
-                  <div className="flex items-baseline gap-2.5">
-                    <h2 className="font-display text-[16px] font-semibold tracking-[-0.018em]">Требует внимания</h2>
-                    <span className="t-meta text-sidebar-foreground/55">
-                      {formatQuantity(data.overdueProductionOrders.length, "позиций")}
-                    </span>
-                  </div>
-                </div>
-                <div className="px-4 md:px-5">
-                  <AttentionList items={attentionItems} onSelect={() => void navigate("/production-orders")} />
-                </div>
-              </Card>
-            )}
+      </section>
 
-            {data.overduePurchaseOrders.length > 0 && (
-              <Card className="overflow-hidden">
-                <div className="flex items-baseline justify-between gap-3 px-4 pt-4 md:px-5">
-                  <CardTitle className="text-[16px]">Закупки с просроченной датой поставки</CardTitle>
-                  <span className="t-meta shrink-0">{data.overduePurchaseOrders.length}</span>
-                </div>
-
-                {/* Таблица на планшете и десктопе */}
-                <div className="mt-3 hidden md:block">
-                  <table className="w-full table-fixed border-collapse text-[13px]">
-                    <thead>
-                      <tr className="border-t border-border text-left text-[11.5px] uppercase tracking-[0.06em] text-muted-foreground">
-                        <th className="h-10 pl-4 pr-2 font-medium">Поставщик</th>
-                        <th className="h-10 w-[104px] px-2 text-right font-medium">Ожидалась</th>
-                        <th className="h-10 w-[96px] px-2 text-right font-medium">Просрочка</th>
-                        {/* Статус прячется до lg: рядом с рельсом 260px на
-                            768px под контент остаётся 444px, и четыре
-                            фиксированные колонки съедали имя поставщика
-                            целиком. Статус виден в мобильных карточках и
-                            на широком экране. */}
-                        <th className="hidden h-10 w-[150px] pl-2 pr-4 text-right font-medium lg:table-cell">Статус</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-border border-t border-border">
-                      {data.overduePurchaseOrders.map((row) => (
-                        <tr
-                          key={row.id}
-                          onClick={() => void navigate("/purchase-orders")}
-                          className="group cursor-pointer transition-colors duration-200 hover:bg-primary/[0.045]"
-                        >
-                          <td className="t-object h-[52px] truncate pl-4 pr-2 align-middle">{row.supplierName}</td>
-                          <td className="t-value h-[52px] whitespace-nowrap px-2 text-right align-middle text-muted-foreground">
-                            {formatDate(row.expectedDate)}
-                          </td>
-                          <td className="t-value h-[52px] whitespace-nowrap px-2 text-right align-middle text-danger">
-                            на {row.daysOverdue} дн.
-                          </td>
-                          <td className="hidden h-[52px] py-0 pl-2 pr-4 text-right align-middle lg:table-cell">
-                            <StatusBadge status={row.status} />
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-
-                {/* Карточки на мобильном — мобильная композиция прототипа,
-                    а не сжатая таблица */}
-                <div className="mt-3 space-y-2 px-4 pb-4 md:hidden">
-                  {data.overduePurchaseOrders.map((row) => (
-                    <MobileListItem key={row.id} onClick={() => void navigate("/purchase-orders")}>
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <div className="text-[13px] font-medium">{row.supplierName}</div>
-                          <div className="mt-1 text-[12px] text-muted-foreground">
-                            ожидалась {formatDate(row.expectedDate)}
-                          </div>
-                        </div>
-                        <StatusBadge status={row.status} />
-                      </div>
-                      <div className="num mt-2.5 flex items-center justify-between border-t border-border pt-2 text-[12px]">
-                        <span className="text-muted-foreground">Просрочка</span>
-                        <span className="text-danger">на {row.daysOverdue} дн.</span>
-                      </div>
-                    </MobileListItem>
-                  ))}
-                </div>
-              </Card>
-            )}
-          </div>
-
-          {/* Правая колонка прототипа — вторичные списки. У прототипа это
-              «Последние документы» и «Последние события»; в apps/web таких
-              источников нет (GET /documents отдаёт документы одной
-              сущности, ленты событий наружу нет), поэтому в тех же слотах
-              стоят реальные списки этого экрана. */}
-          <div className="space-y-4">
-            {data.lowStockMaterials.length > 0 && (
-              <Card className="overflow-hidden">
-                <div className="flex items-baseline justify-between gap-3 px-4 pt-4 md:px-5">
-                  <CardTitle className="text-[16px]">Материалы ниже точки перезаказа</CardTitle>
-                  <span className="t-meta shrink-0">{data.lowStockMaterials.length}</span>
-                </div>
-                <ul className="mt-1 divide-y divide-border px-4 md:px-5">
-                  {data.lowStockMaterials.slice(0, 20).map((row) => (
-                    <li key={row.materialId} className="flex items-center justify-between gap-3 py-2.5">
-                      <span className="t-object min-w-0 truncate">{row.materialName}</span>
-                      <span className="num shrink-0 text-[12px] text-muted-foreground">
-                        {formatQuantity(row.quantityOnHand)} из{" "}
-                        {formatQuantity(row.reorderPoint, unitLabel(row.unit))}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-                {data.lowStockMaterials.length > 20 && (
-                  <div className="px-4 pb-4 pt-2 md:px-5">
-                    <Link to="/materials" className="text-[12px] font-medium text-primary no-underline hover:underline">
-                      Ещё {data.lowStockMaterials.length - 20} — открыть материалы
-                    </Link>
-                  </div>
-                )}
-              </Card>
-            )}
-
-            {data.overdueInvoices.length > 0 && (
-              <Card className="overflow-hidden">
-                <div className="flex items-baseline justify-between gap-3 px-4 pt-4 md:px-5">
-                  <CardTitle className="text-[16px]">Просроченные счета</CardTitle>
-                  <span className="t-meta shrink-0">{data.overdueInvoices.length}</span>
-                </div>
-                <ul className="mt-1 divide-y divide-border px-4 pb-2 md:px-5">
-                  {data.overdueInvoices.map((row) => (
-                    <li key={row.id} className="flex items-center justify-between gap-3 py-2.5">
-                      <span className="t-object min-w-0 truncate">{row.referenceLabel}</span>
-                      <span className="t-value shrink-0 text-danger">{formatMoney(row.amount)}</span>
-                    </li>
-                  ))}
-                </ul>
-              </Card>
-            )}
-          </div>
+      {attentionItems.length > 0 && (
+        <div className="mt-5">
+          <Card className="elev-2 overflow-hidden">
+            <div className="flex items-center justify-between gap-3 bg-sidebar bg-[radial-gradient(120%_180%_at_0%_0%,color-mix(in_oklab,var(--sidebar-primary)_26%,transparent)_0%,transparent_62%)] px-4 py-4 text-sidebar-foreground md:px-5">
+              <div className="flex items-baseline gap-2.5">
+                <h2 className="font-display text-[16px] font-semibold tracking-[-0.018em]">Требует внимания</h2>
+                <span className="t-meta text-sidebar-foreground/55">{formatQuantity(attentionItems.length, "партий")}</span>
+              </div>
+            </div>
+            <div className="px-4 md:px-5">
+              <AttentionList items={attentionItems} onSelect={() => void navigate("/production-orders")} />
+            </div>
+          </Card>
         </div>
       )}
+
+      <div className="stagger mt-5 grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
+        <div>
+          <div className="mb-3 flex items-baseline justify-between">
+            <h2 className="font-display text-[16px] font-semibold">Активные партии</h2>
+            <span className="t-meta">{formatQuantity(activeOrders.length)}</span>
+          </div>
+          {activeOrders.length === 0 ? (
+            <EmptyState compact title="Сейчас нет партий в работе" description="Новая партия создаётся из утверждённой спецификации." />
+          ) : (
+            // 2 колонки — с lg (1024px), не с md (768px, ПРОМПТ №08.3): на
+            // 768-1023px рельс навигации сжимает вторую колонку сильнее, чем
+            // один столбец на мобильном — см. тот же комментарий в
+            // ProductionOrdersPage.tsx.
+            <div className="grid grid-cols-1 items-start gap-3 lg:grid-cols-2">
+              {activeOrders.map((order) => {
+                const variantsById = new Map(
+                  (variantsByProduct[order.productId] ?? []).map((variant) => [variant.id, variant]),
+                );
+                const spec = order.specificationId ? (specs ?? []).find((s) => s.id === order.specificationId) : undefined;
+                const cardData = buildBatchCardFromOrder(
+                  order,
+                  productName(order.productId),
+                  workshopName(order.workshopId),
+                  photoByProduct[order.productId] ?? null,
+                  spec?.specNumber ?? null,
+                  variantsById,
+                );
+                return <BatchCard key={order.id} data={cardData} onClick={() => void navigate(`/production-orders/${order.id}`)} />;
+              })}
+            </div>
+          )}
+        </div>
+
+        <Card className="overflow-hidden">
+          <div className="flex items-baseline justify-between gap-3 px-4 pt-4 md:px-5">
+            <CardTitle className="text-[16px]">Последние спецификации</CardTitle>
+            <span className="t-meta shrink-0">{recentSpecs.length}</span>
+          </div>
+          {recentSpecs.length === 0 ? (
+            <div className="p-4 md:p-5">
+              <EmptyState compact title="Пока нет спецификаций" description="Первый шаг производства — спецификация." />
+            </div>
+          ) : (
+            <ul className="mt-1 divide-y divide-border px-4 pb-2 md:px-5">
+              {recentSpecs.map((spec) => (
+                <li
+                  key={spec.id}
+                  className="interactive flex cursor-pointer items-center justify-between gap-3 py-2.5"
+                  onClick={() => void navigate(`/specifications/${spec.id}`)}
+                >
+                  <div className="min-w-0">
+                    <div className="t-object truncate">
+                      {spec.specNumber ? `№${spec.specNumber}` : "Черновик"} · {productName(spec.productId)}
+                    </div>
+                    <div className="num mt-0.5 text-[12px] text-muted-foreground">
+                      {formatQuantity(Math.round(Number(spec.totalQuantity)), "шт")} ·{" "}
+                      {formatMoney(Number(spec.totalSum), currencyLabel(spec.totalSumCurrency))}
+                    </div>
+                  </div>
+                  <StatusBadge status={spec.status} />
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
+      </div>
     </div>
   );
 }

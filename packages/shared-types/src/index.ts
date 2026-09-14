@@ -17,3 +17,5 @@ export * from "./reporting";
 export * from "./cutting";
 export * from "./qc";
 export * from "./document-intelligence";
+export * from "./specification";
+export * from "./audit";

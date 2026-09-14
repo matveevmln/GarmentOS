@@ -33,6 +33,7 @@ export const createProductSchema = z.object({
   code: z.string().min(1, "Артикул модели не может быть пустым"),
   category: z.string().optional(),
   season: z.string().optional(),
+  description: z.string().optional(),
   createdBy: z.string().uuid().optional(),
 });
 export type CreateProductDto = z.infer<typeof createProductSchema>;
@@ -45,6 +46,10 @@ export const productResponseSchema = z.object({
   code: z.string(),
   category: z.string().nullable(),
   season: z.string().nullable(),
+  // Свободный текст паспорта модели (Этап 2 — «Паспорт модели», владелец
+  // проекта, 2026-09-12) — дополняет структурированные характеристики
+  // (product-attribute schemas ниже), не заменяет их.
+  description: z.string().nullable(),
   status: z.enum(["draft", "active", "discontinued"]),
   techPackUrl: z.string().nullable(),
   // Плановые составляющие себестоимости, не выводимые из BOM
@@ -72,6 +77,17 @@ export const updateProductCostsSchema = z.object({
   otherProductionCostCurrency: purchaseCurrencySchema.optional(),
 });
 export type UpdateProductCostsDto = z.infer<typeof updateProductCostsSchema>;
+
+// Правка паспорта модели — название/категория/описание, отдельно от
+// себестоимости выше (Этап 2 — «Паспорт модели», владелец проекта,
+// 2026-09-12). null у category/description — явная очистка поля, отсутствие
+// поля в теле запроса — «не трогать».
+export const updateProductDetailsSchema = z.object({
+  name: z.string().min(1, "Название модели не может быть пустым").optional(),
+  category: z.string().nullable().optional(),
+  description: z.string().nullable().optional(),
+});
+export type UpdateProductDetailsDto = z.infer<typeof updateProductDetailsSchema>;
 
 // name опционален (Итерация 11): без него — список всех моделей компании
 // (apps/web), с ним — точный поиск для AI-разбора текстового запроса
@@ -142,3 +158,24 @@ export const addProductColorSchema = z.object({
   colorCode: z.string().min(1, "Код цвета нужен для артикула"),
 });
 export type AddProductColorDto = z.infer<typeof addProductColorSchema>;
+
+// Характеристики модели — «Состав: 95% хлопок, 5% лайкра», «Плотность:
+// 260 г/м²» (Этап 2 — «Паспорт модели», владелец проекта, 2026-09-12,
+// требование №3) — растут по одной строке через «+ Добавить характеристику»,
+// не заменяются целиком, в отличие от размерного ряда выше.
+export const productAttributeDraftSchema = z.object({
+  name: z.string().min(1, "Название характеристики не может быть пустым"),
+  value: z.string().min(1, "Значение характеристики не может быть пустым"),
+});
+export type ProductAttributeDraftDto = z.infer<typeof productAttributeDraftSchema>;
+
+export const productAttributeResponseSchema = z.object({
+  id: z.string().uuid(),
+  productId: z.string().uuid(),
+  name: z.string(),
+  value: z.string(),
+  sortOrder: z.number().int(),
+  createdAt: z.date(),
+  updatedAt: z.date(),
+});
+export type ProductAttributeResponseDto = z.infer<typeof productAttributeResponseSchema>;

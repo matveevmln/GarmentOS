@@ -177,14 +177,36 @@ export const batchMaterialRequirementSchema = z.object({
   unitPrice: z.number().nullable(),
   currency: z.string().nullable(),
   totalCost: z.number().nullable(),
+  // Остаток и доступность (Этап 3 «Production Master», владелец проекта,
+  // 2026-09-12) — onHand агрегирован ПО ВСЕМ складам компании (временная
+  // модель до появления понятия «склад партии»); UI обязан явно подписать
+  // это как «Остаток по всем складам». Дефицит — информационный: не
+  // блокирует ни создание партии, ни создание раскроя (allowOverdraft не
+  // меняется).
+  onHand: z.number(),
+  deficit: z.number(),
+  isAvailable: z.boolean(),
 });
 export type BatchMaterialRequirementDto = z.infer<typeof batchMaterialRequirementSchema>;
+
+// Спецификация-источник партии (Этап 3) — null у партий, созданных вручную
+// или до появления этого механизма; response остаётся валидным в обоих
+// случаях.
+export const batchPassportSpecificationSchema = z.object({
+  id: z.string().uuid(),
+  specNumber: z.number().int().nullable(),
+});
+export type BatchPassportSpecificationDto = z.infer<typeof batchPassportSpecificationSchema>;
 
 export const batchPassportResponseSchema = z.object({
   id: z.string().uuid(),
   status: z.string(),
   plannedQuantity: z.string(),
   agreedUnitPrice: z.string(),
+  // Номер партии (Этап 3) — независим от specNumber; null у партий без
+  // номера (созданных вручную или до появления механизма).
+  orderNumber: z.number().int().nullable(),
+  specification: batchPassportSpecificationSchema.nullable(),
   dueDate: z.string().nullable(),
   // null — срок не просрочен либо не задан.
   daysOverdue: z.number().int().nullable(),
@@ -209,4 +231,58 @@ export const batchPassportResponseSchema = z.object({
   // величина, которая рассинхронизировалась бы с источником.
   materialRequirement: z.array(batchMaterialRequirementSchema),
 });
+
+// «История производства модели» (Model-first Minimal Core, владелец
+// проекта, 2026-09-12, ПРОМПТ №06.1) — карточка партии в компактном виде,
+// достаточном для списка (BatchCard), без технических идентификаторов
+// (companyId/productId/bomId/workshopId/costSnapshot). specificationId
+// остаётся внутренним полем для навигации на карточку спецификации, не
+// показывается как значение.
+export const batchCardBreakdownSizeSchema = z.object({
+  size: z.string(),
+  quantity: z.number(),
+});
+export type BatchCardBreakdownSizeDto = z.infer<typeof batchCardBreakdownSizeSchema>;
+
+export const batchCardBreakdownColorSchema = z.object({
+  color: z.string(),
+  quantity: z.number(),
+  sizes: z.array(batchCardBreakdownSizeSchema),
+});
+export type BatchCardBreakdownColorDto = z.infer<typeof batchCardBreakdownColorSchema>;
+
+export const batchCardSchema = z.object({
+  id: z.string().uuid(),
+  orderNumber: z.number().int().nullable(),
+  createdAt: z.date(),
+  status: z.string(),
+  plannedQuantity: z.string(),
+  dueDate: z.string().nullable(),
+  productId: z.string().uuid(),
+  productName: z.string(),
+  photoDocumentId: z.string().uuid().nullable(),
+  workshopName: z.string(),
+  specificationId: z.string().uuid().nullable(),
+  specNumber: z.number().int().nullable(),
+  breakdown: z.array(batchCardBreakdownColorSchema),
+});
+export type BatchCardDto = z.infer<typeof batchCardSchema>;
+
+// Агрегаты считаются на backend (Zero Input, docs/PRINCIPLES.md принцип
+// 17) — фронтенд получает только текущую страницу списка партий, и сумма по
+// ней не была бы суммой по модели.
+export const productProductionAggregatesSchema = z.object({
+  totalProduced: z.number(),
+  batchCount: z.number().int(),
+  completed: z.number().int(),
+  inProgress: z.number().int(),
+  other: z.number().int(),
+});
+export type ProductProductionAggregatesDto = z.infer<typeof productProductionAggregatesSchema>;
+
+export const productProductionResponseSchema = z.object({
+  aggregates: productProductionAggregatesSchema,
+  batches: z.array(batchCardSchema),
+});
+export type ProductProductionResponseDto = z.infer<typeof productProductionResponseSchema>;
 export type BatchPassportResponseDto = z.infer<typeof batchPassportResponseSchema>;

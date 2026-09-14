@@ -14,3 +14,4 @@ export * from "./inbox";
 export * from "./telegram";
 export * from "./cutting";
 export * from "./quality-control";
+export * from "./specification";

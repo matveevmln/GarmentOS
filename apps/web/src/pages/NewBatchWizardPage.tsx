@@ -79,7 +79,7 @@ const STEP_TITLES: Record<StepKey, string> = {
   product: "Модель",
   sizes: "Размерный ряд",
   color: "Цвет / вариант",
-  bom: "Спецификация (BOM)",
+  bom: "Нормы расхода материалов",
   order: "Производственный заказ",
 };
 
@@ -403,7 +403,7 @@ export function NewBatchWizardPage() {
     }
   };
 
-  // ---- Шаг 6: BOM ----
+  // ---- Шаг 6: нормы расхода материалов ----
   const [existingBoms, setExistingBoms] = useState<BomResponseDto[]>([]);
   const [bomsLoaded, setBomsLoaded] = useState(false);
   const [bomId, setBomId] = useState("");
@@ -429,7 +429,7 @@ export function NewBatchWizardPage() {
           );
         }
       })
-      .catch((err: unknown) => toast.error(err instanceof ApiError ? err.message : "Не удалось загрузить спецификации модели"))
+      .catch((err: unknown) => toast.error(err instanceof ApiError ? err.message : "Не удалось загрузить нормы расхода материалов"))
       .finally(() => setBomsLoaded(true));
   }, [productId, done.color]);
 
@@ -443,7 +443,7 @@ export function NewBatchWizardPage() {
     setBomError(null);
     if (bomMode === "use") {
       if (!bomId) {
-        setBomError("Не удалось определить утверждённую спецификацию — переключитесь на создание новой");
+        setBomError("Не удалось определить утверждённые нормы расхода — переключитесь на создание новой");
         return;
       }
       setDone((prev) => ({ ...prev, bom: true }));
@@ -471,9 +471,9 @@ export function NewBatchWizardPage() {
       setExistingBoms((prev) => [...prev, approved]);
       setBomId(approved.id);
       setDone((prev) => ({ ...prev, bom: true }));
-      toast.success("Спецификация создана и утверждена");
+      toast.success("Нормы расхода созданы и утверждены");
     } catch (err) {
-      setBomError(err instanceof ApiError ? err.message : "Не удалось создать спецификацию");
+      setBomError(err instanceof ApiError ? err.message : "Не удалось создать нормы расхода");
     } finally {
       setBomSubmitting(false);
     }
@@ -541,7 +541,7 @@ export function NewBatchWizardPage() {
     <div className="mx-auto max-w-[820px]">
       <PageHeader
         title="Новая партия"
-        subtitle="Один проход: цех → материал → модель → BOM → заказ"
+        subtitle="Один проход: цех → материал → модель → нормы расхода → заказ"
         breadcrumbs={<Breadcrumbs items={[{ label: "GarmentOS" }, { label: "Новая партия" }]} />}
       />
 
@@ -876,7 +876,7 @@ export function NewBatchWizardPage() {
           )}
         </Card>
 
-        {/* Шаг 6 — BOM */}
+        {/* Шаг 6 — нормы расхода материалов */}
         <Card className={cn(!isUnlocked("bom") && "opacity-50")}>
           <CardHeader className="flex-row items-center gap-3 space-y-0">
             <StepBadge index={6} state={stepState("bom")} />
@@ -892,7 +892,7 @@ export function NewBatchWizardPage() {
               {!bomsLoaded ? (
                 <SkeletonList />
               ) : done.bom ? (
-                <p className="t-body">Спецификация утверждена, будет использована при создании заказа.</p>
+                <p className="t-body">Нормы расхода утверждены, будут использованы при создании заказа.</p>
               ) : (
                 <div className="flex flex-col gap-3">
                   {existingBoms.some((row) => row.status === "approved") && (
@@ -907,7 +907,7 @@ export function NewBatchWizardPage() {
                   )}
                   {bomMode === "use" ? (
                     <p className="t-body text-muted-foreground">
-                      Уже утверждённая спецификация найдена — используем её без изменений.
+                      Уже утверждённые нормы расхода найдены — используем их без изменений.
                     </p>
                   ) : (
                     <div className="flex flex-col gap-2">
@@ -949,7 +949,7 @@ export function NewBatchWizardPage() {
                   )}
                   {bomError && <p className="text-[12px] font-medium text-danger">{bomError}</p>}
                   <Button onClick={() => void submitBomStep()} loading={bomSubmitting} size="sm" className="self-start">
-                    {bomMode === "use" ? "Далее" : "Создать и утвердить спецификацию"}
+                    {bomMode === "use" ? "Далее" : "Создать и утвердить нормы расхода"}
                   </Button>
                 </div>
               )}
@@ -977,7 +977,7 @@ export function NewBatchWizardPage() {
               ) : (
                 <div className="flex flex-col gap-3">
                   <p className="t-body text-muted-foreground">
-                    Модель, цех, спецификация и цвет уже выбраны на предыдущих шагах — здесь только количество и цена.
+                    Модель, цех, нормы расхода и цвет уже выбраны на предыдущих шагах — здесь только количество и цена.
                     Раскладка по размерам ({existingSizes.map((s) => s.size).join("/")}) рассчитается автоматически по
                     сохранённому размерному ряду.
                   </p>

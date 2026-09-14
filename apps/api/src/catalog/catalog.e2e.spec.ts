@@ -7,9 +7,11 @@ import type { INestApplication } from "@nestjs/common";
 import { VersioningType } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import {
+  auditLog,
   collections,
   companies,
   createDb,
+  productAttributes,
   productVariants,
   products,
   refreshTokens,
@@ -55,9 +57,14 @@ describe("Catalog API (e2e)", () => {
         const companyProducts = await db.select().from(products).where(eq(products.companyId, company.id));
         for (const product of companyProducts) {
           await db.delete(productVariants).where(eq(productVariants.productId, product.id));
+          await db.delete(productAttributes).where(eq(productAttributes.productId, product.id));
         }
         await db.delete(products).where(eq(products.companyId, company.id));
         await db.delete(collections).where(eq(collections.companyId, company.id));
+        // Этап 2 («Паспорт модели») подключил audit_log к CatalogService —
+        // строки ссылаются на users.id, поэтому чистятся до удаления
+        // пользователей, иначе FK audit_log_user_id_users_id_fk не даст удалить.
+        await db.delete(auditLog).where(eq(auditLog.companyId, company.id));
         const companyUsers = await db.select().from(users).where(eq(users.companyId, company.id));
         for (const user of companyUsers) {
           await db.delete(refreshTokens).where(eq(refreshTokens.userId, user.id));
