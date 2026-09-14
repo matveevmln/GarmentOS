@@ -6,12 +6,12 @@ import {
   createProductSchema,
   type CreateProductDto,
   type DocumentResponseDto,
-  type ProductionOrderResponseDto,
+  type ProductProductionResponseDto,
   type ProductResponseDto,
 } from "@garmentos/shared-types";
 import { apiRequest } from "../api/client";
 import { useCrudResource } from "../api/useCrudResource";
-import { ModelGrid } from "../design-system/ModelCard/ModelGrid";
+import { ModelGrid, type ModelGridItem } from "../design-system/ModelCard/ModelGrid";
 import { SearchBar } from "../design-system/Search/SearchBar";
 import { Card, CardContent, CardHeader, CardTitle } from "../design-system/Card/Card";
 import { Input } from "../design-system/Input/Input";
@@ -32,28 +32,26 @@ export function ProductsPage() {
   const [query, setQuery] = useState("");
   const navigate = useNavigate();
 
-  // Витрина моделей стала production-first (визуальная переработка
-  // 2026-09-13): модель показывает не только паспортные поля, но и свою
-  // производственную активность. Партии берутся ОДНИМ запросом на весь
-  // список (не по запросу на модель) и считаются по тем же статусам, что и
-  // на Главной; «произведено» тут сознательно не дублируется — это число
-  // считает backend на карточке модели (GET /products/:id/production), и
-  // второй реализации того же правила в интерфейсе быть не должно.
-  const [orders, setOrders] = useState<ProductionOrderResponseDto[]>([]);
+  // Витрина моделей — production-first (визуальная переработка 2026-09-13,
+  // карточка модели переоформлена в ПРОМПТ №09.1): каждая карточка несёт
+  // цвета/размеры/число партий, реально встречающиеся в производстве этой
+  // модели. Считает backend (GET /products/:id/production, тот же
+  // источник, что и на карточке модели) — второй реализации того же
+  // правила в интерфейсе быть не должно, поэтому запрос идёт по одному
+  // на модель (тот же паттерн N-запросов, что уже применяется ниже для
+  // фото), а не общим списком заказов с подсчётом на клиенте.
+  const [productionByProduct, setProductionByProduct] = useState<Record<string, ProductProductionResponseDto | null>>(
+    {},
+  );
   useEffect(() => {
-    void apiRequest<ProductionOrderResponseDto[]>("/production-orders")
-      .then(setOrders)
-      .catch(() => setOrders([]));
-  }, []);
-
-  const ACTIVE_STATUSES = new Set(["placed", "in_progress", "ready_for_pickup"]);
-  const activityByProduct = new Map<string, { batches: number; inProgress: number }>();
-  for (const order of orders) {
-    const current = activityByProduct.get(order.productId) ?? { batches: 0, inProgress: 0 };
-    current.batches += 1;
-    if (ACTIVE_STATUSES.has(order.status)) current.inProgress += 1;
-    activityByProduct.set(order.productId, current);
-  }
+    const missing = items.filter((item) => !(item.id in productionByProduct)).map((item) => item.id);
+    if (missing.length === 0) return;
+    for (const productId of missing) {
+      void apiRequest<ProductProductionResponseDto>(`/products/${productId}/production`)
+        .then((data) => setProductionByProduct((prev) => ({ ...prev, [productId]: data })))
+        .catch(() => setProductionByProduct((prev) => ({ ...prev, [productId]: null })));
+    }
+  }, [items]);
 
   // Фото — из существующего Document Engine, по одному запросу на модель и
   // строго один раз (без повторов при перерисовке фильтра).
@@ -77,6 +75,29 @@ export function ProductsPage() {
     setFocus,
     formState: { errors, isSubmitting },
   } = useForm<CreateProductDto>({ resolver: zodResolver(createProductSchema) });
+
+  // Цвета/размеры/партии — агрегированы из breakdown реальных партий этой
+  // модели (тот же формат, что у BatchCard), не из выдуманного справочника.
+  // Числовые размеры сортируются по значению, нечисловые — по алфавиту
+  // как запасной вариант (Number(a)-Number(b) даёт NaN, а NaN ложно в JS —
+  // ("" || x) переходит на localeCompare).
+  function deriveModelStats(data: ProductProductionResponseDto | null | undefined) {
+    if (!data) return { colorNames: [] as string[], sizeLabels: [] as string[], batchCount: 0, inProgressCount: 0 };
+    const colors = new Set<string>();
+    const sizes = new Set<string>();
+    for (const batch of data.batches) {
+      for (const row of batch.breakdown) {
+        colors.add(row.color);
+        for (const size of row.sizes) sizes.add(size.size);
+      }
+    }
+    return {
+      colorNames: Array.from(colors),
+      sizeLabels: Array.from(sizes).sort((a, b) => Number(a) - Number(b) || a.localeCompare(b)),
+      batchCount: data.aggregates.batchCount,
+      inProgressCount: data.aggregates.inProgress,
+    };
+  }
 
   const onSubmit = async (data: CreateProductDto) => {
     try {
@@ -131,21 +152,13 @@ export function ProductsPage() {
           <SearchBar value={query} onChange={setQuery} placeholder="Поиск модели" className="mb-3 md:w-[340px]" />
 
           <ModelGrid
-            items={items.filter((row) => row.name.toLowerCase().includes(query.trim().toLowerCase()))}
-            getKey={(row) => row.id}
-            getTitle={(row) => row.name}
-            getSubtitle={(row) => row.code}
-            getCode={(row) => row.code}
-            getStatus={(row) => row.status}
-            getMeta={(row) => row.category ?? null}
-            getPhotoDocumentId={(row) => photoByProduct[row.id] ?? null}
-            getActivity={(row) => {
-              const activity = activityByProduct.get(row.id);
-              if (!activity) return null;
-              return activity.inProgress > 0
-                ? `${formatQuantity(activity.batches, "партии")} · ${activity.inProgress} в работе`
-                : formatQuantity(activity.batches, "партии");
-            }}
+            items={items
+              .filter((row) => row.name.toLowerCase().includes(query.trim().toLowerCase()))
+              .map((row): ModelGridItem => ({
+                product: row,
+                photoDocumentId: photoByProduct[row.id] ?? null,
+                ...deriveModelStats(productionByProduct[row.id]),
+              }))}
             onItemClick={(row) => void navigate(`/products/${row.id}`)}
             emptyTitle="Пока нет ни одной модели"
             emptyHint="Добавьте первую модель — займёт меньше минуты."
