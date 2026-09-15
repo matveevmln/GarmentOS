@@ -75,12 +75,12 @@
   --color-batch-paper: var(--batch-paper);
   --color-batch-copper: var(--batch-copper);
   --color-batch-track: var(--batch-track);
-  --color-model-ink: var(--model-ink);
-  --color-model-bg: var(--model-bg);
-  --color-model-fg: var(--model-fg);
-  --color-model-muted: var(--model-muted);
-  --color-model-border: var(--model-border);
-  --color-model-accent: var(--model-accent);
+  --color-model-card-ink: var(--model-card-ink);
+  --color-model-card-bg: var(--model-card-bg);
+  --color-model-card-fg: var(--model-card-fg);
+  --color-model-card-muted: var(--model-card-muted);
+  --color-model-card-border: var(--model-card-border);
+  --color-model-card-accent: var(--model-card-accent);
   /* Пакет @fontsource-variable/onest регистрирует @font-face под именем
      "Onest Variable" (переменное начертание), а не "Onest". Без первого
      имени в стеке браузер молча падал на системный sans-serif — проверено
@@ -215,19 +215,24 @@
   --batch-track: oklch(0.89 0.009 72);
 
   /* ====== Токены: карточка модели ======
-   * ПРОМПТ №09.1 (владелец проекта, 2026-09-14) — перенесены из
-   * визуальной лаборатории Lovable (src/components/gos/production-lab.tsx,
-   * PremiumModelCard, тот же проект "GarmentOS", коммит 21a88845).
-   * Сознательно отдельный набор от --batch-* — карточка модели должна
-   * отличаться от карточки партии по цвету и иерархии, а не быть тем же
-   * тёмным акцентом: другой оттенок (55 вместо 48 у batch-copper), и вся
-   * карточка тёмная (фото + тело), а не тёмная шапка поверх светлого тела. */
-  --model-ink: oklch(0.155 0.009 55);
-  --model-bg: oklch(0.195 0.006 55);
-  --model-fg: oklch(0.94 0.004 80);
-  --model-muted: oklch(0.62 0.008 70);
-  --model-border: oklch(0.3 0.006 55);
-  --model-accent: oklch(0.7 0.13 55);
+   * ПРОМПТ №09.2 v2 (владелец проекта, 2026-09-15) — предыдущие итерации
+   * (№09.1 тёмная карточка, №09.2 два прохода осветления графита) отменены
+   * явным указанием владельца: единственный источник истины теперь —
+   * последняя утверждённая версия PremiumModelCard в Lovable (проект
+   * "GarmentOS", коммит cd08246d, src/styles.css). Перенесено буквально:
+   * воздушная светлая карточка (почти белая, --model-card-bg), медный
+   * акцент (--model-card-accent = тот же тон, что --primary), фото —
+   * не full-bleed, а отдельная "плашка" с мягким свечением вокруг —
+   * визуально ближе к паспорту/каталогу, чем к тёмной операционной
+   * BatchCard (не тронута). */
+  --model-card-bg: oklch(0.988 0.003 80);
+  --model-card-ink: oklch(0.22 0.006 60);
+  --model-card-fg: oklch(0.22 0.006 60);
+  --model-card-muted: oklch(0.55 0.008 66);
+  --model-card-border: oklch(0.91 0.004 80);
+  --model-card-accent: oklch(0.62 0.135 52);
+  --model-card-glow: color-mix(in oklab, var(--model-card-accent) 22%, transparent);
+  --model-card-halo: color-mix(in oklab, var(--model-card-accent) 10%, transparent);
 }
 
 
@@ -1164,15 +1169,18 @@
 
 /* ====== Карточка модели ======
  *
- * ПРОМПТ №09.1 (владелец проекта, 2026-09-14) — перенесено из визуальной
- * лаборатории Lovable (PremiumModelCard, тот же проект "GarmentOS",
- * коммит 21a88845), НЕ скопировано буквально: адаптировано под токены и
- * конвенции этого файла (--model-* вместо --model-card-*, имена классов
- * без префикса "premium-"). Фото модели — на весь верх карточки (главный
- * акцент), тело под ним полностью тёмное — в отличие от BatchCard, где
- * тёмная только шапка, а тело светлое. Общая структура и переходы
- * (radius/shadow/dur/ease) — из уже существующих токенов, ничего нового
- * не вводится.
+ * ПРОМПТ №09.2 v2 (владелец проекта, 2026-09-15) — полный перенос
+ * последней утверждённой версии PremiumModelCard из Lovable (проект
+ * "GarmentOS", коммит cd08246d, src/styles.css) взамен предыдущих итераций
+ * (тёмная карточка №09.1, два прохода осветления графита №09.2 v1) —
+ * владелец явно отменил их и назвал Lovable источником визуальной истины.
+ * Имена классов сохранены без префикса "premium-" (те же, что уже
+ * используются в ModelCard.tsx), но структура/отступы/цвета/переходы —
+ * буквально те же, что в Lovable. Фото — не full-bleed, а отдельная
+ * "плашка" с мягким медным свечением вокруг, бейдж статуса — поверх фото
+ * в левом верхнем углу. Тело светлое (--model-card-bg, почти белый), а не
+ * тёмное — вот что делает карточку "каталогом/паспортом", отчётливо
+ * непохожим на тёмную операционную BatchCard (не тронута).
  */
 
 .model-card {
@@ -1181,11 +1189,13 @@
   flex-direction: column;
   overflow: hidden;
   border-radius: var(--r-2xl);
-  background: var(--model-bg);
-  border: 1px solid var(--model-border);
+  background:
+    radial-gradient(120% 110% at 50% -10%, var(--model-card-halo) 0%, transparent 52%),
+    var(--model-card-bg);
+  border: 1px solid var(--model-card-border);
   box-shadow:
-    0 1px 0 color-mix(in oklab, var(--model-fg) 7%, transparent) inset,
-    0 18px 46px -22px color-mix(in oklab, var(--model-ink) 55%, transparent);
+    0 1px 0 color-mix(in oklab, var(--card) 80%, transparent) inset,
+    0 14px 38px -22px color-mix(in oklab, var(--model-card-ink) 18%, transparent);
   transition:
     transform var(--dur-3) var(--ease-out),
     box-shadow var(--dur-3) var(--ease-out),
@@ -1193,56 +1203,111 @@
 }
 .model-card:hover {
   transform: translateY(-3px);
-  border-color: color-mix(in oklab, var(--model-accent) 35%, var(--model-border));
+  border-color: color-mix(in oklab, var(--model-card-accent) 28%, var(--model-card-border));
   box-shadow:
-    0 24px 56px -26px color-mix(in oklab, var(--model-ink) 65%, transparent),
-    0 0 0 1px color-mix(in oklab, var(--model-accent) 18%, transparent);
+    0 24px 56px -26px color-mix(in oklab, var(--model-card-ink) 22%, transparent),
+    0 0 0 1px color-mix(in oklab, var(--model-card-accent) 14%, transparent);
 }
 .model-card:active {
   transform: translateY(-1px) scale(0.995);
+}
+
+.model-card::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    color-mix(in oklab, var(--model-card-accent) 55%, transparent) 18%,
+    color-mix(in oklab, var(--model-card-accent) 16%, transparent) 52%,
+    transparent 100%
+  );
+  opacity: 0.8;
+  pointer-events: none;
 }
 
 .model-card-image {
   position: relative;
   aspect-ratio: 4 / 3;
   overflow: hidden;
-  background: var(--model-ink);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 14px 14px 0;
 }
-.model-card-image img {
+
+/* Мягкое медное свечение позади фото — как в Lovable, декоративный слой,
+ * не завязан на данные. */
+.model-card-glow {
+  position: absolute;
+  inset: 18%;
+  z-index: 0;
+  border-radius: 50%;
+  background: radial-gradient(circle at 50% 50%, var(--model-card-glow) 0%, transparent 70%);
+  filter: blur(18px);
+  opacity: 0.75;
+  transition: opacity var(--dur-3) var(--ease-out), transform var(--dur-3) var(--ease-out);
+}
+.model-card:hover .model-card-glow {
+  opacity: 1;
+  transform: scale(1.06);
+}
+
+.model-card-photo {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  border-radius: var(--r-xl);
+  border: 1px solid var(--model-card-border);
+  background: var(--card);
+  box-shadow:
+    0 8px 24px -10px color-mix(in oklab, var(--model-card-ink) 16%, transparent),
+    0 0 0 1px color-mix(in oklab, var(--card) 80%, transparent) inset;
+}
+.model-card-photo img {
   width: 100%;
   height: 100%;
   object-fit: cover;
   transition: transform var(--dur-3) var(--ease-out);
 }
-.model-card:hover .model-card-image img {
+.model-card:hover .model-card-photo img {
   transform: scale(1.04);
 }
 
 /* Запасное состояние без фото (фото у модели рекомендуемое, не
  * обязательное — то же правило, что у HeroModelThumb в BatchCard.tsx) —
- * артикул крупно на тёмной подложке вместо пустого места. */
+ * артикул на той же светлой "плашке", что и фото, а не на пустом месте. */
 .model-card-placeholder {
-  position: absolute;
-  inset: 0;
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: 2px;
+  border-radius: var(--r-xl);
+  border: 1px solid var(--model-card-border);
+  background: var(--card);
 }
 .model-card-placeholder-code {
   font-family: var(--font-mono);
   font-size: 22px;
   font-weight: 600;
   letter-spacing: 0.06em;
-  color: color-mix(in oklab, var(--model-fg) 55%, transparent);
+  color: var(--model-card-fg);
 }
 .model-card-placeholder-suffix {
   font-family: var(--font-mono);
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.18em;
-  color: color-mix(in oklab, var(--model-fg) 32%, transparent);
+  color: var(--model-card-muted);
 }
 
 .model-card-overlay {
@@ -1250,24 +1315,25 @@
   inset: 0;
   pointer-events: none;
   background:
-    linear-gradient(180deg, color-mix(in oklab, var(--model-ink) 42%, transparent) 0%, transparent 38%),
-    linear-gradient(180deg, transparent 48%, color-mix(in oklab, var(--model-bg) 92%, transparent) 100%);
+    linear-gradient(180deg, color-mix(in oklab, var(--model-card-ink) 10%, transparent) 0%, transparent 28%),
+    linear-gradient(180deg, transparent 62%, color-mix(in oklab, var(--model-card-bg) 92%, transparent) 100%);
 }
 
 .model-card-badge {
   position: absolute;
-  left: 12px;
-  top: 12px;
+  left: 22px;
+  top: 22px;
   z-index: 2;
 }
 
 .model-card-status {
-  background: color-mix(in oklab, var(--model-accent) 12%, var(--model-bg)) !important;
-  border-color: color-mix(in oklab, var(--model-accent) 28%, var(--model-border)) !important;
-  color: var(--model-fg) !important;
+  background: color-mix(in oklab, var(--model-card-accent) 10%, var(--model-card-bg)) !important;
+  border: 1px solid color-mix(in oklab, var(--model-card-accent) 38%, var(--model-card-border)) !important;
+  color: var(--model-card-fg) !important;
+  box-shadow: 0 2px 8px -3px color-mix(in oklab, var(--model-card-accent) 30%, transparent);
 }
 .model-card-status > span {
-  background: var(--model-accent) !important;
+  background: var(--model-card-accent) !important;
 }
 
 .model-card-body {
@@ -1275,7 +1341,7 @@
   flex-direction: column;
   flex: 1 1 auto;
   padding: 14px;
-  color: var(--model-fg);
+  color: var(--model-card-fg);
 }
 
 .model-card-category {
@@ -1284,7 +1350,7 @@
   font-weight: 500;
   text-transform: uppercase;
   letter-spacing: 0.14em;
-  color: var(--model-accent);
+  color: var(--model-card-accent);
 }
 
 .model-card-name {
@@ -1294,7 +1360,7 @@
   font-weight: 600;
   line-height: 1.18;
   letter-spacing: -0.018em;
-  color: var(--model-fg);
+  color: var(--model-card-fg);
 }
 
 .model-card-article {
@@ -1303,7 +1369,7 @@
   font-size: 12px;
   font-weight: 500;
   letter-spacing: 0.02em;
-  color: var(--model-muted);
+  color: var(--model-card-muted);
 }
 
 .model-card-colors {
@@ -1320,7 +1386,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   font-size: 11.5px;
-  color: var(--model-muted);
+  color: var(--model-card-muted);
 }
 
 .model-card-sizes {
@@ -1337,12 +1403,16 @@
   height: 28px;
   padding-inline: 8px;
   border-radius: var(--r-sm);
-  background: color-mix(in oklab, var(--model-fg) 8%, transparent);
-  border: 1px solid color-mix(in oklab, var(--model-fg) 10%, transparent);
+  background: var(--card);
+  border: 1px solid color-mix(in oklab, var(--model-card-accent) 22%, var(--model-card-border));
   font-family: var(--font-mono);
   font-size: 12px;
   font-weight: 500;
-  color: var(--model-fg);
+  color: var(--model-card-fg);
+  transition: border-color var(--dur-2) var(--ease-out);
+}
+.model-card:hover .model-card-size {
+  border-color: color-mix(in oklab, var(--model-card-accent) 40%, var(--model-card-border));
 }
 
 .model-card-metrics {
@@ -1351,7 +1421,7 @@
   gap: 8px;
   margin-top: 16px;
   padding-top: 14px;
-  border-top: 1px solid var(--model-border);
+  border-top: 1px solid var(--model-card-border);
 }
 .model-card-metric-label {
   display: block;
@@ -1359,7 +1429,7 @@
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.1em;
-  color: var(--model-muted);
+  color: var(--model-card-muted);
 }
 .model-card-metric-value {
   display: block;
@@ -1369,22 +1439,36 @@
   font-weight: 500;
   line-height: 1;
   letter-spacing: -0.02em;
-  color: var(--model-fg);
+  color: var(--model-card-fg);
 }
 
-/* Образец цвета (ColorDot, Breakdown.tsx) поверх тёмного тела: базовое
- * кольцо .swatch-dot окрашено под светлую поверхность (var(--card)) —
- * здесь заменяется на кольцо в цвет тёмного тела карточки, иначе вокруг
- * каждой точки был бы светлый нежелательный ореол. */
+/* Образец цвета (ColorDot, Breakdown.tsx) поверх светлого тела: то же
+ * кольцо, что в Lovable — акцентная обводка + halo в цвет фона карточки. */
 .model-card-swatch {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  border: 1.5px solid color-mix(in oklab, var(--model-card-accent) 55%, transparent);
   box-shadow:
-    0 0 0 2px var(--model-bg),
-    0 2px 5px color-mix(in oklab, var(--model-ink) 40%, transparent);
+    0 0 0 2px var(--model-card-bg),
+    0 3px 8px -2px color-mix(in oklab, var(--model-card-ink) 18%, transparent);
 }
 
 @media (max-width: 480px) {
   .model-card {
     border-radius: 14px;
+  }
+  .model-card-image {
+    padding: 12px 12px 0;
+  }
+  .model-card-badge {
+    left: 20px;
+    top: 20px;
+  }
+  .model-card-glow {
+    inset: 16%;
+    filter: blur(14px);
   }
   .model-card-body {
     padding: 12px;

@@ -2,19 +2,20 @@ import { usePhotoUrl } from "../Blocks/BatchCard";
 import { ColorDot } from "../Blocks/Breakdown";
 import { StatusBadge } from "../StatusBadge/StatusBadge";
 
-// ModelCard — карточка модели для витрины «Модели» (ПРОМПТ №09.1, владелец
-// проекта, 2026-09-14). Визуальный язык перенесён из Lovable-референса
-// PremiumModelCard (src/components/gos/production-lab.tsx, тот же проект
-// "GarmentOS", коммит 21a88845) — НЕ скопирован буквально, адаптирован под
-// реальные данные (Product + GET /products/:id/production) и существующие
-// компоненты дизайн-системы (ColorDot вместо фиксированного 5-цветного
+// ModelCard — карточка модели для витрины «Модели». ПРОМПТ №09.2 v2
+// (владелец проекта, 2026-09-15) — полный перенос последней утверждённой
+// версии PremiumModelCard из Lovable (src/components/gos/production-lab.tsx,
+// проект "GarmentOS", коммит cd08246d) взамен прежних тёмных итераций.
+// Разметка воспроизведена буквально (обёртка -glow и -photo вокруг
+// изображения, бейдж статуса поверх фото), адаптированы только источники
+// данных под реальные (ColorDot вместо фиксированного 5-цветного
 // справочника, usePhotoUrl вместо статичного набора картинок).
 //
-// Сознательно отличается от BatchCard структурой, цветом и иерархией:
-// у BatchCard тёмная ШАПКА (номер/статус) поверх светлого ТЕЛА; здесь фото
-// модели — на весь верх карточки (главный акцент), а тело под ним
-// полностью тёмное, на отдельном наборе токенов (--model-*, не --batch-*,
-// другой оттенок акцента — 55 вместо 48).
+// Отличается от BatchCard структурой, цветом и иерархией: у BatchCard
+// тёмная ШАПКА (номер/статус) поверх светлого ТЕЛА; здесь наоборот — фото
+// на светлой "плашке" со свечением, тело под ним тоже светлое (--model-
+// card-*, отдельный набор токенов от --batch-*, каталожный, а не
+// операционный характер карточки).
 export interface ModelCardModel {
   code: string;
   name: string;
@@ -48,15 +49,18 @@ export function ModelCard({
   return (
     <button type="button" onClick={onClick} className="model-card focus-ring anim-rise text-left">
       <div className="model-card-image">
+        <div className="model-card-glow" aria-hidden="true" />
         {photoUrl ? (
-          <img src={photoUrl} alt={model.name} loading="lazy" />
+          <div className="model-card-photo">
+            <img src={photoUrl} alt={model.name} loading="lazy" />
+            <div className="model-card-overlay" />
+          </div>
         ) : (
           <div className="model-card-placeholder">
             <span className="model-card-placeholder-code">{codePrefix}</span>
             {codeSuffix ? <span className="model-card-placeholder-suffix">{codeSuffix}</span> : null}
           </div>
         )}
-        <div className="model-card-overlay" />
         <div className="model-card-badge">
           <StatusBadge status={model.status} className="model-card-status" />
         </div>
