@@ -182,6 +182,13 @@ export function ProductDetailPage() {
       form.append("docType", "photo_product");
       form.append("entityType", "product");
       form.append("entityId", id);
+      // ПРОМПТ №09.5 (QA перед Freeze Model Card) — найденный P0: замена
+      // фото никогда не помечала прежний документ устаревшим (supersedes
+      // ДокументId не передавался), поэтому у модели могло оказаться сразу
+      // два documents с isCurrentVersion=true, и какой из них покажет
+      // .find() (здесь и в ModelCard/usePhotoUrl) зависело от порядка строк
+      // в БД, а не от того, что реально загрузили последним.
+      if (photoDoc) form.append("supersedesDocumentId", photoDoc.id);
       await apiUpload<DocumentResponseDto>("/documents", form);
       setPhotoFiles([]);
       loadPhoto();

@@ -18,13 +18,16 @@ import {
   productSizes,
   productVariants,
   refreshTokens,
+  roles,
   userRoles,
   users,
 } from "@garmentos/db-schema";
 import type { ProductAttributeResponseDto, ProductResponseDto } from "@garmentos/shared-types";
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { TokenService } from "../auth/token.service";
+import { hashPassword } from "../identity/password-hasher";
 import { AppModule } from "../app.module";
 import { authHeader, setupAuthenticatedCompany } from "../test-support/auth-test-helper";
 
@@ -52,6 +55,7 @@ interface ErrorResponseBody {
 describe("Product Passport API (e2e)", () => {
   let app: INestApplication;
   let httpServer: Server;
+  let tokenService: TokenService;
   const createdCompanyNames: string[] = [];
 
   beforeAll(async () => {
@@ -60,7 +64,44 @@ describe("Product Passport API (e2e)", () => {
     app.enableVersioning({ type: VersioningType.URI, defaultVersion: "1" });
     await app.init();
     httpServer = app.getHttpServer() as Server;
+    tokenService = app.get(TokenService);
   });
+
+  // Компания + подписанный access-токен тем же TokenService, что и обычный
+  // логин, но БЕЗ вызова /v1/auth/login — тот ограничен ThrottlerGuard
+  // (5 запросов/60с, auth.controller.ts). Этому файлу нужно больше токенов
+  // подряд, чем позволяет лимит (тот же приём, что в specification.e2e.spec.ts
+  // и tenant-isolation.e2e.spec.ts). Используется только для стороны, которая
+  // ничего не должна получить (компания B) — своя компания по-прежнему
+  // логинится по-настоящему через setupAuthenticatedCompany там, где сценарий
+  // это проверяет.
+  async function createCompanyWithToken(companyName: string, roleCode: string): Promise<{ companyId: string; accessToken: string }> {
+    createdCompanyNames.push(companyName);
+    const [company] = await db.insert(companies).values({ name: companyName }).returning();
+    if (!company) throw new Error("Не удалось создать тестовую компанию");
+
+    const [user] = await db
+      .insert(users)
+      .values({
+        companyId: company.id,
+        email: `passport-e2e-${Date.now()}-${Math.random().toString(36).slice(2)}@example.com`,
+        passwordHash: hashPassword("test-password-123"),
+        fullName: "Test User",
+      })
+      .returning();
+    if (!user) throw new Error("Не удалось создать тестового пользователя");
+
+    const [role] = await db
+      .select()
+      .from(roles)
+      .where(and(isNull(roles.companyId), eq(roles.code, roleCode)))
+      .limit(1);
+    if (!role) throw new Error(`Предустановленная роль "${roleCode}" не найдена — проверьте миграцию 0007`);
+    await db.insert(userRoles).values({ userId: user.id, roleId: role.id });
+
+    const accessToken = tokenService.signAccessToken({ sub: user.id, companyId: company.id, roles: [roleCode] });
+    return { companyId: company.id, accessToken };
+  }
 
   afterAll(async () => {
     for (const name of createdCompanyNames) {
@@ -214,6 +255,108 @@ describe("Product Passport API (e2e)", () => {
       .set(...authHeader(accessToken))
       .expect(200);
     expect(fileResponse.headers["content-type"]).toBe("image/jpeg");
+  });
+
+  it("замена фото модели (supersedesDocumentId) — старое фото уходит в историю, актуально ровно одно (ПРОМПТ №09.5, найденный P0)", async () => {
+    const companyName = `E2E Passport Photo Replace ${Date.now()}`;
+    const { accessToken } = await createCompanyWithToken(companyName, "owner");
+
+    const productResponse = await request(httpServer)
+      .post("/v1/products")
+      .set(...authHeader(accessToken))
+      .send({ name: "Худи Замена Фото", code: `HOODIE-PHOTO-REPL-${Date.now()}` })
+      .expect(201);
+    const product = productResponse.body as ProductResponseDto;
+
+    const firstUpload = await request(httpServer)
+      .post("/v1/documents")
+      .set(...authHeader(accessToken))
+      .field("docType", "photo_product")
+      .field("entityType", "product")
+      .field("entityId", product.id)
+      .attach("file", Buffer.from([0xff, 0xd8, 0xff, 0xd9]), { filename: "first.jpg", contentType: "image/jpeg" })
+      .expect(201);
+    const first = firstUpload.body as { id: string };
+
+    // Веб-клиент (ProductDetailPage.uploadPhoto) обязан передавать
+    // supersedesDocumentId при замене — без него у модели оказывались бы
+    // два documents с isCurrentVersion=true одновременно, и какой из них
+    // покажет .find() в ModelCard/usePhotoUrl зависело бы от порядка строк
+    // в БД, а не от факта загрузки последним.
+    const secondUpload = await request(httpServer)
+      .post("/v1/documents")
+      .set(...authHeader(accessToken))
+      .field("docType", "photo_product")
+      .field("entityType", "product")
+      .field("entityId", product.id)
+      .field("supersedesDocumentId", first.id)
+      .attach("file", Buffer.from([0xff, 0xd8, 0xff, 0xe1]), { filename: "second.jpg", contentType: "image/jpeg" })
+      .expect(201);
+    const second = secondUpload.body as { id: string; supersedesDocumentId: string | null };
+    expect(second.supersedesDocumentId).toBe(first.id);
+
+    const listResponse = await request(httpServer)
+      .get("/v1/documents")
+      .set(...authHeader(accessToken))
+      .query({ entityType: "product", entityId: product.id })
+      .expect(200);
+    const docs = listResponse.body as Array<{ id: string; isCurrentVersion: boolean }>;
+
+    const current = docs.filter((doc) => doc.isCurrentVersion);
+    expect(current).toHaveLength(1);
+    expect(current[0]?.id).toBe(second.id);
+
+    const oldDoc = docs.find((doc) => doc.id === first.id);
+    expect(oldDoc?.isCurrentVersion).toBe(false);
+  });
+
+  it("tenant isolation: чужая компания не видит и не может скачать фото модели другой компании (ПРОМПТ №09.5, QA перед Freeze Model Card)", async () => {
+    const companyAName = `E2E Passport Photo IDOR A ${Date.now()}`;
+    const companyBName = `E2E Passport Photo IDOR B ${Date.now()}`;
+    const { accessToken: tokenA } = await setupAuthenticatedCompany(db, httpServer, companyAName, "owner");
+    const { accessToken: tokenB } = await createCompanyWithToken(companyBName, "owner");
+
+    const productResponse = await request(httpServer)
+      .post("/v1/products")
+      .set(...authHeader(tokenA))
+      .send({ name: "Модель компании A с фото", code: `PROD-PHOTO-A-${Date.now()}` })
+      .expect(201);
+    const product = productResponse.body as ProductResponseDto;
+
+    const uploadResponse = await request(httpServer)
+      .post("/v1/documents")
+      .set(...authHeader(tokenA))
+      .field("docType", "photo_product")
+      .field("entityType", "product")
+      .field("entityId", product.id)
+      .attach("file", Buffer.from([0xff, 0xd8, 0xff, 0xd9]), { filename: "model.jpg", contentType: "image/jpeg" })
+      .expect(201);
+    const uploaded = uploadResponse.body as { id: string };
+
+    // Компания B не видит фото компании A по тому же productId — то, что
+    // именно на этом эндпоинте строится Model Card (usePhotoUrl,
+    // GET /documents?entityType=product&entityId=...).
+    const listAsB = await request(httpServer)
+      .get("/v1/documents")
+      .set(...authHeader(tokenB))
+      .query({ entityType: "product", entityId: product.id })
+      .expect(200);
+    expect(listAsB.body).toEqual([]);
+
+    // Компания B не может скачать байты фото компании A, даже зная его id
+    // напрямую (та же проверка companyId, что и в listForEntity/findById).
+    const fileAsB = await request(httpServer)
+      .get(`/v1/documents/${uploaded.id}/file`)
+      .set(...authHeader(tokenB))
+      .expect(404);
+    expect((fileAsB.body as ErrorResponseBody).code).toBe("DOCUMENT_NOT_FOUND");
+
+    // Своя компания по-прежнему видит и может скачать собственное фото.
+    const fileAsA = await request(httpServer)
+      .get(`/v1/documents/${uploaded.id}/file`)
+      .set(...authHeader(tokenA))
+      .expect(200);
+    expect(fileAsA.headers["content-type"]).toBe("image/jpeg");
   });
 
   it("tenant isolation: чужая компания не видит размерный ряд/характеристики модели (регрессия найденного IDOR)", async () => {
