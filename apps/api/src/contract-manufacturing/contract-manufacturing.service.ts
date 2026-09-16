@@ -1,6 +1,7 @@
 import { Inject, Injectable } from "@nestjs/common";
 import {
   captureProductionOrderCostSnapshot,
+  completeProductionOrder as completeProductionOrderUseCase,
   confirmProductionOrder,
   createProductionOrderDraft,
   createProductionOrderFromSpecification,
@@ -374,6 +375,31 @@ export class ContractManufacturingService {
           receivedQuantity: v.receivedQuantity,
         })),
       },
+    });
+
+    return order;
+  }
+
+  // Завершение партии (ПРОМПТ №10.1/10.2, владелец проекта, 2026-09-15) —
+  // отдельное явное действие пользователя после приёмки, независимое от ОТК
+  // (production_order_qc_results никогда сама не меняет статус партии — см.
+  // packages/domain/qc). "received" сам по себе больше не считается концом
+  // жизни партии.
+  async completeProductionOrder(
+    currentUser: AuthenticatedRequestUser,
+    productionOrderId: string,
+  ): Promise<ProductionOrder> {
+    const order = await completeProductionOrderUseCase(
+      { productionOrders: this.productionOrders },
+      { companyId: currentUser.companyId, productionOrderId },
+    );
+
+    await this.auditService.recordForUser(currentUser, {
+      entityType: "production_order",
+      entityId: order.id,
+      action: "production_order.completed",
+      beforeJson: { status: "received" },
+      afterJson: { status: order.status },
     });
 
     return order;

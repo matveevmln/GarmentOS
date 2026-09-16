@@ -6,6 +6,7 @@ export type ProductionOrderStatus =
   | "in_progress"
   | "ready_for_pickup"
   | "received"
+  | "completed"
   | "cancelled";
 
 // "new" — обычный оплачиваемый объём (цена берётся из agreedUnitPrice заказа,
@@ -245,6 +246,22 @@ export function assertCanReceive(status: ProductionOrderStatus): void {
   }
 }
 
+// Завершение партии (ПРОМПТ №10.1/10.2, владелец проекта, 2026-09-15) —
+// отдельное явное действие пользователя, не следствие приёмки и не следствие
+// ОТК. "received" сам по себе больше не считается концом жизни партии: она
+// может сколько угодно ждать в этом статусе, пока пользователь не подтвердит
+// закрытие. ОТК (production_order_qc_results) — независимый факт, который
+// НИКОГДА не переводит статус партии сам по себе (см. qc-result.ts) — только
+// эта функция, вызванная explicit-действием "Завершить партию".
+export function assertCanComplete(status: ProductionOrderStatus): void {
+  if (status !== "received") {
+    throw new DomainError(
+      `Нельзя завершить партию в статусе "${status}" — завершение доступно только после приёмки`,
+      "PRODUCTION_ORDER_NOT_RECEIVED",
+    );
+  }
+}
+
 // Факт приёмки может отличаться от плана в любую сторону (P0-1, владелец
 // проекта, 2026-09-07 — "ordered ≠ received ≠ good ≠ defect"). Единственное,
 // что проверяется здесь — сами введённые числа корректны и относятся к
@@ -299,7 +316,13 @@ export function assertCanUpdateStatusFromWorkshop(
   current: ProductionOrderStatus,
   next: "in_progress" | "ready_for_pickup",
 ): void {
-  if (current === "received" || current === "cancelled") {
+  // "completed" (Global Completed Regression Audit, владелец проекта,
+  // 2026-09-15) — терминальный статус наравне с "received"/"cancelled":
+  // без этой проверки next === "ready_for_pickup" не был отклонён ни одним
+  // условием ниже (next === "in_progress" отклоняется только для current
+  // !== "placed"), то есть закрытую партию можно было бы формально вернуть
+  // в "готово к отгрузке" через тот же путь, что и входящее сообщение цеха.
+  if (current === "received" || current === "cancelled" || current === "completed") {
     throw new DomainError(
       `Заказ пошива в статусе "${current}" — обновление статуса цехом больше не применяется`,
       "PRODUCTION_ORDER_INVALID_STATUS_TRANSITION",

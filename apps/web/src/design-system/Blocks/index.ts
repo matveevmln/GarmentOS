@@ -21,6 +21,6 @@ export type { AttentionItem } from "./AttentionList";
 export { DataTable, Td, MobileListItem } from "./DataTable";
 export type { DataTableColumn } from "./DataTable";
 export { Accordion } from "./Accordion";
-export { BatchCard, ModelThumb, usePhotoUrl } from "./BatchCard";
+export { BatchCard, colorCountLabel, HeroModelThumb, ModelThumb, usePhotoUrl } from "./BatchCard";
 export type { BatchCardProps } from "./BatchCard";
 export { ColorBreakdown, ColorDot, SizePill } from "./Breakdown";

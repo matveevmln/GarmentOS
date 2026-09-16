@@ -16,6 +16,7 @@ import { sql } from "drizzle-orm";
 import { createCompany, DrizzleCompanyRepository } from "@garmentos/domain-identity";
 import { createMaterial, DrizzleMaterialRepository } from "@garmentos/domain-procurement";
 import { describe, expect, it } from "vitest";
+import { completeProductionOrder } from "./application/complete-production-order";
 import { confirmProductionOrder } from "./application/confirm-production-order";
 import { createProductionOrderDraft } from "./application/create-production-order";
 import { createWorkshop } from "./application/create-workshop";
@@ -278,6 +279,82 @@ describe("domain/contract-manufacturing", () => {
       // Повторная приёмка уже принятой партии запрещена.
       await expect(
         receiveProductionOrder({ productionOrders }, { companyId: company.id, productionOrderId: draft.id }),
+      ).rejects.toThrow(DomainError);
+    });
+  });
+
+  // ПРОМПТ №10.1/10.2 (владелец проекта, 2026-09-15): "received" сам по себе
+  // больше не считается концом жизни партии — завершение только явным
+  // действием, независимым от ОТК (проверяется отдельно в packages/domain/qc).
+  it("завершает партию (completed) только из статуса 'принято', не раньше и не дважды", async () => {
+    await runInRolledBackTransaction(async (tx) => {
+      const { company, product, variant, boms, approvedBom, workshops, workshop } = await seedApprovedBomAndVariant(tx);
+      const productionOrders = new DrizzleProductionOrderRepository(tx);
+      const bomApproval = makeBomApprovalPort(boms);
+
+      const draft = await createProductionOrderDraft(
+        { productionOrders, workshops, bomApproval },
+        {
+          companyId: company.id,
+          productId: product.id,
+          bomId: approvedBom.id,
+          workshopId: workshop.id,
+          plannedQuantity: 100,
+          agreedUnitPrice: 450,
+          variants: [{ productVariantId: variant.id, quantity: 100 }],
+        },
+      );
+
+      // Нельзя завершить черновик.
+      await expect(
+        completeProductionOrder({ productionOrders }, { companyId: company.id, productionOrderId: draft.id }),
+      ).rejects.toThrow(/только после приёмки/);
+
+      await confirmProductionOrder({ productionOrders }, { companyId: company.id, productionOrderId: draft.id });
+
+      // Нельзя завершить размещённый заказ — приёмки ещё не было.
+      await expect(
+        completeProductionOrder({ productionOrders }, { companyId: company.id, productionOrderId: draft.id }),
+      ).rejects.toThrow(DomainError);
+
+      await updateProductionOrderStatusFromWorkshop(
+        { productionOrders },
+        { companyId: company.id, workshopId: workshop.id, status: "in_progress" },
+      );
+      await updateProductionOrderStatusFromWorkshop(
+        { productionOrders },
+        { companyId: company.id, workshopId: workshop.id, status: "ready_for_pickup" },
+      );
+      await receiveProductionOrder({ productionOrders }, { companyId: company.id, productionOrderId: draft.id });
+
+      const completed = await completeProductionOrder(
+        { productionOrders },
+        { companyId: company.id, productionOrderId: draft.id },
+      );
+      expect(completed.status).toBe("completed");
+
+      // Повторное завершение уже завершённой партии запрещено.
+      await expect(
+        completeProductionOrder({ productionOrders }, { companyId: company.id, productionOrderId: draft.id }),
+      ).rejects.toThrow(DomainError);
+
+      // Global Completed Regression Audit (владелец проекта, 2026-09-15):
+      // завершённая партия — терминальный статус наравне с "received"/
+      // "cancelled". Путь по конкретному id (REST) не проходит через фильтр
+      // findLatestActiveByWorkshop (тот и так не увидит completed-заказ как
+      // "активный"), поэтому именно REST-путь — реальная поверхность, на
+      // которой раньше отсутствовала защита от отката "готово к отгрузке".
+      await expect(
+        updateProductionOrderStatus(
+          { productionOrders },
+          { companyId: company.id, productionOrderId: draft.id, status: "in_progress" },
+        ),
+      ).rejects.toThrow(DomainError);
+      await expect(
+        updateProductionOrderStatus(
+          { productionOrders },
+          { companyId: company.id, productionOrderId: draft.id, status: "ready_for_pickup" },
+        ),
       ).rejects.toThrow(DomainError);
     });
   });

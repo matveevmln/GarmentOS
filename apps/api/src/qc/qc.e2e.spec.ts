@@ -13,6 +13,8 @@ import {
   companies,
   createDb,
   materials,
+  productionOrderDefectCompensations,
+  productionOrderDefects,
   productionOrderQcResults,
   productionOrders,
   productionOrderVariants,
@@ -78,6 +80,19 @@ describe("ОТК — результат приёмочного контроля 
           .from(productionOrders)
           .where(eq(productionOrders.companyId, company.id));
         for (const order of companyOrders) {
+          const orderDefects = await db
+            .select()
+            .from(productionOrderDefects)
+            .where(eq(productionOrderDefects.productionOrderId, order.id));
+          for (const defect of orderDefects) {
+            await db
+              .delete(productionOrderDefectCompensations)
+              .where(eq(productionOrderDefectCompensations.defectId, defect.id));
+          }
+          await db
+            .delete(productionOrderDefectCompensations)
+            .where(eq(productionOrderDefectCompensations.compensatingProductionOrderId, order.id));
+          await db.delete(productionOrderDefects).where(eq(productionOrderDefects.productionOrderId, order.id));
           await db.delete(productionOrderQcResults).where(eq(productionOrderQcResults.productionOrderId, order.id));
           await db.delete(productionOrderVariants).where(eq(productionOrderVariants.productionOrderId, order.id));
         }

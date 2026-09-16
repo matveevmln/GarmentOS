@@ -41,11 +41,15 @@ export class BatchPassportService {
       });
     }
 
-    const [product, workshop, variants, documents, invoiceRows, specificationRow] = await Promise.all([
+    const [product, workshop, variants, documents, productDocuments, invoiceRows, specificationRow] = await Promise.all([
       this.catalogService.findProductById(companyId, order.productId),
       this.contractManufacturingService.findWorkshopById(companyId, order.workshopId),
       this.catalogService.listProductVariants(companyId, order.productId),
       this.documentService.listForEntity(companyId, "production_order", order.id),
+      // Фото модели (тот же источник и то же правило, что в
+      // ProductProductionService.getProduction) — UI-выравнивание паспорта
+      // партии с BatchCard, не бизнес-логика.
+      this.documentService.listForEntity(companyId, "product", order.productId),
       this.db
         .select({ id: invoicesTable.id, status: invoicesTable.status, amount: invoicesTable.amount, dueDate: invoicesTable.dueDate })
         .from(invoicesTable)
@@ -104,6 +108,8 @@ export class BatchPassportService {
     }
     timeline.sort((a, b) => a.occurredAt.getTime() - b.occurredAt.getTime());
 
+    const photoDocument = productDocuments.find((doc) => doc.docType === "photo_product" && doc.isCurrentVersion) ?? null;
+
     const requirement = computeMaterialRequirement(snapshot, Number(order.plannedQuantity));
     const onHandByMaterial = await this.aggregateMaterialOnHand(
       companyId,
@@ -118,9 +124,16 @@ export class BatchPassportService {
       orderNumber: order.orderNumber,
       specification: specificationRow[0] ? { id: specificationRow[0].id, specNumber: specificationRow[0].specNumber } : null,
       dueDate: order.dueDate,
-      daysOverdue: order.status === "received" || order.status === "cancelled" ? null : daysOverdue(order.dueDate, new Date()),
+      // "completed" (Global Completed Regression Audit, владелец проекта,
+      // 2026-09-15) — терминальный статус наравне с "received"/"cancelled":
+      // закрытая партия не показывает просрочку, даже если срок был нарушен
+      // до закрытия.
+      daysOverdue:
+        order.status === "received" || order.status === "cancelled" || order.status === "completed"
+          ? null
+          : daysOverdue(order.dueDate, new Date()),
       createdAt: order.createdAt,
-      product: { id: product.id, name: product.name },
+      product: { id: product.id, name: product.name, photoDocumentId: photoDocument?.id ?? null },
       workshop: {
         id: workshop.id,
         name: workshop.name,

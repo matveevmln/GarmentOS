@@ -130,7 +130,12 @@ export class ProductProductionService {
     // зафиксирован построчно — плановое количество строки, тот же
     // резервный принцип, что и в receiveProductionOrder), НЕ сумма заказанного
     // по всем партиям («заказано ≠ произведено»).
-    const completedOrders = orders.filter((order) => order.status === "received");
+    // "completed" (Global Completed Regression Audit, владелец проекта,
+    // 2026-09-15) — партия, закрытая явным действием, уже была принята на
+    // склад раньше ("completed" достижим только из "received" —
+    // assertCanComplete): производство/приёмка уже случились, закрытие
+    // партии их не отменяет и не должно вычёркивать её из агрегата.
+    const completedOrders = orders.filter((order) => order.status === "received" || order.status === "completed");
     const totalProduced = completedOrders.reduce(
       (sum, order) =>
         sum + order.variants.reduce((lineSum, line) => lineSum + Number(line.receivedQuantity ?? line.quantity), 0),

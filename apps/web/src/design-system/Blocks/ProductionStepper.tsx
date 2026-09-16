@@ -21,6 +21,10 @@ export const PRODUCTION_STAGES = [
   "in_progress",
   "ready_for_pickup",
   "received",
+  // completed — отдельное явное завершение партии (ПРОМПТ №10.1/10.2,
+  // владелец проекта, 2026-09-15), не совпадает с "received" — приёмка на
+  // склад больше не считается концом жизни партии сама по себе.
+  "completed",
 ] as const;
 
 export type ProductionStage = (typeof PRODUCTION_STAGES)[number];

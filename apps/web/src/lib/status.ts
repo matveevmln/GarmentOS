@@ -30,6 +30,7 @@ export const STATUS_MAP: Record<string, StatusMeta> = {
   in_progress: { label: "В производстве", tone: "accent" },
   ready_for_pickup: { label: "Готово к отгрузке", tone: "success" },
   received: { label: "Принято", tone: "success" },
+  completed: { label: "Завершена", tone: "success" },
   cancelled: { label: "Отменён", tone: "danger" },
 
   // purchase_order_status — закупки

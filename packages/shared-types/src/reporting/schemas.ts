@@ -211,7 +211,11 @@ export const batchPassportResponseSchema = z.object({
   // null — срок не просрочен либо не задан.
   daysOverdue: z.number().int().nullable(),
   createdAt: z.date(),
-  product: z.object({ id: z.string().uuid(), name: z.string() }),
+  // Фото — свойство МОДЕЛИ, не партии (тот же принцип, что и в batchCardSchema
+  // ниже, ПРОМПТ №06.1 §7) — добавлено для UI-выравнивания паспорта партии с
+  // уже утверждённым BatchCard (ПРОМПТ №08.2), чтение read-only, без нового
+  // хранилища/бизнес-логики.
+  product: z.object({ id: z.string().uuid(), name: z.string(), photoDocumentId: z.string().uuid().nullable() }),
   workshop: z.object({
     id: z.string().uuid(),
     name: z.string(),

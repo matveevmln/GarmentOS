@@ -21,6 +21,8 @@ import {
   materials,
   materialStockItems,
   materialStockMovements,
+  productionOrderDefectCompensations,
+  productionOrderDefects,
   productionOrderQcResults,
   productionOrders,
   productionOrderVariants,
@@ -97,8 +99,27 @@ describe("Стеганка — полный жизненный цикл перв
             await db.delete(cuttingOrderResults).where(eq(cuttingOrderResults.cuttingOrderId, cuttingOrder.id));
           }
           await db.delete(cuttingOrders).where(eq(cuttingOrders.productionOrderId, order.id));
+          const orderDefects = await db
+            .select()
+            .from(productionOrderDefects)
+            .where(eq(productionOrderDefects.productionOrderId, order.id));
+          for (const defect of orderDefects) {
+            await db
+              .delete(productionOrderDefectCompensations)
+              .where(eq(productionOrderDefectCompensations.defectId, defect.id));
+          }
+          await db
+            .delete(productionOrderDefectCompensations)
+            .where(eq(productionOrderDefectCompensations.compensatingProductionOrderId, order.id));
+          await db.delete(productionOrderDefects).where(eq(productionOrderDefects.productionOrderId, order.id));
           await db.delete(productionOrderQcResults).where(eq(productionOrderQcResults.productionOrderId, order.id));
           await db.delete(productionOrderVariants).where(eq(productionOrderVariants.productionOrderId, order.id));
+        }
+        for (const order of companyOrders) {
+          await db
+            .update(productionOrders)
+            .set({ sourceProductionOrderId: null })
+            .where(eq(productionOrders.id, order.id));
         }
         await db.delete(productionOrders).where(eq(productionOrders.companyId, company.id));
         await db.delete(workshops).where(eq(workshops.companyId, company.id));

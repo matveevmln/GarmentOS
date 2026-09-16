@@ -15,6 +15,7 @@ export {
   assertReworkRequiresSource,
   assertSourceOrderIsNotSelf,
   assertSourceOrderExists,
+  assertCanComplete,
 } from "./domain/production-order";
 export { DomainError } from "./domain/errors";
 
@@ -68,6 +69,11 @@ export {
   type ReceiveProductionOrderDeps,
   type ReceiveProductionOrderInput,
 } from "./application/receive-production-order";
+export {
+  completeProductionOrder,
+  type CompleteProductionOrderDeps,
+  type CompleteProductionOrderInput,
+} from "./application/complete-production-order";
 
 export {
   DrizzleProductionOrderRepository,

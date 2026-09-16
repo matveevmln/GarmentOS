@@ -124,6 +124,21 @@ export class ProductionOrdersController {
     return productionOrderResponseSchema.parse(productionOrder);
   }
 
+  // Завершение партии (ПРОМПТ №10.1/10.2, владелец проекта, 2026-09-15) —
+  // отдельное явное действие, доступно только после приёмки (assertCanComplete).
+  // Не зависит от ОТК: production_order_qc_results — независимый факт, не
+  // статус, и его наличие/отсутствие не проверяется здесь намеренно (warn,
+  // не block — решает вызывающий UI, не backend).
+  @RequirePermissions("contract_manufacturing.write")
+  @Post(":id/complete")
+  async complete(
+    @Param("id") id: string,
+    @CurrentUser() currentUser: AuthenticatedRequestUser,
+  ): Promise<ProductionOrderResponseDto> {
+    const productionOrder = await this.contractManufacturingService.completeProductionOrder(currentUser, id);
+    return productionOrderResponseSchema.parse(productionOrder);
+  }
+
   // ?productId= — партии одной модели (Model-first Minimal Core, ПРОМПТ
   // №06.1). Необязателен: без него список ведёт себя ровно как раньше
   // (обратная совместимость).

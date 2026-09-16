@@ -71,7 +71,13 @@ export class AttentionService {
       .where(
         and(
           eq(productionOrders.companyId, companyId),
-          notInArray(productionOrders.status, ["received", "cancelled"]),
+          // "completed" (ПРОМПТ №10.1/10.2) — терминальный статус, как и
+          // "received"/"cancelled": закрытая партия не требует внимания по
+          // сроку сдачи, даже если он был нарушен. Найдено в Global Completed
+          // Regression Audit (владелец проекта, 2026-09-15) — до появления
+          // "completed" этот статус не существовал, поэтому проверка не
+          // включала его изначально.
+          notInArray(productionOrders.status, ["received", "cancelled", "completed"]),
           lt(productionOrders.dueDate, todayIso),
         ),
       );

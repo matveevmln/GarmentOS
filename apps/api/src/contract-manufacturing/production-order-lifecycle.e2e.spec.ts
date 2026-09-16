@@ -249,6 +249,31 @@ describe("Production order — полный цикл через REST без Tele
       .send({ warehouseId: warehouse.id })
       .expect(409);
     expect((repeatReceiveResponse.body as ErrorResponseBody).code).toBe("PRODUCTION_ORDER_NOT_READY_FOR_PICKUP");
+
+    // ПРОМПТ №10.1/10.2 (владелец проекта, 2026-09-15): "received" не
+    // является завершением партии — до явного "Завершить партию" переход
+    // в completed невозможен (проверено уже на domain-уровне в
+    // contract-manufacturing.spec.ts; здесь — что REST-путь и аудит на
+    // месте).
+    const completedResponse = await request(httpServer)
+      .post(`/v1/production-orders/${order.id}/complete`)
+      .set(...authHeader(accessToken))
+      .expect(201);
+    expect((completedResponse.body as ProductionOrderResponseDto).status).toBe("completed");
+
+    const completeAuditEntries = await db
+      .select()
+      .from(auditLog)
+      .where(and(eq(auditLog.entityId, order.id), eq(auditLog.action, "production_order.completed")));
+    expect(completeAuditEntries).toHaveLength(1);
+
+    // Терминальный статус — повторное завершение запрещено.
+    const repeatCompleteResponse = await request(httpServer)
+      .post(`/v1/production-orders/${order.id}/complete`)
+      .set(...authHeader(accessToken))
+      .send()
+      .expect(409);
+    expect((repeatCompleteResponse.body as ErrorResponseBody).code).toBe("PRODUCTION_ORDER_NOT_RECEIVED");
   });
 
   // P0-1 (владелец проекта, 2026-09-07): "ordered ≠ received" — реальный

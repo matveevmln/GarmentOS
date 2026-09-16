@@ -1,0 +1,1 @@
+ALTER TYPE "public"."production_order_status" ADD VALUE 'completed' BEFORE 'cancelled';

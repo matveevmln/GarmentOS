@@ -37,13 +37,16 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 // собранный из GarmentInput/GarmentSelect/GarmentDatePicker/GarmentButton/
 // GarmentCard вместо голого HTML. После утверждения владельцем — образец
 // для переноса остальных 7 форм (не переносятся в этом же цикле работ).
-const STATUS_FILTERS: FilterOption<"all" | "draft" | "placed" | "in_progress" | "ready_for_pickup" | "received">[] = [
+const STATUS_FILTERS: FilterOption<
+  "all" | "draft" | "placed" | "in_progress" | "ready_for_pickup" | "received" | "completed"
+>[] = [
   { value: "all", label: "Все" },
   { value: "draft", label: "Черновик" },
   { value: "placed", label: "Размещён" },
   { value: "in_progress", label: "В работе" },
   { value: "ready_for_pickup", label: "Готово" },
   { value: "received", label: "Принято" },
+  { value: "completed", label: "Завершена" },
 ];
 
 export function ProductionOrdersPage() {

@@ -23,6 +23,7 @@
     "@garmentos/domain-contract-manufacturing": "workspace:*",
     "@garmentos/domain-cutting": "workspace:*",
     "@garmentos/domain-qc": "workspace:*",
+    "@garmentos/domain-defect": "workspace:*",
     "@garmentos/domain-specification": "workspace:*",
     "@garmentos/domain-document": "workspace:*",
     "@garmentos/domain-finance": "workspace:*",

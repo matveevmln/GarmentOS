@@ -95,6 +95,10 @@ export const productionOrderStatusSchema = z.enum([
   "in_progress",
   "ready_for_pickup",
   "received",
+  // completed — партия закрыта явным действием пользователя после приёмки
+  // (ПРОМПТ №10.1/10.2, владелец проекта, 2026-09-15). "received" больше не
+  // является концом жизни партии сам по себе.
+  "completed",
   "cancelled",
 ]);
 

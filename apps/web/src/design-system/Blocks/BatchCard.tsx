@@ -118,8 +118,12 @@ export function ModelThumb({
 /** Миниатюра модели в тёмной шапке (68×78, не квадрат — размер и радиус
  *  заданы классом `.batch-hero-thumb`, см. Tokens/tokens.css). Фон и цвет
  *  монограммы — отдельный, светлый-на-тёмном вариант: обычный ModelThumb
- *  здесь нечитаем (тёмный текст на тёмной подложке). */
-function HeroModelThumb({ photoDocumentId, productName }: { photoDocumentId: string | null; productName: string }) {
+ *  здесь нечитаем (тёмный текст на тёмной подложке).
+ *
+ *  Экспортирована (UI GAP AUDIT, владелец проекта, 2026-09-15) — используется
+ *  ещё и в тёмном hero паспорта партии (BatchPassportPage), тот же визуальный
+ *  язык, не второй компонент. */
+export function HeroModelThumb({ photoDocumentId, productName }: { photoDocumentId: string | null; productName: string }) {
   const url = usePhotoUrl(photoDocumentId);
   return (
     <div className={cn("batch-hero-thumb overflow-hidden border", url ? "bg-black/20" : "flex items-center justify-center bg-white/10")}>
@@ -155,7 +159,10 @@ function ChevronDown({ className }: { className?: string }) {
  *  (attention.service.ts): срок в прошлом и партия не в терминальном
  *  статусе. */
 function overdueDays(dueDate: string | null, status: string): number | null {
-  if (!dueDate || status === "received" || status === "cancelled") return null;
+  // "completed" (Global Completed Regression Audit, владелец проекта,
+  // 2026-09-15) — терминальный статус наравне с "received"/"cancelled":
+  // завершённая партия не подсвечивается как просроченная.
+  if (!dueDate || status === "received" || status === "cancelled" || status === "completed") return null;
   const due = new Date(dueDate);
   if (Number.isNaN(due.getTime())) return null;
   const diff = Math.floor((new Date().setHours(0, 0, 0, 0) - due.setHours(0, 0, 0, 0)) / 86_400_000);
@@ -163,8 +170,10 @@ function overdueDays(dueDate: string | null, status: string): number | null {
 }
 
 /** «1 цвет» / «2 цвета» / «5 цветов» — простое русское склонение по
- *  последней цифре (11-14 — особый случай), нужно только здесь. */
-function colorCountLabel(count: number): string {
+ *  последней цифре (11-14 — особый случай). Экспортирована (UI GAP AUDIT,
+ *  владелец проекта, 2026-09-15) — используется также в паспорте партии,
+ *  чтобы не заводить вторую копию той же пунктуации. */
+export function colorCountLabel(count: number): string {
   const mod10 = count % 10;
   const mod100 = count % 100;
   const word = mod10 === 1 && mod100 !== 11 ? "цвет" : mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20) ? "цвета" : "цветов";

@@ -139,7 +139,7 @@ export function DesignSystemPage() {
 
       <Section title="Статусы (StatusBadge)">
         <div className="flex flex-wrap gap-2">
-          {["draft", "placed", "in_progress", "ready_for_pickup", "received", "cancelled", "approved"].map((status) => (
+          {["draft", "placed", "in_progress", "ready_for_pickup", "received", "completed", "cancelled", "approved"].map((status) => (
             <StatusBadge key={status} status={status} />
           ))}
         </div>

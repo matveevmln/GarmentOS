@@ -40,6 +40,21 @@ export interface BatchCompletionState {
  *   состояние, но не притворяется кнопкой.
  */
 export function batchCompletionState(status: string, hasAction: boolean): BatchCompletionState {
+  // "completed" (ПРОМПТ №10.1/10.2, владелец проекта, 2026-09-15) — партия
+  // закрыта явным действием пользователя, отдельным от приёмки (см. комментарий
+  // класса выше). Показывается тем же "включённым" видом, что и "received"
+  // (тумблер сегодня об одной операции — приёмке, не о новом статусе), но с
+  // точным объяснением: сообщение старой ветки ("остатки уже зачислены") было
+  // бы формально верным, но не отвечает на вопрос "почему нельзя нажать" для
+  // уже закрытой партии — отдельная ветка нужна ради точной формулировки.
+  if (status === "completed") {
+    return {
+      completed: true,
+      interactive: false,
+      blockedReason: "Партия завершена",
+    };
+  }
+
   const completed = status === "received";
 
   if (completed) {

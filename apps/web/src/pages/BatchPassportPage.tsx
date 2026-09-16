@@ -5,6 +5,8 @@ import type {
   CuttingFactResponseDto,
   CuttingOrderResponseDto,
   DocumentResponseDto,
+  ProductionOrderDefectResponseDto,
+  ProductionOrderDefectSummaryResponseDto,
   ProductionOrderResponseDto,
   ProductVariantResponseDto,
   QcResultResponseDto,
@@ -21,8 +23,11 @@ import { EmptyState } from "../design-system/Feedback/EmptyState";
 import { IconAlert } from "../design-system/Icons/icons";
 import {
   Accordion,
+  colorCountLabel,
+  ColorDot,
   CostBreakdown,
   DocumentRow,
+  HeroModelThumb,
   MoneyBlock,
   ProductionStepper,
   Timeline,
@@ -130,6 +135,8 @@ export function BatchPassportPage() {
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isChangingStatus, setIsChangingStatus] = useState(false);
+  const [isCompleting, setIsCompleting] = useState(false);
+  const [confirmCompleteWithoutQc, setConfirmCompleteWithoutQc] = useState(false);
   const [confirmRegenerate, setConfirmRegenerate] = useState(false);
   const [tab, setTab] = useState<TabKey>("cost");
   const [uploadFiles, setUploadFiles] = useState<File[]>([]);
@@ -159,6 +166,19 @@ export function BatchPassportPage() {
   const [qcDefect, setQcDefect] = useState<number | undefined>(undefined);
   const [qcComment, setQcComment] = useState("");
   const [isSubmittingQc, setIsSubmittingQc] = useState(false);
+
+  // Брак и компенсация (ПРОМПТ №10.1/10.2, этап B, владелец проекта,
+  // 2026-09-15) — структурированные строки, создаются автоматически вместе
+  // с результатом ОТК. Компенсация — единственное действие, требующее
+  // явного подтверждения пользователем ("Добавить компенсацию").
+  const [defects, setDefects] = useState<ProductionOrderDefectResponseDto[]>([]);
+  const [defectSummary, setDefectSummary] = useState<ProductionOrderDefectSummaryResponseDto | null>(null);
+  const [compensationDefect, setCompensationDefect] = useState<ProductionOrderDefectResponseDto | null>(null);
+  const [compensationCandidates, setCompensationCandidates] = useState<ProductionOrderResponseDto[]>([]);
+  const [compensationOrderId, setCompensationOrderId] = useState("");
+  const [compensationVariantId, setCompensationVariantId] = useState("");
+  const [compensationQuantity, setCompensationQuantity] = useState<number | undefined>(undefined);
+  const [isSubmittingCompensation, setIsSubmittingCompensation] = useState(false);
 
   // «Создать следующий заказ» (P5-2, владелец проекта, 2026-09-06) —
   // переделка брака и/или новый пошив одним заказом-черновиком у того же
@@ -196,9 +216,24 @@ export function BatchPassportPage() {
   const loadQc = () => {
     if (!id) return;
     void apiRequest<QcResultResponseDto>(`/production-orders/${id}/qc`)
-      .then((result) => setQcResult(result))
+      .then((result) => {
+        setQcResult(result);
+        loadDefects();
+      })
       .catch(() => setQcResult(null))
       .finally(() => setQcLoaded(true));
+  };
+
+  // Загружается только когда есть результат ОТК — до этого дефектов не может
+  // быть (единственный источник дефекта — result.defectQuantity > 0).
+  const loadDefects = () => {
+    if (!id) return;
+    void apiRequest<ProductionOrderDefectResponseDto[]>(`/production-orders/${id}/defects`)
+      .then(setDefects)
+      .catch(() => setDefects([]));
+    void apiRequest<ProductionOrderDefectSummaryResponseDto>(`/production-orders/${id}/defect-summary`)
+      .then(setDefectSummary)
+      .catch(() => setDefectSummary(null));
   };
 
   const submitQc = async () => {
@@ -221,12 +256,70 @@ export function BatchPassportPage() {
         },
       });
       setQcResult(result);
+      loadDefects();
       toast.success("Результат ОТК зафиксирован");
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "Не удалось зафиксировать результат ОТК");
     } finally {
       setIsSubmittingQc(false);
     }
+  };
+
+  // Открывает диалог компенсации для конкретной строки брака — пользователь
+  // уже выбрал дефект нажатием кнопки, дополнительно угадывать/предлагать
+  // нечего (владелец проекта, п.3: явное подтверждение связи). Список
+  // кандидатов — заказы той же модели, явно ссылающиеся на эту партию как на
+  // источник (sourceProductionOrderId), уже существующий REST-путь
+  // (GET /production-orders?productId=), без нового эндпоинта.
+  const openCompensationDialog = async (defect: ProductionOrderDefectResponseDto) => {
+    if (!passport) return;
+    setCompensationDefect(defect);
+    setCompensationOrderId("");
+    setCompensationVariantId("");
+    setCompensationQuantity(defect.remainingQuantity);
+    try {
+      const [orders, variantRows] = await Promise.all([
+        apiRequest<ProductionOrderResponseDto[]>(`/production-orders?productId=${passport.product.id}`),
+        apiRequest<ProductVariantResponseDto[]>(`/product-variants?productId=${passport.product.id}`),
+      ]);
+      setCompensationCandidates(orders.filter((order) => order.sourceProductionOrderId === passport.id));
+      setNextOrderVariants(variantRows);
+    } catch {
+      setCompensationCandidates([]);
+    }
+  };
+
+  const compensationOrder = compensationCandidates.find((order) => order.id === compensationOrderId) ?? null;
+  const compensationReworkVariants = (compensationOrder?.variants ?? []).filter(
+    (variant) => variant.variantType === "rework",
+  );
+
+  const submitCompensation = async () => {
+    if (!compensationDefect || !compensationOrderId || !compensationQuantity) return;
+    setIsSubmittingCompensation(true);
+    try {
+      await apiRequest(`/defects/${compensationDefect.id}/compensations`, {
+        method: "POST",
+        body: {
+          compensatingProductionOrderId: compensationOrderId,
+          compensatingVariantId: compensationVariantId || null,
+          quantity: compensationQuantity,
+        },
+      });
+      toast.success("Компенсация добавлена");
+      setCompensationDefect(null);
+      loadDefects();
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Не удалось добавить компенсацию");
+    } finally {
+      setIsSubmittingCompensation(false);
+    }
+  };
+
+  const defectVariantLabel = (productVariantId: string | null): string => {
+    if (!productVariantId || !passport) return "Без деталировки (весь брак)";
+    const variant = passport.variants.find((row) => row.productVariantId === productVariantId);
+    return variant ? `${variant.size} / ${variant.color}` : productVariantId;
   };
 
   const openNextOrderDialog = async () => {
@@ -459,6 +552,35 @@ export function BatchPassportPage() {
     }
   };
 
+  // Завершение партии (ПРОМПТ №10.1/10.2, владелец проекта, 2026-09-15) —
+  // отдельное явное действие после приёмки, не следствие ОТК. Если результата
+  // ОТК ещё нет — предупреждаем (не блокируем): партия имеет право быть
+  // завершена и без формального контроля качества, если он в данном случае
+  // не нужен, но пользователь должен явно это подтвердить, а не пропустить
+  // ОТК по недосмотру.
+  const completeOrder = async () => {
+    if (!id) return;
+    setIsCompleting(true);
+    try {
+      await apiRequest(`/production-orders/${id}/complete`, { method: "POST" });
+      load();
+      toast.success("Партия завершена");
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Не удалось завершить партию");
+    } finally {
+      setIsCompleting(false);
+      setConfirmCompleteWithoutQc(false);
+    }
+  };
+
+  const requestCompleteOrder = () => {
+    if (!qcResult) {
+      setConfirmCompleteWithoutQc(true);
+      return;
+    }
+    void completeOrder();
+  };
+
   // Загрузка документа, пришедшего извне: подписанная спецификация, счёт,
   // накладная. Файл уходит в хранилище, запись — в базу, связь — с этой
   // партией. Содержимое файла данные партии не меняет: документ ложится
@@ -541,6 +663,13 @@ export function BatchPassportPage() {
     if (!colors.includes(variant.color)) colors.push(variant.color);
     if (!sizes.includes(variant.size)) sizes.push(variant.size);
   }
+  // Компактная раскладка по цвету для paper-зоны hero (тот же приём, что и
+  // компактная строка цветов в BatchCard — полная раскладка по размерам
+  // остаётся во вкладке «Размеры и цвета», здесь только итог по цвету).
+  const colorBreakdown = colors.map((color) => ({
+    color,
+    quantity: passport.variants.filter((row) => row.color === color).reduce((sum, row) => sum + Number(row.quantity), 0),
+  }));
   const quantityFor = (color: string, size: string): number | null => {
     const variant = passport.variants.find((row) => row.color === color && row.size === size);
     return variant ? Math.round(Number(variant.quantity)) : null;
@@ -1348,26 +1477,343 @@ export function BatchPassportPage() {
         </DialogContent>
       </Dialog>
 
-      {/* 1. Идентичность */}
-      <section className="elev-2 flex flex-wrap items-center gap-x-8 gap-y-4 rounded-[10px] bg-sidebar bg-[linear-gradient(180deg,color-mix(in_oklab,var(--sidebar-primary)_9%,transparent)_0%,transparent_60%)] px-4 py-4 text-sidebar-foreground md:px-5">
-        <div className="flex items-center gap-3">
-          <div>
-            <div className="editorial text-[17px] leading-tight">{passport.product.name}</div>
-            <div className="text-[12px] text-sidebar-foreground/60">{passport.workshop.name}</div>
+      {/* 1. Production Hero + Paper Summary (UI GAP AUDIT, владелец проекта,
+          2026-09-15) — тот же визуальный язык, что и утверждённый BatchCard
+          (design-system/Blocks/BatchCard.tsx, ПРОМПТ №08.2): тёмная шапка
+          (фото/номер/статус) поверх светлого тела (объём/срок/цвета), те же
+          .batch-* классы и токены (--batch-ink/--batch-paper/--batch-copper),
+          без новой визуальной системы. BatchCard — компактное представление
+          партии в списках, этот блок — подробное представление ТОЙ ЖЕ
+          партии на её собственной странице. */}
+      <div className="batch-card overflow-hidden rounded-[16px]">
+        <div className="batch-hero relative overflow-hidden p-4 pb-5 md:p-6 md:pb-7">
+          <div className="relative z-[1] flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <span className="batch-kicker">Производственная партия</span>
+              <strong className="num mt-1.5 block truncate text-[22px] font-semibold text-sidebar-foreground md:text-[28px]">
+                {passport.orderNumber ? formatBatchNumber(passport.orderNumber, passport.createdAt) : "Партия без номера"}
+              </strong>
+            </div>
+            <StatusBadge status={passport.status} className="batch-status-badge shrink-0" />
+          </div>
+
+          <div className="relative z-[1] mt-5 grid grid-cols-[68px_minmax(0,1fr)] items-end gap-3 md:mt-6">
+            <HeroModelThumb photoDocumentId={passport.product.photoDocumentId} productName={passport.product.name} />
+            <div className="min-w-0">
+              <h2 className="truncate text-[19px] font-semibold leading-tight text-sidebar-foreground md:text-[22px]">
+                {passport.product.name}
+              </h2>
+              <p className="mt-1.5 truncate text-[11px] text-sidebar-foreground/55">
+                {passport.specification ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => void navigate(`/specifications/${passport.specification!.id}`)}
+                      className="interactive focus-ring rounded-[3px] underline-offset-2 hover:underline"
+                    >
+                      Спецификация {passport.specification.specNumber ? `№${passport.specification.specNumber}` : ""}
+                    </button>
+                    {" · "}
+                  </>
+                ) : null}
+                {passport.workshop.name}
+              </p>
+            </div>
           </div>
         </div>
-        <div className="h-8 w-px bg-sidebar-border max-md:hidden" />
-        <div>
-          <div className="eyebrow text-sidebar-foreground/50">Количество</div>
-          <div className="num mt-1 text-[14px] font-medium">{formatQuantity(plannedQuantity, "изделий")}</div>
-        </div>
-        <div className="ml-auto inline-flex items-center gap-2 rounded-[4px] border border-sidebar-border bg-sidebar-accent px-2.5 py-1.5 text-[12px] font-medium">
-          <span className="h-1.5 w-1.5 rounded-full bg-sidebar-primary" />
-          {statusMeta(passport.status).label}
-        </div>
-      </section>
 
-      {/* 2. Деньги + 4. Требует внимания */}
+        <div className="batch-body p-4 md:p-6">
+          <div className="grid grid-cols-[minmax(0,1fr)_auto] items-end gap-4">
+            <div>
+              <span className="batch-label">Объём партии</span>
+              <div className="mt-1 flex items-end gap-2">
+                <strong className="num batch-quantity">{formatQuantity(plannedQuantity)}</strong>
+                <span className="pb-1.5 text-[11px] font-medium text-muted-foreground">изделий</span>
+              </div>
+            </div>
+            <div className="pb-1 text-right">
+              <span className="batch-label">Срок</span>
+              <strong className={cn("num mt-1.5 block text-[13px]", passport.daysOverdue !== null && "text-danger")}>
+                {passport.dueDate ? formatDate(passport.dueDate) : "не назначен"}
+              </strong>
+            </div>
+          </div>
+
+          {colorBreakdown.length > 0 ? (
+            <div className="mt-4 flex items-center justify-between border-t border-border pt-3">
+              <div className="flex min-w-0 items-center gap-2.5">
+                <div className="flex -space-x-1.5">
+                  {colorBreakdown.map((row) => (
+                    <ColorDot key={row.color} color={row.color} className="batch-swatch h-[18px] w-[18px] border-2 border-card" />
+                  ))}
+                </div>
+                <span className="truncate text-[11px] text-muted-foreground">
+                  {colorBreakdown.map((row) => row.color).join(" · ")}
+                </span>
+              </div>
+              <span className="num ml-3 shrink-0 text-[11px] font-semibold">{colorCountLabel(colorBreakdown.length)}</span>
+            </div>
+          ) : null}
+        </div>
+      </div>
+
+      {/* 3. Production Workflow (UI GAP AUDIT, владелец проекта, 2026-09-15) —
+          «где партия сейчас → что происходит → одно главное действие»,
+          объединяет прежние отдельные карточки «Производство» / «Завершение
+          партии» / «Следующий заказ» в один поток. Правила видимости и
+          переходов ниже НЕ изменены ни на строку (те же условия, те же
+          обработчики) — поменялась только визуальная композиция. */}
+      <Card className="mt-4 overflow-hidden p-0">
+        <div className="flex items-center justify-between gap-3 border-b border-border bg-muted/20 px-4 py-3 md:px-5">
+          <CardTitle className="text-[16px]">Производство</CardTitle>
+          <span className="t-meta shrink-0">{6 + (hasSpecificationStage ? 1 : 0) + (hasMaterialsStage ? 1 : 0)} этапов</span>
+        </div>
+        <div className="p-4 md:p-5">
+          {isProductionStage(passport.status) ? (
+            <ProductionStepper
+              current={passport.status}
+              cutting={cuttingStage}
+              hasSpecification={hasSpecificationStage}
+              materialsChecked={hasMaterialsStage}
+            />
+          ) : (
+            <p className="t-secondary">Заказ отменён — партия вышла из производственной шкалы.</p>
+          )}
+
+          {/* Текущее действие цеха — ровно одна кнопка на стадию (P0-1: переход
+              без Telegram, канал не настроен ни для одного цеха на пилоте). */}
+          {passport.status === "placed" || passport.status === "in_progress" ? (
+            <div className="mt-4 flex items-center gap-2 border-t border-border pt-4">
+              <span className="t-secondary">Цех сообщил:</span>
+              <Button
+                type="button"
+                size="sm"
+                variant="secondary"
+                loading={isChangingStatus}
+                onClick={() =>
+                  void changeOrderStatus(passport.status === "placed" ? "in_progress" : "ready_for_pickup")
+                }
+              >
+                {passport.status === "placed" ? "Начали шить" : "Готово к отгрузке"}
+              </Button>
+            </div>
+          ) : null}
+
+          {/* Завершение партии + Следующий заказ (ПРОМПТ №10.1/10.2 и P5-2) —
+              то же условие видимости (status === "received"), те же
+              обработчики (requestCompleteOrder/openNextOrderDialog), тот же
+              подтверждающий диалог ниже. «Завершить партию» — главное
+              действие этой стадии (default-кнопка), «Следующий заказ» —
+              second­ary continuation, а не равноправная альтернатива. */}
+          {passport.status === "received" ? (
+            <div className="mt-4 border-t border-border pt-4">
+              <p className="t-secondary">
+                Партия принята на склад, но ещё не закрыта. Завершите её, когда убедитесь, что по ней больше не
+                нужно действий (включая ОТК, если он нужен для этой партии).
+              </p>
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <Button type="button" size="sm" loading={isCompleting} onClick={requestCompleteOrder}>
+                  Завершить партию
+                </Button>
+                <Button type="button" size="sm" variant="ghost" onClick={() => void openNextOrderDialog()}>
+                  Создать следующий заказ
+                </Button>
+              </div>
+            </div>
+          ) : null}
+
+          <div className="mt-4">
+            <EmptyState
+              compact
+              title="Детальный ход пошива появится здесь"
+              description="Проценты готовности, комментарии и фото от цеха — разделы 19-20 «Баланса производственной партии», ждёт реализации. Раскрой уже ведётся во вкладке «Раскрой»."
+            />
+          </div>
+        </div>
+      </Card>
+
+      <Dialog open={confirmCompleteWithoutQc} onOpenChange={setConfirmCompleteWithoutQc}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Завершить партию без результата ОТК?</DialogTitle>
+            <DialogDescription>
+              По этой партии ещё не зафиксирован результат ОТК. Завершение партии не запрещает и не заменяет
+              контроль качества — если он нужен для этой партии, лучше сначала внести результат в карточке «ОТК и
+              брак» ниже.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="secondary" size="sm" onClick={() => setConfirmCompleteWithoutQc(false)}>
+              Отмена
+            </Button>
+            <Button size="sm" loading={isCompleting} onClick={() => void completeOrder()}>
+              Всё равно завершить
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 4. ОТК и брак (UI GAP AUDIT, владелец проекта, 2026-09-15) —
+          объединяет прежние отдельные карточки «ОТК» (P4) и «Брак и
+          компенсация» (ПРОМПТ №10.1/10.2, этап B) в один связный раздел.
+          Данные, условия и обработчики этапа B не изменены ни на строку —
+          получено/годных/брак/произведено/компенсировано/осталось,
+          деталировка дефектов, «Добавить компенсацию» и «Компенсировано
+          полностью» показаны здесь ровно так же, как раньше. */}
+      <Card className="mt-4 overflow-hidden p-0">
+        <div className="border-b border-border bg-muted/20 px-4 py-3 md:px-5">
+          <CardTitle className="text-[16px]">ОТК и брак</CardTitle>
+        </div>
+        <div className="p-4 md:p-5">
+          {/* Уже зафиксированный результат ОТК остаётся видимым и после
+              завершения партии (UI GAP AUDIT, QA-баг, владелец проекта,
+              2026-09-15) — «completed» не отменяет и не скрывает факт,
+              записанный ранее в статусе «received». Проверяется первым,
+              чтобы не зависеть от порядка остальных веток ниже (они не
+              менялись). Отсутствие результата у завершённой партии по-прежнему
+              ведёт в исходную ветку "status !== received" — эта форма ввода
+              ОТК как была доступна только в статусе "received", так и
+              осталась (submitQc/API этапа B не менялись). */}
+          {qcResult && (passport.status === "received" || passport.status === "completed") ? (
+            <dl className="num grid grid-cols-1 gap-px bg-border sm:grid-cols-3">
+              <div className="bg-card p-3">
+                <dt className="eyebrow text-muted-foreground">Получено</dt>
+                <dd className="mt-1 text-[18px] font-medium">{formatQuantity(qcResult.receivedQuantity, "шт")}</dd>
+              </div>
+              <div className="bg-card p-3">
+                <dt className="eyebrow text-muted-foreground">Годных</dt>
+                <dd className="mt-1 text-[18px] font-medium text-success">{formatQuantity(qcResult.goodQuantity, "шт")}</dd>
+              </div>
+              <div className="bg-card p-3">
+                <dt className="eyebrow text-muted-foreground">Брак</dt>
+                <dd className={cn("mt-1 text-[18px] font-medium", qcResult.defectQuantity > 0 && "text-danger")}>
+                  {formatQuantity(qcResult.defectQuantity, "шт")}
+                </dd>
+              </div>
+              {qcResult.comment ? (
+                <div className="col-span-full bg-card p-3">
+                  <dt className="eyebrow text-muted-foreground">Комментарий</dt>
+                  <dd className="mt-1 text-[13px]">{qcResult.comment}</dd>
+                </div>
+              ) : null}
+            </dl>
+          ) : passport.status !== "received" ? (
+            <EmptyState
+              compact
+              title="Результат ОТК появится после приёмки партии"
+              description="Внести получено/годных/брак можно, когда заказ перейдёт в статус «Принято»."
+            />
+          ) : !qcLoaded ? (
+            <SkeletonList rows={1} />
+          ) : qcReceivedFact === null ? (
+            // Заказ уже "Принято", но факт приёмки по вариантам неизвестен —
+            // например, партия принята до появления учёта факта (P0-1). Вводить
+            // ОТК по плану вместо факта запрещено (P1, hardening перед
+            // «Стеганкой», владелец проекта, 2026-09-07: "ordered ≠ received"),
+            // поэтому форма не показывается вовсе, а не подставляет план молча.
+            <EmptyState
+              compact
+              title="Факт приёмки для этого заказа не сохранён"
+              description="Заказ принят до появления учёта фактического количества — ввод ОТК недоступен, чтобы не подставить план вместо факта."
+            />
+          ) : (
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+              {/* Получено — только факт приёмки (P0-1), никогда не редактируется
+                  вручную здесь: раньше оператор мог случайно ввести план вместо
+                  факта (P1, hardening перед «Стеганкой», владелец проекта,
+                  2026-09-07). */}
+              <Field label="Получено по приёмке, шт">
+                <NumberInput value={qcReceivedFact ?? undefined} onChange={() => undefined} disabled />
+              </Field>
+              <Field label="Годных, шт">
+                <NumberInput value={qcGood} onChange={setQcGood} min={0} />
+              </Field>
+              <Field label="Брак, шт">
+                <NumberInput value={qcDefect} onChange={setQcDefect} min={0} />
+              </Field>
+              <Field label="Комментарий" className="sm:col-span-3">
+                <Input value={qcComment} onChange={(event) => setQcComment(event.target.value)} placeholder="Необязательно" />
+              </Field>
+              <div className="sm:col-span-3">
+                <Button
+                  type="button"
+                  size="sm"
+                  loading={isSubmittingQc}
+                  disabled={qcGood === undefined || qcDefect === undefined}
+                  onClick={() => void submitQc()}
+                >
+                  Зафиксировать результат ОТК
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {qcResult ? (
+            <div className="mt-5 border-t border-border pt-5">
+              {!defectSummary || defectSummary.defectQuantity === 0 ? (
+                <EmptyState compact title="Брак не выявлен" description="Компенсация не требуется." />
+              ) : (
+                <>
+                  <dl className="num grid grid-cols-2 gap-px bg-border sm:grid-cols-4">
+                    <div className="bg-card p-3">
+                      <dt className="eyebrow text-muted-foreground">Произведено</dt>
+                      <dd className="mt-1 text-[18px] font-medium">{formatQuantity(defectSummary.producedQuantity, "шт")}</dd>
+                    </div>
+                    <div className="bg-card p-3">
+                      <dt className="eyebrow text-muted-foreground">Брак</dt>
+                      <dd className="mt-1 text-[18px] font-medium text-danger">{formatQuantity(defectSummary.defectQuantity, "шт")}</dd>
+                    </div>
+                    <div className="bg-card p-3">
+                      <dt className="eyebrow text-muted-foreground">Компенсировано</dt>
+                      <dd className="mt-1 text-[18px] font-medium text-success">
+                        {formatQuantity(defectSummary.compensatedQuantity, "шт")}
+                      </dd>
+                    </div>
+                    <div className="bg-card p-3">
+                      <dt className="eyebrow text-muted-foreground">Осталось</dt>
+                      <dd
+                        className={cn(
+                          "mt-1 text-[18px] font-medium",
+                          defectSummary.remainingToCompensate > 0 && "text-danger",
+                        )}
+                      >
+                        {formatQuantity(defectSummary.remainingToCompensate, "шт")}
+                      </dd>
+                    </div>
+                  </dl>
+                  <div className="mt-4 space-y-2">
+                    {defects.map((defect) => (
+                      <div
+                        key={defect.id}
+                        className="flex flex-wrap items-center justify-between gap-3 border border-border p-3"
+                      >
+                        <div>
+                          <p className="t-secondary">{defectVariantLabel(defect.productVariantId)}</p>
+                          <p className="num mt-0.5 text-[14px]">
+                            Брак {formatQuantity(defect.quantity, "шт")} · компенсировано{" "}
+                            {formatQuantity(defect.compensatedQuantity, "шт")}
+                            {defect.reason ? ` · ${defect.reason}` : ""}
+                          </p>
+                        </div>
+                        {defect.remainingQuantity > 0 ? (
+                          <Button type="button" size="sm" variant="secondary" onClick={() => void openCompensationDialog(defect)}>
+                            Добавить компенсацию
+                          </Button>
+                        ) : (
+                          <span className="t-meta text-success">Компенсировано полностью</span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+          ) : null}
+        </div>
+      </Card>
+
+      {/* 5. Деньги + Требует внимания — второстепенная информация, ниже
+          production workflow и ОТК/брака. */}
       <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
         <Card className="overflow-hidden">
           <div className="px-4 pt-4 md:px-5">
@@ -1469,159 +1915,6 @@ export function BatchPassportPage() {
           </Card>
         )}
       </div>
-
-      {/* 3. Производство */}
-      <Card className="mt-4 p-4 md:p-5">
-        <div className="flex items-center justify-between gap-3">
-          <CardTitle className="text-[16px]">Производство</CardTitle>
-          <span className="t-meta shrink-0">{6 + (hasSpecificationStage ? 1 : 0) + (hasMaterialsStage ? 1 : 0)} этапов</span>
-        </div>
-        <div className="mt-4">
-          {isProductionStage(passport.status) ? (
-            <ProductionStepper
-              current={passport.status}
-              cutting={cuttingStage}
-              hasSpecification={hasSpecificationStage}
-              materialsChecked={hasMaterialsStage}
-            />
-          ) : (
-            <p className="t-secondary">Заказ отменён — партия вышла из производственной шкалы.</p>
-          )}
-        </div>
-        {/* P0-1: переход на следующий этап без Telegram — цех сегодня
-            сообщает об этом текстом, но канал не настроен ни для одного
-            цеха на пилоте. */}
-        {passport.status === "placed" || passport.status === "in_progress" ? (
-          <div className="mt-4 flex items-center gap-2 border-t border-border pt-4">
-            <span className="t-secondary">Цех сообщил:</span>
-            <Button
-              type="button"
-              size="sm"
-              variant="secondary"
-              loading={isChangingStatus}
-              onClick={() =>
-                void changeOrderStatus(passport.status === "placed" ? "in_progress" : "ready_for_pickup")
-              }
-            >
-              {passport.status === "placed" ? "Начали шить" : "Готово к отгрузке"}
-            </Button>
-          </div>
-        ) : null}
-        <div className="mt-4">
-          <EmptyState
-            compact
-            title="Детальный ход пошива появится здесь"
-            description="Проценты готовности, комментарии и фото от цеха — разделы 19-20 «Баланса производственной партии», ждёт реализации. Раскрой уже ведётся во вкладке «Раскрой»."
-          />
-        </div>
-      </Card>
-
-      {/* 4. ОТК (P4, владелец проекта, 2026-09-06) — отдельный результат
-          приёмочного контроля, статус заказа не меняет. Возможен только
-          после приёмки партии на склад. */}
-      <Card className="mt-4 p-4 md:p-5">
-        <div className="flex items-center justify-between gap-3">
-          <CardTitle className="text-[16px]">ОТК</CardTitle>
-        </div>
-        {passport.status !== "received" ? (
-          <div className="mt-4">
-            <EmptyState
-              compact
-              title="Результат ОТК появится после приёмки партии"
-              description="Внести получено/годных/брак можно, когда заказ перейдёт в статус «Принято»."
-            />
-          </div>
-        ) : !qcLoaded ? (
-          <div className="mt-4">
-            <SkeletonList rows={1} />
-          </div>
-        ) : qcResult ? (
-          <dl className="num mt-4 grid grid-cols-1 gap-px bg-border sm:grid-cols-3">
-            <div className="bg-card p-3">
-              <dt className="eyebrow text-muted-foreground">Получено</dt>
-              <dd className="mt-1 text-[18px] font-medium">{formatQuantity(qcResult.receivedQuantity, "шт")}</dd>
-            </div>
-            <div className="bg-card p-3">
-              <dt className="eyebrow text-muted-foreground">Годных</dt>
-              <dd className="mt-1 text-[18px] font-medium text-success">{formatQuantity(qcResult.goodQuantity, "шт")}</dd>
-            </div>
-            <div className="bg-card p-3">
-              <dt className="eyebrow text-muted-foreground">Брак</dt>
-              <dd className={cn("mt-1 text-[18px] font-medium", qcResult.defectQuantity > 0 && "text-danger")}>
-                {formatQuantity(qcResult.defectQuantity, "шт")}
-              </dd>
-            </div>
-            {qcResult.comment ? (
-              <div className="col-span-full bg-card p-3">
-                <dt className="eyebrow text-muted-foreground">Комментарий</dt>
-                <dd className="mt-1 text-[13px]">{qcResult.comment}</dd>
-              </div>
-            ) : null}
-          </dl>
-        ) : qcReceivedFact === null ? (
-          // Заказ уже "Принято", но факт приёмки по вариантам неизвестен —
-          // например, партия принята до появления учёта факта (P0-1). Вводить
-          // ОТК по плану вместо факта запрещено (P1, hardening перед
-          // «Стеганкой», владелец проекта, 2026-09-07: "ordered ≠ received"),
-          // поэтому форма не показывается вовсе, а не подставляет план молча.
-          <div className="mt-4">
-            <EmptyState
-              compact
-              title="Факт приёмки для этого заказа не сохранён"
-              description="Заказ принят до появления учёта фактического количества — ввод ОТК недоступен, чтобы не подставить план вместо факта."
-            />
-          </div>
-        ) : (
-          <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
-            {/* Получено — только факт приёмки (P0-1), никогда не редактируется
-                вручную здесь: раньше оператор мог случайно ввести план вместо
-                факта (P1, hardening перед «Стеганкой», владелец проекта,
-                2026-09-07). */}
-            <Field label="Получено по приёмке, шт">
-              <NumberInput value={qcReceivedFact ?? undefined} onChange={() => undefined} disabled />
-            </Field>
-            <Field label="Годных, шт">
-              <NumberInput value={qcGood} onChange={setQcGood} min={0} />
-            </Field>
-            <Field label="Брак, шт">
-              <NumberInput value={qcDefect} onChange={setQcDefect} min={0} />
-            </Field>
-            <Field label="Комментарий" className="sm:col-span-3">
-              <Input value={qcComment} onChange={(event) => setQcComment(event.target.value)} placeholder="Необязательно" />
-            </Field>
-            <div className="sm:col-span-3">
-              <Button
-                type="button"
-                size="sm"
-                loading={isSubmittingQc}
-                disabled={qcGood === undefined || qcDefect === undefined}
-                onClick={() => void submitQc()}
-              >
-                Зафиксировать результат ОТК
-              </Button>
-            </div>
-          </div>
-        )}
-      </Card>
-
-      {/* 4а. Следующий заказ (P5-2, владелец проекта, 2026-09-06) —
-          переделка брака и/или новый пошив одним заказом-черновиком,
-          доступно только для принятой партии. */}
-      {passport.status === "received" ? (
-        <Card className="mt-4 p-4 md:p-5">
-          <div className="flex items-center justify-between gap-3">
-            <CardTitle className="text-[16px]">Следующий заказ</CardTitle>
-          </div>
-          <p className="t-secondary mt-2">
-            Переделка брака этой партии и/или новый пошив — одним заказом-черновиком у того же цеха, по той же модели.
-          </p>
-          <div className="mt-4">
-            <Button type="button" size="sm" variant="secondary" onClick={() => void openNextOrderDialog()}>
-              Создать следующий заказ
-            </Button>
-          </div>
-        </Card>
-      ) : null}
 
       <Dialog open={nextOrderOpen} onOpenChange={setNextOrderOpen}>
         <DialogContent className="max-w-xl">
@@ -1756,6 +2049,77 @@ export function BatchPassportPage() {
         </DialogContent>
       </Dialog>
 
+      {/* Компенсация дефекта (ПРОМПТ №10.1/10.2, этап B, владелец проекта,
+          2026-09-15) — единственное действие в модуле брака, требующее
+          явного подтверждения. Список заказов — только те, что явно
+          ссылаются на эту партию как на источник (sourceProductionOrderId),
+          строка — только rework (не начисляет повторно оплату). */}
+      <Dialog open={compensationDefect !== null} onOpenChange={(open) => !open && setCompensationDefect(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Добавить компенсацию</DialogTitle>
+            <DialogDescription>
+              Брак «{compensationDefect ? defectVariantLabel(compensationDefect.productVariantId) : ""}» —{" "}
+              осталось компенсировать {compensationDefect ? formatQuantity(compensationDefect.remainingQuantity, "шт") : ""}.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <Field label="Компенсирующий заказ">
+              <Select value={compensationOrderId} onValueChange={(value) => { setCompensationOrderId(value); setCompensationVariantId(""); }}>
+                <SelectTrigger>
+                  <SelectValue placeholder={compensationCandidates.length === 0 ? "Нет заказов-переделок на эту партию" : "Выберите заказ"} />
+                </SelectTrigger>
+                <SelectContent>
+                  {compensationCandidates.map((order) => (
+                    <SelectItem key={order.id} value={order.id}>
+                      Заказ {order.orderNumber ? `№${order.orderNumber}` : order.id.slice(0, 8)} · {statusMeta(order.status).label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
+            {compensationCandidates.length === 0 ? (
+              <p className="t-secondary">
+                Сначала создайте заказ-переделку через «Следующий заказ» со строкой типа «Переделка», ссылающийся на эту
+                партию.
+              </p>
+            ) : null}
+            <Field label="Строка заказа (необязательно)">
+              <Select value={compensationVariantId} onValueChange={setCompensationVariantId} disabled={!compensationOrder}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Без привязки к строке" />
+                </SelectTrigger>
+                <SelectContent>
+                  {compensationReworkVariants.map((variant) => (
+                    <SelectItem key={variant.id} value={variant.id}>
+                      {nextOrderVariantLabel(variant.productVariantId)} × {formatQuantity(Number(variant.quantity), "шт")}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
+            <Field label="Количество">
+              <NumberInput value={compensationQuantity} onChange={setCompensationQuantity} min={0} />
+            </Field>
+          </div>
+
+          <DialogFooter>
+            <Button type="button" variant="ghost" onClick={() => setCompensationDefect(null)}>
+              Отмена
+            </Button>
+            <Button
+              type="button"
+              loading={isSubmittingCompensation}
+              disabled={!compensationOrderId || !compensationQuantity}
+              onClick={() => void submitCompensation()}
+            >
+              Добавить компенсацию
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* 5. Детали — табы на десктопе */}
       <div className="mt-4 hidden md:block">
         <Card className="overflow-hidden">
@@ -1802,7 +2166,12 @@ export function BatchPassportPage() {
       <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
         {[
           {
-            title: "ОТК и брак",
+            // Переименовано (UI GAP AUDIT, владелец проекта, 2026-09-15) — во
+            // избежание совпадения названия с реальной, уже работающей
+            // секцией «ОТК и брак» выше (Этап B): этот пустой раздел про
+            // другое — отправку/приёмку/устранение силами цеха, раздел 4
+            // «Баланса производственной партии», ещё не утверждён.
+            title: "Отправка и устранение брака",
             hint: "Отправлено / принято / брак / устранение — появится после утверждения раздела 4 «Баланса производственной партии».",
           },
           {

@@ -3,6 +3,7 @@ import type { Database } from "@garmentos/db-schema";
 import { DrizzleQcResultRepository } from "@garmentos/domain-qc";
 import { AuditModule } from "../audit/audit.module";
 import { ContractManufacturingModule } from "../contract-manufacturing/contract-manufacturing.module";
+import { DefectModule } from "../defect/defect.module";
 import { DATABASE_CONNECTION } from "../database/database.module";
 import { QcController } from "./qc.controller";
 import { QcService } from "./qc.service";
@@ -13,7 +14,7 @@ import { QcProductionOrderLookupAdapter } from "./production-order-lookup.adapte
 // подключает существующий сервис как адаптер, не заводит собственный доступ
 // к таблице production_orders.
 @Module({
-  imports: [ContractManufacturingModule, AuditModule],
+  imports: [ContractManufacturingModule, AuditModule, DefectModule],
   controllers: [QcController],
   providers: [
     QcService,
