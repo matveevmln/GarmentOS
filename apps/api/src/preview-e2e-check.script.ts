@@ -3,7 +3,7 @@ import { config as loadEnv } from "dotenv";
 loadEnv({ path: "../../.env" });
 
 import "reflect-metadata";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import type { Server } from "node:http";
 import type { INestApplication } from "@nestjs/common";
@@ -208,21 +208,27 @@ async function main(): Promise<void> {
   } else {
     await runAfter(httpServer, accessToken);
   }
+  const checkExitCode = process.exitCode ?? 0;
+  process.exitCode = undefined;
 
-  // Намеренно НЕ ждём app.close() — supertest/superagent иногда держит
-  // keep-alive сокеты, из-за которых закрытие Nest-приложения зависает
-  // навсегда, а вместе с ним и вся цепочка "check && node dist/main.js"
-  // (найдено в этом же прогоне — деплой завис именно на этом шаге).
-  // Процесс всё равно завершается сразу следующей строкой — закрывать
-  // тестовый HTTP-сервер отдельно не нужно, ОС освобождает сокеты при
-  // выходе процесса.
+  // Намеренно не полагаемся на shell "&&" в startCommand — Railway уже
+  // дважды (preDeployCommand в №14.6, теперь startCommand здесь) молча не
+  // выполнял вторую команду цепочки. Вместо этого сам процесс запускает
+  // реальный сервер как дочерний процесс и держит event loop живым, пока
+  // жив ребёнок — никакой shell-склейки команд.
+  console.log(`== Проверка завершена (exit=${checkExitCode}), запускаю реальное приложение ==`);
+  const child = spawn("node", ["dist/main.js"], { stdio: "inherit" });
+  for (const signal of ["SIGTERM", "SIGINT"] as const) {
+    process.on(signal, () => child.kill(signal));
+  }
+  child.on("exit", (code) => process.exit(code ?? 0));
+  child.on("error", (error) => {
+    console.error("Не удалось запустить node dist/main.js:", error);
+    process.exit(1);
+  });
 }
 
-main()
-  .catch((error: unknown) => {
-    console.error("Ошибка Preview E2E check:", error);
-    process.exitCode = 1;
-  })
-  .finally(() => {
-    process.exit(process.exitCode ?? 0);
-  });
+main().catch((error: unknown) => {
+  console.error("Ошибка Preview E2E check:", error);
+  process.exit(1);
+});
