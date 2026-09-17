@@ -19,11 +19,17 @@ RUN pnpm turbo run build --filter=@garmentos/api
 
 FROM node:22-alpine AS runtime
 RUN corepack enable
+# su-exec — для entrypoint'а: контейнер стартует от root ровно на шаг chown
+# точки монтирования Railway-volume (см. api-entrypoint.sh), затем немедленно
+# передаёт процесс приложения непривилегированному пользователю node.
+RUN apk add --no-cache su-exec
 ENV NODE_ENV=production
 WORKDIR /repo
 COPY --from=build /repo .
+COPY infra/docker/api-entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
 
 WORKDIR /repo/apps/api
-USER node
 EXPOSE 3000
+ENTRYPOINT ["/entrypoint.sh"]
 CMD ["node", "dist/main.js"]
