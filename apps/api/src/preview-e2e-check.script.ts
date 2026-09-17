@@ -5,12 +5,48 @@ loadEnv({ path: "../../.env" });
 import "reflect-metadata";
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
 import type { Server } from "node:http";
 import type { INestApplication } from "@nestjs/common";
 import { VersioningType } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import request from "supertest";
 import { AppModule } from "./app.module";
+
+// Фаза (before/after) определяется НЕ через аргумент startCommand — Railway
+// дважды (redeploy() поверх обновлённого startCommand) не подхватил новое
+// значение команды, обе попытки реально выполнили тот же "before", что и
+// исходный деплой (см. отчёт в диалоге). Вместо этого сам процесс хранит
+// состояние проверки в JSON-файле НА ТОМ ЖЕ смонтированном volume, что и
+// документы — если файла нет, это первый запуск ("before": создать тестовые
+// данные и записать их id); если файл уже есть, это запуск после restart
+// ("after": проверить, что записанные ранее id/файл пережили перезапуск).
+// Не зависит от того, как именно Railway передаёт аргументы командной строки.
+interface CheckState {
+  productId: string;
+  documentId: string;
+  originalSha256: string;
+}
+
+function stateFilePath(): string {
+  const baseDir = process.env.LOCAL_STORAGE_DIR ?? "./.local-storage";
+  return `${baseDir}/.preview-e2e-check-state.json`;
+}
+
+function loadState(): CheckState | null {
+  const path = stateFilePath();
+  if (!existsSync(path)) {
+    return null;
+  }
+  return JSON.parse(readFileSync(path, "utf-8")) as CheckState;
+}
+
+function saveState(state: CheckState): void {
+  const path = stateFilePath();
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, JSON.stringify(state));
+}
 
 // Временный E2E-раннер (ПРОМПТ №14.5, автономный прогон №14.6.3-style) —
 // НЕ часть постоянной архитектуры, удаляется сразу после использования.
@@ -113,6 +149,8 @@ async function runBefore(httpServer: Server, accessToken: string): Promise<void>
   const fetchedSha256 = createHash("sha256").update(bufferBody(fileRes)).digest("hex");
   const matchBefore = fetchedSha256 === originalSha256;
 
+  saveState({ productId, documentId, originalSha256 });
+
   finish(listOk && matchBefore, {
     PRODUCT_ID: productId,
     DOCUMENT_ID: documentId,
@@ -123,15 +161,8 @@ async function runBefore(httpServer: Server, accessToken: string): Promise<void>
   });
 }
 
-async function runAfter(httpServer: Server, accessToken: string): Promise<void> {
-  const productId = process.argv[3];
-  const documentId = process.argv[4];
-  const originalSha256 = process.argv[5];
-  if (!productId || !documentId || !originalSha256) {
-    console.error("Для режима 'after' нужны позиционные аргументы: productId documentId originalSha256");
-    process.exitCode = 1;
-    return;
-  }
+async function runAfter(httpServer: Server, accessToken: string, state: CheckState): Promise<void> {
+  const { productId, documentId, originalSha256 } = state;
 
   console.log("== Verify AFTER restart: product exists (Postgres persistence) ==");
   const productRes = await request(httpServer).get(`/v1/products/${productId}`).set("Authorization", `Bearer ${accessToken}`);
@@ -173,11 +204,8 @@ async function main(): Promise<void> {
   const email = process.env.PREVIEW_QA_OWNER_EMAIL!;
   const password = process.env.PREVIEW_QA_OWNER_PASSWORD!;
 
-  const mode = process.argv[2];
-  if (mode !== "before" && mode !== "after") {
-    console.error("Использование: node preview-e2e-check.script.js <before|after> [productId] [documentId] [originalSha256]");
-    process.exit(1);
-  }
+  const existingState = loadState();
+  console.log(existingState ? "Найдено состояние предыдущего запуска — режим AFTER." : "Состояние не найдено — режим BEFORE (первый запуск).");
 
   // Та же существующая миграция, тем же существующим механизмом — как
   // отдельный процесс, без секретов в аргументах.
@@ -203,10 +231,10 @@ async function main(): Promise<void> {
   const accessToken = (loginRes.body as LoginResponseBody).accessToken;
   console.log("Login OK.");
 
-  if (mode === "before") {
+  if (!existingState) {
     await runBefore(httpServer, accessToken);
   } else {
-    await runAfter(httpServer, accessToken);
+    await runAfter(httpServer, accessToken, existingState);
   }
   const checkExitCode = process.exitCode ?? 0;
   process.exitCode = undefined;
