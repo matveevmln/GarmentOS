@@ -193,25 +193,29 @@ async function main(): Promise<void> {
   await app.init();
   const httpServer = app.getHttpServer() as Server;
 
-  try {
-    console.log("== Login ==");
-    const loginRes = await request(httpServer).post("/v1/auth/login").send({ email, password });
-    if (loginRes.status !== 200) {
-      console.error(`Login failed: status=${loginRes.status} body=${JSON.stringify(loginRes.body)}`);
-      process.exitCode = 1;
-      return;
-    }
-    const accessToken = (loginRes.body as LoginResponseBody).accessToken;
-    console.log("Login OK.");
-
-    if (mode === "before") {
-      await runBefore(httpServer, accessToken);
-    } else {
-      await runAfter(httpServer, accessToken);
-    }
-  } finally {
-    await app.close();
+  console.log("== Login ==");
+  const loginRes = await request(httpServer).post("/v1/auth/login").send({ email, password });
+  if (loginRes.status !== 200) {
+    console.error(`Login failed: status=${loginRes.status} body=${JSON.stringify(loginRes.body)}`);
+    process.exitCode = 1;
+    return;
   }
+  const accessToken = (loginRes.body as LoginResponseBody).accessToken;
+  console.log("Login OK.");
+
+  if (mode === "before") {
+    await runBefore(httpServer, accessToken);
+  } else {
+    await runAfter(httpServer, accessToken);
+  }
+
+  // Намеренно НЕ ждём app.close() — supertest/superagent иногда держит
+  // keep-alive сокеты, из-за которых закрытие Nest-приложения зависает
+  // навсегда, а вместе с ним и вся цепочка "check && node dist/main.js"
+  // (найдено в этом же прогоне — деплой завис именно на этом шаге).
+  // Процесс всё равно завершается сразу следующей строкой — закрывать
+  // тестовый HTTP-сервер отдельно не нужно, ОС освобождает сокеты при
+  // выходе процесса.
 }
 
 main()
