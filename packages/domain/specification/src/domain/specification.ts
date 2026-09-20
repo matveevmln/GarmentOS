@@ -34,6 +34,10 @@ export interface Specification {
   companyId: string;
   workshopId: string;
   productId: string;
+  // NEW-поток (ПРОМПТ №3): заказ, ИЗ которого создана эта спецификация.
+  // null — либо legacy-спецификация (createSpecificationDraft), либо ещё не
+  // существующая связь. См. общий комментарий вверху db-schema/specification.ts.
+  productionOrderId: string | null;
   specNumber: number | null;
   status: SpecificationStatus;
   version: number;
@@ -108,14 +112,40 @@ export function assertCanApprove(status: SpecificationStatus): void {
   }
 }
 
-// Правка строк/основных полей — только пока черновик (требование №9:
-// "После APPROVED: нельзя редактировать; нельзя менять строки..."). Тот же
-// инвариант защищает и отмену черновика.
+// Правка строк/основных полей LEGACY-потока — только пока черновик
+// (требование №9: "После APPROVED: нельзя редактировать; нельзя менять
+// строки..."). Тот же инвариант защищает и отмену черновика. НЕ трогается
+// ПРОМПТ №3 — legacy-поведение остаётся ровно таким, каким было.
 export function assertIsDraft(status: SpecificationStatus): void {
   if (status !== "draft") {
     throw new DomainError(
       `Спецификация в статусе "${status}" больше не редактируется — любое изменение оформляется новой спецификацией`,
       "SPECIFICATION_NOT_EDITABLE",
+    );
+  }
+}
+
+// NEW-поток (ПРОМПТ №2.1 раздел D / ПРОМПТ №3 раздел 4) — спецификация,
+// созданная ИЗ заказа, редактируема в любой момент, пока не отменена (не
+// только "пока черновик", как в legacy). "cancelled" — единственное
+// терминальное состояние здесь.
+export function assertCanEdit(status: SpecificationStatus): void {
+  if (status === "cancelled") {
+    throw new DomainError("Спецификация отменена — редактирование недоступно", "SPECIFICATION_CANCELLED");
+  }
+}
+
+// Разделяет два потока на уровне вызова, а не только на уровне БД
+// (ПРОМПТ №3, раздел 9 — "не смешивать эти два механизма"): новый
+// редактируемый PATCH-эндпоинт и генерация PDF "из текущего состояния"
+// применяются ТОЛЬКО к спецификациям, созданным из заказа — legacy-поток
+// (draft -> approve -> snapshot) продолжает жить по своим собственным
+// правилам (assertIsDraft/assertCanApprove) и не подвергается новой логике.
+export function assertIsNewFlowSpecification(productionOrderId: string | null): void {
+  if (!productionOrderId) {
+    throw new DomainError(
+      "Это legacy-спецификация (не создана из заказа) — новый способ редактирования/генерации к ней не применяется",
+      "SPECIFICATION_NOT_NEW_FLOW",
     );
   }
 }

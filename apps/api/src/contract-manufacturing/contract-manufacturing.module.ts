@@ -8,6 +8,7 @@ import { WorkshopsController } from "./workshops.controller";
 import { ProductionOrdersController } from "./production-orders.controller";
 import { PRODUCTION_ORDER_REPOSITORY, WORKSHOP_REPOSITORY } from "./contract-manufacturing.tokens";
 import { bomApprovalProvider } from "./bom-approval.provider";
+import { qcResultLookupProvider } from "./qc-result-lookup.provider";
 import { ContractManufacturingService } from "./contract-manufacturing.service";
 
 @Module({
@@ -16,6 +17,7 @@ import { ContractManufacturingService } from "./contract-manufacturing.service";
   providers: [
     ContractManufacturingService,
     bomApprovalProvider,
+    qcResultLookupProvider,
     {
       provide: WORKSHOP_REPOSITORY,
       useFactory: (db: Database) => new DrizzleWorkshopRepository(db),

@@ -10,8 +10,10 @@ export type {
 export {
   SPECIFICATION_PREPAYMENT_PERCENT,
   assertCanApprove,
+  assertCanEdit,
   assertHasItems,
   assertIsDraft,
+  assertIsNewFlowSpecification,
   assertValidItem,
   computePrepaymentAmount,
   computeSpecificationTotals,
@@ -23,6 +25,7 @@ export type {
   ProductLookupPort,
   ProductVariantLookupPort,
   SpecificationRepository,
+  SpecificationUpdatePatch,
   WorkshopLookupPort,
 } from "./application/ports";
 
@@ -42,5 +45,20 @@ export {
   type ApproveSpecificationInput,
   type ApproveSpecificationLine,
 } from "./application/approve-specification";
+export {
+  createSpecificationFromProductionOrder,
+  type CreateSpecificationFromProductionOrderDeps,
+  type CreateSpecificationFromProductionOrderInput,
+} from "./application/create-specification-from-production-order";
+export {
+  updateSpecification,
+  type UpdateSpecificationDeps,
+  type UpdateSpecificationInput,
+} from "./application/update-specification";
+export {
+  cancelSpecification,
+  type CancelSpecificationDeps,
+  type CancelSpecificationInput,
+} from "./application/cancel-specification";
 
 export { DrizzleSpecificationRepository } from "./infrastructure/drizzle-specification-repository";

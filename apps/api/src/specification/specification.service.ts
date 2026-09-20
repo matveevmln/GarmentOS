@@ -1,8 +1,11 @@
 import { BadRequestException, HttpStatus, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import {
   approveSpecification,
+  cancelSpecification,
   createSpecificationDraft,
   createSpecificationFromExisting,
+  createSpecificationFromProductionOrder,
+  updateSpecification,
   type ProductLookupPort,
   type ProductVariantLookupPort,
   type Specification,
@@ -19,13 +22,22 @@ import type {
   CreateSpecificationFromExistingDto,
   ProductionOrderCostSnapshot,
   SpecificationAvailableQuantityResponseDto,
+  UpdateSpecificationDto,
 } from "@garmentos/shared-types";
 import { AuditService } from "../audit/audit.service";
 import { BomService } from "../bom/bom.service";
 import { CatalogService } from "../catalog/catalog.service";
 import { ContractManufacturingService } from "../contract-manufacturing/contract-manufacturing.service";
 import { DocumentService } from "../document/document.service";
-import { formatRuAmount, formatRuDate, formatRuQuantity } from "../ai-production-assistant/ru-number-format";
+import { computeSpecificationLinePricing } from "../ai-production-assistant/specification-pricing";
+import {
+  formatDeliveryPeriodText,
+  formatRuAmount,
+  formatRuAmountNoDecimals,
+  formatRuDate,
+  formatRuQuantity,
+  formatRuQuantityNoGrouping,
+} from "../ai-production-assistant/ru-number-format";
 import { IdentityService } from "../identity/identity.service";
 import { CostingService } from "../reporting/costing.service";
 import {
@@ -35,15 +47,33 @@ import {
   SPECIFICATION_WORKSHOP_PORT,
 } from "./specification.tokens";
 
-// Условие оплаты по умолчанию — тот же текст, что в
-// production-order-orchestration.service.ts (Итерация 7): используется,
-// только если у конкретного цеха (workshop.paymentTerms) собственное условие
-// не настроено. Не вынесено в общий модуль намеренно — короткая бизнес-
-// формулировка, не код; дублирование здесь дешевле, чем кросс-модульная
-// зависимость ради одной строки (docs/PRINCIPLES.md, принцип 2).
-const DEFAULT_PAYMENT_TERMS =
-  "70% стоимости товара, указанной в спецификации, оплачиваются Заказчиком в течение 3 (трёх) рабочих дней после " +
-  "получения счёта от Исполнителя. Остальные 30% оплачиваются Заказчиком в момент отгрузки Товара со склада Исполнителя.";
+// Условие оплаты по умолчанию — используется, только если у конкретного цеха
+// (workshop.paymentTerms) собственное условие не настроено. Дословно
+// соответствует эталонному документу (ПРОМПТ №10.3, владелец проекта,
+// 2026-09-17: read-only сверка PDF-эталона через pdfplumber выявила, что
+// прежний текст здесь — "70%/30% в течение 3 дней" — НЕ совпадал с реальной
+// формулировкой эталона: "Предоплата 70% составляет N руб. Окончательный
+// расчёт... ЭСФ..." плюс отдельный абзац про отклонение ±10%). Процент
+// предоплаты (70%) — бизнес-факт компании, не выводится логикой (CLAUDE.md,
+// правило 8б) — тот же факт, что был закреплён и в предыдущем тексте. Не
+// вынесено в общий модуль намеренно — короткая бизнес-формулировка, не код;
+// дублирование с production-order-orchestration.service.ts дешевле, чем
+// кросс-модульная зависимость ради одной строки (docs/PRINCIPLES.md, принцип 2).
+//
+// Плейсхолдеры внутри резолвятся ЗДЕСЬ (не через шаблонный applyPlaceholders)
+// — итоговая строка целиком подставляется в {{paymentTerms}} самого шаблона,
+// поэтому вложенные {{...}} внутри неё повторно не обработались бы.
+function formatDefaultPaymentTerms(totalSum: number): string {
+  const prepaymentPercent = 70;
+  const prepaymentAmount = formatRuAmount((totalSum * prepaymentPercent) / 100);
+  return (
+    `Предоплата ${prepaymentPercent}% составляет ${prepaymentAmount} руб. Окончательный расчёт производится на основании ` +
+    "фактически отгруженного количества единиц товара, указанного в Электронном счете-фактуре (ЭСФ), в течение 5 рабочих " +
+    "дней с даты выставления ЭСФ.\n\n" +
+    "Допускается отклонение фактического количества товара от указанного в настоящей Спецификации в пределах ±10% без " +
+    "составления дополнительного соглашения."
+  );
+}
 
 // Тонкий presentation-адаптер поверх packages/domain/specification
 // (docs/ARCHITECTURE.md, раздел 2) — тот же паттерн, что и остальные Service
@@ -96,6 +126,116 @@ export class SpecificationService {
     );
   }
 
+  // Резолвер Order ↔ Specification (ПРОМПТ №3, раздел 9) — единственная
+  // точка, знающая про ОБЕ независимые связи: LEGACY (production_orders.specification_id,
+  // спецификация первична, 1:N) и NEW (specifications.production_order_id,
+  // заказ первичен, 1:1). Каждая пара пишется ровно одним потоком — это не
+  // две конкурирующие истины, а два физически разных происхождения; резолвер
+  // просто не дублирует эту проверку в каждом вызывающем месте.
+  async resolveOrderSpecificationLink(companyId: string, order: ProductionOrder): Promise<Specification | null> {
+    const newFlowSpec = await this.specifications.findByProductionOrderId(companyId, order.id);
+    if (newFlowSpec) return newFlowSpec;
+    if (order.specificationId) {
+      return this.specifications.findById(companyId, order.specificationId);
+    }
+    return null;
+  }
+
+  // Создание спецификации ИЗ уже существующего заказа (ПРОМПТ №3, раздел 4) —
+  // единственный вход NEW-потока. Строки/цех/модель/срок поставки берутся из
+  // заказа на backend, ничего не передаётся в теле запроса. Цена строки —
+  // та же формула, что уже применяется к заказу (rework=0, new=цена строки
+  // или цена заказа) — переиспользуется, не дублируется.
+  async createFromProductionOrder(companyId: string, productionOrderId: string, createdBy: string | null): Promise<Specification> {
+    const order = await this.contractManufacturingService.findProductionOrderById(companyId, productionOrderId);
+    if (!order) {
+      throw new NotFoundException({
+        statusCode: HttpStatus.NOT_FOUND,
+        code: "PRODUCTION_ORDER_NOT_FOUND",
+        message: `Заказ пошива ${productionOrderId} не найден`,
+      });
+    }
+
+    const existingLink = await this.resolveOrderSpecificationLink(companyId, order);
+    if (existingLink) {
+      throw new BadRequestException({
+        statusCode: HttpStatus.BAD_REQUEST,
+        code: "SPECIFICATION_ALREADY_EXISTS_FOR_ORDER",
+        message: "Для этого заказа уже создана спецификация",
+      });
+    }
+
+    const items = order.variants.map((variant) => {
+      const pricing = computeSpecificationLinePricing(order, variant);
+      return { productVariantId: variant.productVariantId, quantity: pricing.quantity, unitPrice: pricing.unitPrice };
+    });
+
+    const spec = await createSpecificationFromProductionOrder(
+      { specifications: this.specifications, workshops: this.workshopPort, products: this.productPort, productVariants: this.productVariantPort },
+      {
+        companyId,
+        productionOrderId: order.id,
+        workshopId: order.workshopId,
+        productId: order.productId,
+        deliveryDeadline: order.dueDate,
+        items,
+        createdBy,
+      },
+    );
+
+    await this.auditService.record(companyId, createdBy, "http_api", {
+      entityType: "specification",
+      entityId: spec.id,
+      action: "specification.created_from_production_order",
+      afterJson: { productionOrderId: order.id, specNumber: spec.specNumber, totalSum: spec.totalSum },
+    });
+
+    return spec;
+  }
+
+  // Правка спецификации NEW-потока (ПРОМПТ №3, раздел 4/9) — редактируемый
+  // документ, без approve/freeze. НИКОГДА не пишет ничего обратно в заказ
+  // (гарантируется на уровне доменного use case — UpdateSpecificationDeps
+  // физически не содержит доступа к production_orders).
+  async update(companyId: string, specificationId: string, input: UpdateSpecificationDto, updatedBy: string | null): Promise<Specification> {
+    const before = await this.findById(companyId, specificationId);
+    const spec = await updateSpecification(
+      { specifications: this.specifications, workshops: this.workshopPort, productVariants: this.productVariantPort },
+      {
+        companyId,
+        specificationId,
+        workshopId: input.workshopId,
+        deliveryDeadline: input.deliveryDeadline,
+        items: input.items,
+      },
+    );
+
+    await this.auditService.record(companyId, updatedBy, "http_api", {
+      entityType: "specification",
+      entityId: spec.id,
+      action: "specification.updated",
+      beforeJson: { workshopId: before.workshopId, totalSum: before.totalSum, totalQuantity: before.totalQuantity },
+      afterJson: { workshopId: spec.workshopId, totalSum: spec.totalSum, totalQuantity: spec.totalQuantity },
+    });
+
+    return spec;
+  }
+
+  // Отмена спецификации NEW-потока — терминальное состояние, доступное
+  // только для этого потока (assertIsNewFlowSpecification в домене).
+  async cancel(companyId: string, specificationId: string, cancelledBy: string | null): Promise<Specification> {
+    const spec = await cancelSpecification({ specifications: this.specifications }, { companyId, specificationId });
+
+    await this.auditService.record(companyId, cancelledBy, "http_api", {
+      entityType: "specification",
+      entityId: spec.id,
+      action: "specification.cancelled",
+      afterJson: { status: spec.status },
+    });
+
+    return spec;
+  }
+
   // Утверждение (требование №9) — единственная точка, где спецификация
   // получает номер и замораживает snapshot. Реквизиты цеха/компании/модели
   // читаются здесь, непосредственно перед вызовом домена — ровно то
@@ -131,7 +271,12 @@ export class SpecificationService {
             message: `Вариант ${item.productVariantId} не найден`,
           });
         }
-        return { productVariantId: item.productVariantId, name: `${product.name}, ${variant.color}`, unit: "шт", size: variant.size };
+        // Перенос строки, не запятая, между названием модели и цветом
+        // (ПРОМПТ №11.4, владелец проекта, 2026-09-19: эталон ВСЕГДА
+        // переносит цвет на отдельную строку ячейки "Товары", а не
+        // автоматическим переносом по ширине запятой — pdf-lib-template-
+        // renderer.ts теперь разбивает значение по "\n" так же, как шапку).
+        return { productVariantId: item.productVariantId, name: `${product.name}\n${variant.color}`, unit: "шт", size: variant.size };
       }),
     );
 
@@ -147,10 +292,9 @@ export class SpecificationService {
           contractDate: workshop.contractDate,
           paymentTerms: workshop.paymentTerms,
           deliveryMethod: workshop.deliveryMethod,
-          // Юр.адрес цеха («Производитель» в эталонном PDF) — поле ещё не
-          // заведено на workshops (следующий этап — адаптация PDF-рендерера
-          // под Snapshot, владелец проекта, требование №15 в этой задаче).
-          legalAddress: null,
+          // Юр.адрес цеха («Производитель» в эталонном PDF, ПРОМПТ №2.2/№3) —
+          // существующая сущность workshop (workshops.legal_address).
+          legalAddress: workshop.legalAddress,
           signerRole: workshop.signerRole,
           signerName: workshop.signerName,
         },
@@ -330,7 +474,7 @@ export class SpecificationService {
       // Вариант B — коммерческие поля из snapshot спецификации, НЕ из живых
       // workshop/company (требование №7): реквизиты, изменённые после
       // утверждения спецификации, не должны повлиять на партию.
-      paymentTerms: snapshot.workshop.paymentTerms ?? DEFAULT_PAYMENT_TERMS,
+      paymentTerms: snapshot.workshop.paymentTerms ?? formatDefaultPaymentTerms(totalSum),
       deliveryMethod: snapshot.workshop.deliveryMethod ?? "",
       contractNumber: snapshot.workshop.contractNumber ?? "",
       contractDate: snapshot.workshop.contractDate ?? "",
@@ -386,15 +530,29 @@ export class SpecificationService {
     return this.specifications.listByCompany(companyId, filter);
   }
 
-  // PDF строго из Snapshot утверждённой спецификации (требование №16) — не
-  // из живых product/workshop/company. Повторная генерация через месяц с
-  // теми же данными снимка даёт идентичный документ, даже если модель/цех/
-  // компания успели измениться — snapshotJson для этого и замораживается при
-  // approve. Использует тот же Document Template Engine и тот же эталонный
-  // шаблон, что и старый поток «спецификация из production_order»
-  // (docs/DOCUMENT_ENGINE_ARCHITECTURE.md), только источник данных другой.
+  // Дата спецификации (ПРОМПТ №3, раздел 7: "должна быть определена
+  // однозначно") — дата создания, никогда не меняется правкой (updatedAt
+  // здесь намеренно не используется).
+  private formatSpecDate(spec: Specification): string {
+    return formatRuDate(spec.createdAt.toISOString().slice(0, 10));
+  }
+
+  // PDF (требование №16 legacy / ПРОМПТ №3 раздел 6 NEW) — источник данных
+  // зависит от потока: LEGACY читает строго замороженный snapshotJson (не
+  // живые product/workshop/company — повторная генерация через месяц с теми
+  // же данными снимка даёт идентичный документ, даже если модель/цех/
+  // компания успели измениться); NEW-поток снимка не имеет вовсе
+  // (ПРОМПТ №3: "PDF собирается из ТЕКУЩЕГО состояния Specification") и
+  // собирает данные из живых Workshop/Product/Company + текущих строк
+  // спецификации. Оба используют один и тот же Document Template Engine и
+  // один и тот же эталонный шаблон (docs/DOCUMENT_ENGINE_ARCHITECTURE.md).
   async generateDocument(companyId: string, specificationId: string, uploadedBy: string | null): Promise<AttachDocumentResult> {
     const spec = await this.findById(companyId, specificationId);
+
+    if (spec.productionOrderId) {
+      return this.generateDocumentForNewFlow(companyId, spec, uploadedBy);
+    }
+
     if (spec.status !== "approved" || !spec.snapshotJson) {
       throw new BadRequestException({
         statusCode: HttpStatus.BAD_REQUEST,
@@ -403,20 +561,24 @@ export class SpecificationService {
       });
     }
     const snapshot = spec.snapshotJson as unknown as SpecificationSnapshot;
+    const totalSum = Number(snapshot.totals.sum);
 
     const data: SpecificationDocumentData = {
       fields: {
         contractNumber: snapshot.workshop.contractNumber ?? "",
         contractDate: formatRuDate(snapshot.workshop.contractDate),
+        specDate: this.formatSpecDate(spec),
         customerName: snapshot.company.legalName,
         contractorName: snapshot.workshop.name,
         specNumber: String(spec.specNumber ?? ""),
-        paymentTerms: snapshot.workshop.paymentTerms ?? DEFAULT_PAYMENT_TERMS,
-        deliveryDeadline: formatRuDate(snapshot.deliveryDeadline),
+        paymentTerms: snapshot.workshop.paymentTerms ?? formatDefaultPaymentTerms(totalSum),
+        deliveryDeadline: formatDeliveryPeriodText(snapshot.deliveryDeadline, String(spec.createdAt.getFullYear())),
         deliveryMethod: snapshot.workshop.deliveryMethod ?? "",
+        legalAddress: snapshot.workshop.legalAddress ?? "",
         contractorSignerRole: snapshot.workshop.signerRole ?? "",
         contractorSignerName: snapshot.workshop.signerName ?? "",
         customerSignerName: snapshot.company.signerName ?? "",
+        totalSumNoDecimals: formatRuAmountNoDecimals(totalSum),
       },
       items: snapshot.items.map((item) => ({
         name: item.name,
@@ -427,11 +589,93 @@ export class SpecificationService {
         sum: formatRuAmount(Number(item.sum)),
       })),
       totals: {
-        quantity: formatRuQuantity(Number(snapshot.totals.quantity)),
+        quantity: formatRuQuantityNoGrouping(Number(snapshot.totals.quantity)),
         sum: formatRuAmount(Number(snapshot.totals.sum)),
       },
     };
 
     return this.documentService.generateSpecificationForSpecification(companyId, specificationId, uploadedBy, data);
+  }
+
+  // NEW-поток (ПРОМПТ №3, раздел 6) — без snapshotJson: собирает данные из
+  // ТЕКУЩЕГО состояния спецификации и живых Workshop/Product/Company.
+  // Регенерация после правки специально даёт другой PDF — это и есть
+  // "PDF = версия конкретного состояния Specification" (ПРОМПТ №2.1, п.6);
+  // предыдущая версия документа не удаляется (supersedesDocumentId,
+  // Immutable Original — docs/PRINCIPLES.md, принцип 19).
+  private async generateDocumentForNewFlow(companyId: string, spec: Specification, uploadedBy: string | null): Promise<AttachDocumentResult> {
+    if (spec.status === "cancelled") {
+      throw new BadRequestException({
+        statusCode: HttpStatus.BAD_REQUEST,
+        code: "SPECIFICATION_CANCELLED",
+        message: "PDF нельзя сформировать для отменённой спецификации",
+      });
+    }
+
+    const [workshop, product, company] = await Promise.all([
+      this.contractManufacturingService.findWorkshopById(companyId, spec.workshopId),
+      this.catalogService.findProductById(companyId, spec.productId),
+      this.identityService.findCompanyById(companyId),
+    ]);
+    if (!workshop) {
+      throw new NotFoundException({ statusCode: HttpStatus.NOT_FOUND, code: "SPECIFICATION_WORKSHOP_NOT_FOUND", message: `Цех ${spec.workshopId} не найден` });
+    }
+    if (!product) {
+      throw new NotFoundException({ statusCode: HttpStatus.NOT_FOUND, code: "SPECIFICATION_PRODUCT_NOT_FOUND", message: `Модель ${spec.productId} не найдена` });
+    }
+    if (!company) {
+      throw new NotFoundException({ statusCode: HttpStatus.NOT_FOUND, code: "SPECIFICATION_COMPANY_NOT_FOUND", message: `Компания ${companyId} не найдена` });
+    }
+
+    const customerName = company.legalName ?? company.name;
+
+    const items = await Promise.all(
+      spec.items.map(async (item) => {
+        const variant = await this.catalogService.findProductVariantById(companyId, item.productVariantId);
+        if (!variant) {
+          throw new NotFoundException({
+            statusCode: HttpStatus.NOT_FOUND,
+            code: "SPECIFICATION_VARIANT_NOT_FOUND",
+            message: `Вариант ${item.productVariantId} не найден`,
+          });
+        }
+        return {
+          // См. комментарий у аналогичной строки в approveSpecification выше
+          // (ПРОМПТ №11.4) — перенос строки вместо запятой перед цветом.
+          name: `${product.name}\n${variant.color}`,
+          unit: "шт",
+          size: variant.size,
+          quantity: formatRuQuantity(Number(item.quantity)),
+          unitPrice: formatRuAmount(Number(item.unitPrice)),
+          sum: formatRuAmount(Number(item.sum)),
+        };
+      }),
+    );
+
+    const data: SpecificationDocumentData = {
+      fields: {
+        contractNumber: workshop.contractNumber ?? "",
+        contractDate: formatRuDate(workshop.contractDate),
+        specDate: this.formatSpecDate(spec),
+        customerName,
+        contractorName: workshop.name,
+        specNumber: String(spec.specNumber ?? ""),
+        paymentTerms: workshop.paymentTerms ?? formatDefaultPaymentTerms(Number(spec.totalSum)),
+        deliveryDeadline: formatDeliveryPeriodText(spec.deliveryDeadline, String(spec.createdAt.getFullYear())),
+        deliveryMethod: workshop.deliveryMethod ?? "",
+        legalAddress: workshop.legalAddress ?? "",
+        contractorSignerRole: workshop.signerRole ?? "",
+        contractorSignerName: workshop.signerName ?? "",
+        customerSignerName: company.signerName ?? "",
+        totalSumNoDecimals: formatRuAmountNoDecimals(Number(spec.totalSum)),
+      },
+      items,
+      totals: {
+        quantity: formatRuQuantityNoGrouping(Number(spec.totalQuantity)),
+        sum: formatRuAmount(Number(spec.totalSum)),
+      },
+    };
+
+    return this.documentService.generateSpecificationForSpecification(companyId, spec.id, uploadedBy, data);
   }
 }

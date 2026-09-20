@@ -54,16 +54,24 @@ export class BatchPassportService {
         .select({ id: invoicesTable.id, status: invoicesTable.status, amount: invoicesTable.amount, dueDate: invoicesTable.dueDate })
         .from(invoicesTable)
         .where(and(eq(invoicesTable.companyId, companyId), eq(invoicesTable.productionOrderId, order.id))),
-      // Спецификация-источник (Этап 3) — прямой запрос вместо
+      // Спецификация-источник (Этап 3, LEGACY) ИЛИ спецификация, созданная
+      // ИЗ этого заказа (ПРОМПТ №3, раздел 9 — NEW-поток,
+      // specifications.production_order_id) — прямой запрос вместо
       // SpecificationService: SpecificationModule импортирует ReportingModule
-      // (ради CostingService), обратный импорт создал бы цикл модулей.
+      // (ради CostingService), обратный импорт создал бы цикл модулей. Обе
+      // связи взаимоисключающие по конструкции (пишет ровно один поток),
+      // поэтому простое either/or корректно резолвит обе.
       order.specificationId
         ? this.db
             .select({ id: specificationsTable.id, specNumber: specificationsTable.specNumber })
             .from(specificationsTable)
             .where(and(eq(specificationsTable.companyId, companyId), eq(specificationsTable.id, order.specificationId)))
             .limit(1)
-        : Promise.resolve([]),
+        : this.db
+            .select({ id: specificationsTable.id, specNumber: specificationsTable.specNumber })
+            .from(specificationsTable)
+            .where(and(eq(specificationsTable.companyId, companyId), eq(specificationsTable.productionOrderId, order.id)))
+            .limit(1),
     ]);
     if (!product) {
       throw new NotFoundException({ statusCode: 404, code: "PRODUCT_NOT_FOUND", message: `Модель ${order.productId} не найдена` });

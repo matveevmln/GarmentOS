@@ -31,6 +31,10 @@ export interface Workshop {
   deliveryMethod: string | null;
   signerRole: string | null;
   signerName: string | null;
+  // Юридический адрес цеха («Производитель» в эталонном PDF спецификации,
+  // ПРОМПТ №2.2/№3) — существующая сущность workshop, не новая универсальная
+  // таблица адресов (владелец проекта, ПРОМПТ №3, раздел 7).
+  legalAddress: string | null;
   createdBy: string | null;
   createdAt: Date;
   updatedAt: Date;

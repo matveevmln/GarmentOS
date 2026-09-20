@@ -4,10 +4,29 @@ export type ProductionOrderStatus =
   | "draft"
   | "placed"
   | "in_progress"
+  | "sewing_completed"
   | "ready_for_pickup"
+  | "shipped_to_fulfillment"
   | "received"
   | "completed"
   | "cancelled";
+
+// Линейный порядок жизненного цикла партии (ПРОМПТ №3, раздел 8) — не
+// включает "cancelled" (терминальная ветка вне линии, недостижима явным
+// действием сегодня). Используется и для допустимости переходов вперёд
+// (assertCanUpdateStatusFromWorkshop), и для контролируемого отката ровно на
+// один шаг назад (assertCanRollbackStatus) — единственное место, где порядок
+// определён, чтобы не рассинхронизировать два независимых списка правил.
+const PRODUCTION_ORDER_STATUS_ORDER: readonly ProductionOrderStatus[] = [
+  "draft",
+  "placed",
+  "in_progress",
+  "sewing_completed",
+  "ready_for_pickup",
+  "shipped_to_fulfillment",
+  "received",
+  "completed",
+];
 
 // "new" — обычный оплачиваемый объём (цена берётся из agreedUnitPrice заказа,
 // как и раньше). "rework" — переделка брака, добавленная строкой в заказ,
@@ -238,9 +257,12 @@ export function assertCanConfirm(status: ProductionOrderStatus): void {
 // разбор по партиям/браку сознательно отложен до Баланса производственной
 // партии (docs/PRODUCTION_BATCH_LIFECYCLE_ARCHITECTURE.md).
 export function assertCanReceive(status: ProductionOrderStatus): void {
-  if (status !== "ready_for_pickup") {
+  // "shipped_to_fulfillment" добавлен ПРОМПТ №3 (раздел 8) как ещё одна
+  // допустимая точка входа в приёмку — та же терпимость к пропуску
+  // промежуточных статусов, что уже действовала для "ready_for_pickup".
+  if (status !== "ready_for_pickup" && status !== "shipped_to_fulfillment") {
     throw new DomainError(
-      `Нельзя принять заказ пошива в статусе "${status}" — приёмка доступна только когда цех сообщил "готово к отгрузке"`,
+      `Нельзя принять заказ пошива в статусе "${status}" — приёмка доступна только когда цех сообщил "готово к отгрузке" или "отправлено в фулфилмент"`,
       "PRODUCTION_ORDER_NOT_READY_FOR_PICKUP",
     );
   }
@@ -312,16 +334,24 @@ export function assertCostSnapshotNotYetSet(costSnapshot: Record<string, unknown
 // достаточный для Итерации 7: "начали шить"/"готово". "received" — это
 // приёмка на нашем складе, подтверждается нашей стороной, не цехом; терминальные
 // статусы (received/cancelled) не переоткрываются входящим сообщением.
-export function assertCanUpdateStatusFromWorkshop(
-  current: ProductionOrderStatus,
-  next: "in_progress" | "ready_for_pickup",
-): void {
+export type WorkshopReportableStatus = "in_progress" | "sewing_completed" | "ready_for_pickup" | "shipped_to_fulfillment";
+
+// ПРОМПТ №2.1/№3 (владелец проекта, п.1-2): "sewing_completed" и
+// "shipped_to_fulfillment" — два новых явных факта, каждый только через это
+// явное действие пользователя (никогда не выводится автоматически из
+// раскроя или чего-либо ещё — сам факт вызова этой функции уже является
+// "явным действием", домен не занимается выводом статуса из косвенных
+// данных). Правило одно и то же для всех четырёх значений next: строго
+// вперёд по каноническому порядку (PRODUCTION_ORDER_STATUS_ORDER), с
+// сохранением уже существовавшей терпимости к пропуску промежуточных
+// статусов (например, "placed" -> "ready_for_pickup" напрямую был и остаётся
+// разрешён).
+export function assertCanUpdateStatusFromWorkshop(current: ProductionOrderStatus, next: WorkshopReportableStatus): void {
   // "completed" (Global Completed Regression Audit, владелец проекта,
   // 2026-09-15) — терминальный статус наравне с "received"/"cancelled":
-  // без этой проверки next === "ready_for_pickup" не был отклонён ни одним
-  // условием ниже (next === "in_progress" отклоняется только для current
-  // !== "placed"), то есть закрытую партию можно было бы формально вернуть
-  // в "готово к отгрузке" через тот же путь, что и входящее сообщение цеха.
+  // без этой проверки более ранний next не был бы отклонён ни одним условием
+  // ниже, то есть закрытую партию можно было бы формально вернуть назад
+  // через тот же путь, что и входящее сообщение цеха.
   if (current === "received" || current === "cancelled" || current === "completed") {
     throw new DomainError(
       `Заказ пошива в статусе "${current}" — обновление статуса цехом больше не применяется`,
@@ -334,10 +364,51 @@ export function assertCanUpdateStatusFromWorkshop(
       "PRODUCTION_ORDER_INVALID_STATUS_TRANSITION",
     );
   }
-  if (next === "in_progress" && current !== "placed") {
+  const currentIndex = PRODUCTION_ORDER_STATUS_ORDER.indexOf(current);
+  const nextIndex = PRODUCTION_ORDER_STATUS_ORDER.indexOf(next);
+  if (currentIndex >= nextIndex) {
     throw new DomainError(
-      `Нельзя перевести заказ пошива в "в работе" из статуса "${current}"`,
+      `Нельзя перевести заказ пошива в статус "${next}" из статуса "${current}"`,
       "PRODUCTION_ORDER_INVALID_STATUS_TRANSITION",
     );
   }
+}
+
+// Контролируемый rollback (ПРОМПТ №2.1, раздел C / ПРОМПТ №3, раздел 9) —
+// НЕ произвольный setStatus назад. Разрешён строго на один шаг по тому же
+// каноническому порядку, что и переходы вперёд, и только если это не
+// разрушает уже записанный производственный факт. Целевой статус
+// ВЫЧИСЛЯЕТСЯ здесь, а не передаётся вызывающим — исключает возможность
+// запросить откат сразу на несколько шагов.
+export function assertCanRollbackStatus(
+  current: ProductionOrderStatus,
+  hasReceivedFacts: boolean,
+  hasQcResult: boolean,
+): ProductionOrderStatus {
+  if (current === "cancelled") {
+    throw new DomainError(`Нельзя откатить статус отменённого заказа`, "PRODUCTION_ORDER_ROLLBACK_FROM_CANCELLED");
+  }
+  if (current === "completed") {
+    throw new DomainError(
+      `Нельзя откатить завершённую партию — этот механизм рассчитан на исправление ошибочного перехода, а не на переоткрытие закрытой партии`,
+      "PRODUCTION_ORDER_ROLLBACK_FROM_COMPLETED",
+    );
+  }
+  const currentIndex = PRODUCTION_ORDER_STATUS_ORDER.indexOf(current);
+  if (currentIndex <= 0) {
+    throw new DomainError(`У статуса "${current}" нет предыдущего статуса для отката`, "PRODUCTION_ORDER_ROLLBACK_NO_PREVIOUS");
+  }
+  if (hasQcResult) {
+    throw new DomainError(
+      `Нельзя откатить статус — по этому заказу уже зафиксирован результат ОТК`,
+      "PRODUCTION_ORDER_ROLLBACK_QC_EXISTS",
+    );
+  }
+  if (current === "received" && hasReceivedFacts) {
+    throw new DomainError(
+      `Нельзя откатить приёмку — уже записан факт полученного количества хотя бы по одному варианту`,
+      "PRODUCTION_ORDER_ROLLBACK_RECEIVED_FACTS_EXIST",
+    );
+  }
+  return PRODUCTION_ORDER_STATUS_ORDER[currentIndex - 1];
 }

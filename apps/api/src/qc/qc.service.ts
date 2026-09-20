@@ -112,4 +112,11 @@ export class QcService {
     }
     return this.toResponse(result);
   }
+
+  // Для списков (Фулфилмент ОТК, ПРОМПТ №3 раздел 10) — большинство заказов
+  // ещё не имеют результата ОТК, это нормальное состояние, не ошибка.
+  async tryFindByProductionOrder(companyId: string, productionOrderId: string): Promise<QcResultResponseDto | null> {
+    const result = await this.qcResults.findByProductionOrder(companyId, productionOrderId);
+    return result ? this.toResponse(result) : null;
+  }
 }

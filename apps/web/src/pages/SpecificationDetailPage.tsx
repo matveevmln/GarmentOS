@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import type {
+  PresetResponseDto,
   ProductionOrderResponseDto,
   ProductResponseDto,
   ProductVariantResponseDto,
@@ -25,6 +26,7 @@ import { ErrorState } from "../design-system/Feedback/ErrorState";
 import { DataTable, Td } from "../design-system/Blocks";
 import { toast } from "../design-system/Toast/Toast";
 import { currencyLabel, formatDate, formatMoney, formatQuantity } from "../lib/format";
+import { cn } from "../design-system/utils";
 
 // Единый мастер спецификации (Этап 2 — «Паспорт модели», владелец проекта,
 // 2026-09-12, требования №8-15): модель → цех → строки → условия → черновик
@@ -470,23 +472,73 @@ function SpecificationView({ id }: { id: string }) {
   const [availableQuantity, setAvailableQuantity] = useState<SpecificationAvailableQuantityResponseDto | null>(null);
   const [showCreateBatch, setShowCreateBatch] = useState(false);
 
+  // Редактирование спецификации NEW-потока (ПРОМПТ №3, раздел 2) —
+  // спецификация, созданная ИЗ заказа (spec.productionOrderId задан):
+  // редактируемый документ без approve/freeze, правка НЕ меняет заказ
+  // (гарантия на уровне backend — UpdateSpecificationDeps физически не
+  // содержит доступа к production_orders).
+  const [isEditing, setIsEditing] = useState(false);
+  const [editWorkshopId, setEditWorkshopId] = useState("");
+  const [editDeliveryDeadline, setEditDeliveryDeadline] = useState<Date | undefined>();
+  const [editItems, setEditItems] = useState<Record<string, { quantity: number; unitPrice: number }>>({});
+  const [allWorkshops, setAllWorkshops] = useState<WorkshopResponseDto[]>([]);
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
+  // Пресеты цены спецификации (ПРОМПТ №3, раздел 5) — 700 RUB по умолчанию,
+  // применяется сразу ко всем строкам вместо ручного ввода в каждую.
+  const [pricePresets, setPricePresets] = useState<PresetResponseDto[]>([]);
+  const [customPricePreset, setCustomPricePreset] = useState<number | undefined>(undefined);
+  const [isSavingPricePreset, setIsSavingPricePreset] = useState(false);
+
+  useEffect(() => {
+    apiRequest<PresetResponseDto[]>("/presets?kind=specification_price")
+      .then(setPricePresets)
+      .catch(() => setPricePresets([]));
+  }, []);
+
+  const applyPriceToAllRows = (value: number) => {
+    setEditItems((prev) =>
+      Object.fromEntries(Object.entries(prev).map(([variantId, values]) => [variantId, { ...values, unitPrice: value }])),
+    );
+  };
+
+  const addPricePreset = async () => {
+    if (!customPricePreset) return;
+    setIsSavingPricePreset(true);
+    try {
+      const preset = await apiRequest<PresetResponseDto>("/presets", {
+        method: "POST",
+        body: { kind: "specification_price", value: customPricePreset, currency: "RUB" },
+      });
+      setPricePresets((prev) => (prev.some((p) => p.id === preset.id) ? prev : [...prev, preset]));
+      applyPriceToAllRows(Number(preset.value));
+      setCustomPricePreset(undefined);
+      toast.success("Значение сохранено — доступно при следующем выборе");
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Не удалось сохранить значение");
+    } finally {
+      setIsSavingPricePreset(false);
+    }
+  };
+
   const load = () => {
     setError(false);
     apiRequest<SpecificationResponseDto>(`/specifications/${id}`)
       .then(async (loaded) => {
         setSpec(loaded);
-        const [productData, workshopData, variantsData, docsData] = await Promise.all([
+        const [productData, workshopData, variantsData, docsData, workshopsData] = await Promise.all([
           apiRequest<ProductResponseDto>(`/products/${loaded.productId}`),
           apiRequest<WorkshopResponseDto>(`/workshops/${loaded.workshopId}`),
           apiRequest<ProductVariantResponseDto[]>(`/product-variants?productId=${loaded.productId}`),
           apiRequest<Array<{ id: string; isCurrentVersion: boolean; title: string | null }>>(
             `/documents?entityType=specification&entityId=${loaded.id}`,
           ),
+          apiRequest<WorkshopResponseDto[]>("/workshops"),
         ]);
         setProduct(productData);
         setWorkshop(workshopData);
         setVariants(variantsData);
         setDocuments(docsData);
+        setAllWorkshops(workshopsData);
         if (loaded.status === "approved") {
           const available = await apiRequest<SpecificationAvailableQuantityResponseDto>(
             `/specifications/${loaded.id}/available-quantity`,
@@ -526,6 +578,44 @@ function SpecificationView({ id }: { id: string }) {
     }
   };
 
+  const startEdit = () => {
+    if (!spec) return;
+    setEditWorkshopId(spec.workshopId);
+    setEditDeliveryDeadline(spec.deliveryDeadline ? new Date(spec.deliveryDeadline) : undefined);
+    setEditItems(
+      Object.fromEntries(
+        spec.items.map((item) => [item.productVariantId, { quantity: Number(item.quantity), unitPrice: Number(item.unitPrice) }]),
+      ),
+    );
+    setIsEditing(true);
+  };
+
+  const saveEdit = async () => {
+    if (!spec) return;
+    setIsSavingEdit(true);
+    try {
+      await apiRequest(`/specifications/${spec.id}`, {
+        method: "PATCH",
+        body: {
+          workshopId: editWorkshopId !== spec.workshopId ? editWorkshopId : undefined,
+          deliveryDeadline: editDeliveryDeadline ? editDeliveryDeadline.toISOString().slice(0, 10) : null,
+          items: Object.entries(editItems).map(([productVariantId, values]) => ({
+            productVariantId,
+            quantity: values.quantity,
+            unitPrice: values.unitPrice,
+          })),
+        },
+      });
+      setIsEditing(false);
+      load();
+      toast.success("Спецификация изменена", { description: "Суммы пересчитаны. Заказ пошива не изменён." });
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Не удалось сохранить изменения");
+    } finally {
+      setIsSavingEdit(false);
+    }
+  };
+
   const downloadDocument = async (docId: string, title: string | null) => {
     try {
       const blob = await apiDownload(`/documents/${docId}/file`);
@@ -549,6 +639,11 @@ function SpecificationView({ id }: { id: string }) {
   const remainder = spec.prepaymentAmount ? Number(spec.totalSum) - Number(spec.prepaymentAmount) : null;
   const hasAvailableQuantity = (availableQuantity?.items ?? []).some((row) => row.availableQuantity > 0.0005);
   const isFullyAllocated = spec.status === "approved" && availableQuantity !== null && !hasAvailableQuantity;
+  // NEW-поток (ПРОМПТ №3) — спецификация создана ИЗ заказа: партия уже
+  // существует, "Создать партию"/"Создать на основе" здесь не имеют смысла
+  // (это операции LEGACY-потока, где спецификация первична).
+  const isNewFlow = spec.productionOrderId !== null;
+  const canEdit = isNewFlow && spec.status !== "cancelled";
 
   return (
     <div className="mx-auto max-w-[1100px]">
@@ -572,11 +667,24 @@ function SpecificationView({ id }: { id: string }) {
           />
         }
         actions={
-          spec.status === "draft" ? (
+          isEditing ? (
+            <span className="flex flex-wrap items-center gap-2">
+              <Button size="sm" variant="secondary" onClick={() => setIsEditing(false)}>
+                Отмена
+              </Button>
+              <Button size="sm" loading={isSavingEdit} onClick={() => void saveEdit()}>
+                Сохранить
+              </Button>
+            </span>
+          ) : canEdit ? (
+            <Button size="sm" variant="secondary" onClick={startEdit}>
+              Изменить
+            </Button>
+          ) : spec.status === "draft" ? (
             <Button size="sm" loading={isApproving} onClick={() => void approve()}>
               Утвердить спецификацию
             </Button>
-          ) : spec.status === "approved" ? (
+          ) : spec.status === "approved" && !isNewFlow ? (
             <span className="flex flex-wrap items-center gap-2">
               {hasAvailableQuantity && (
                 <Button size="sm" onClick={() => setShowCreateBatch(true)}>
@@ -590,6 +698,55 @@ function SpecificationView({ id }: { id: string }) {
           ) : undefined
         }
       />
+
+      {isEditing && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Цех и срок поставки</CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
+            <Field label="Цех" className="min-w-[220px] flex-1">
+              <Combobox
+                value={editWorkshopId}
+                onChange={setEditWorkshopId}
+                placeholder="Выберите цех"
+                searchPlaceholder="Поиск цеха..."
+                options={allWorkshops.map((w) => ({ value: w.id, label: w.name }))}
+              />
+            </Field>
+            <Field label="Срок поставки" className="min-w-[180px]">
+              <DatePicker value={editDeliveryDeadline} onChange={setEditDeliveryDeadline} />
+            </Field>
+            <Field label="Цена спецификации — применить ко всем строкам" className="w-full">
+              <div className="flex flex-wrap items-center gap-2">
+                {pricePresets.map((preset) => (
+                  <button
+                    key={preset.id}
+                    type="button"
+                    onClick={() => applyPriceToAllRows(Number(preset.value))}
+                    className={cn(
+                      "rounded-[10px] border border-border bg-card px-3 py-1.5 text-[13px] font-medium text-muted-foreground transition-colors hover:border-primary/30",
+                    )}
+                  >
+                    {formatQuantity(Number(preset.value))} {preset.currency === "RUB" ? "руб." : preset.currency}
+                  </button>
+                ))}
+                <NumberInput className="w-[120px]" value={customPricePreset} onChange={setCustomPricePreset} min={0} />
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  loading={isSavingPricePreset}
+                  disabled={!customPricePreset}
+                  onClick={() => void addPricePreset()}
+                >
+                  Сохранить и применить
+                </Button>
+              </div>
+            </Field>
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardHeader>
@@ -605,24 +762,69 @@ function SpecificationView({ id }: { id: string }) {
                 { key: "sum", label: "Сумма", align: "right", width: "160px" },
               ]}
             >
-              {spec.items.map((item) => (
-                <tr key={item.id} className="cursor-default">
-                  <Td>
-                    {product.name}, {variantLabel(item.productVariantId)}
-                  </Td>
-                  <Td align="right" className="num">
-                    {formatQuantity(Number(item.quantity))}
-                  </Td>
-                  <Td align="right" className="num">
-                    {formatMoney(Number(item.unitPrice), currencyLabel(spec.totalSumCurrency))}
-                  </Td>
-                  <Td align="right" className="num">
-                    {formatMoney(Number(item.sum), currencyLabel(spec.totalSumCurrency))}
-                  </Td>
-                </tr>
-              ))}
+              {spec.items.map((item) =>
+                isEditing ? (
+                  <tr key={item.id} className="cursor-default">
+                    <Td>
+                      {product.name}, {variantLabel(item.productVariantId)}
+                    </Td>
+                    <Td align="right">
+                      <NumberInput
+                        className="ml-auto w-[100px]"
+                        value={editItems[item.productVariantId]?.quantity}
+                        onChange={(value) =>
+                          setEditItems((prev) => ({
+                            ...prev,
+                            [item.productVariantId]: { ...prev[item.productVariantId], quantity: value ?? 0, unitPrice: prev[item.productVariantId]?.unitPrice ?? 0 },
+                          }))
+                        }
+                        min={0}
+                      />
+                    </Td>
+                    <Td align="right">
+                      <NumberInput
+                        className="ml-auto w-[110px]"
+                        value={editItems[item.productVariantId]?.unitPrice}
+                        onChange={(value) =>
+                          setEditItems((prev) => ({
+                            ...prev,
+                            [item.productVariantId]: { ...prev[item.productVariantId], unitPrice: value ?? 0, quantity: prev[item.productVariantId]?.quantity ?? 0 },
+                          }))
+                        }
+                        min={0}
+                      />
+                    </Td>
+                    <Td align="right" className="num text-muted-foreground">
+                      {formatMoney(
+                        (editItems[item.productVariantId]?.quantity ?? 0) * (editItems[item.productVariantId]?.unitPrice ?? 0),
+                        currencyLabel(spec.totalSumCurrency),
+                      )}
+                    </Td>
+                  </tr>
+                ) : (
+                  <tr key={item.id} className="cursor-default">
+                    <Td>
+                      {product.name}, {variantLabel(item.productVariantId)}
+                    </Td>
+                    <Td align="right" className="num">
+                      {formatQuantity(Number(item.quantity))}
+                    </Td>
+                    <Td align="right" className="num">
+                      {formatMoney(Number(item.unitPrice), currencyLabel(spec.totalSumCurrency))}
+                    </Td>
+                    <Td align="right" className="num">
+                      {formatMoney(Number(item.sum), currencyLabel(spec.totalSumCurrency))}
+                    </Td>
+                  </tr>
+                ),
+              )}
             </DataTable>
           </div>
+          {isEditing && (
+            <p className="t-meta mt-2">
+              Суммы пересчитаются после сохранения. Заказ пошива, из которого создана эта спецификация, не изменится.
+            </p>
+          )}
         </CardContent>
       </Card>
 

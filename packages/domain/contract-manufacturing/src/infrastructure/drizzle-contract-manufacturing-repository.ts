@@ -41,6 +41,7 @@ function toWorkshop(row: WorkshopRow): Workshop {
     deliveryMethod: row.deliveryMethod,
     signerRole: row.signerRole,
     signerName: row.signerName,
+    legalAddress: row.legalAddress,
     createdBy: row.createdBy,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,

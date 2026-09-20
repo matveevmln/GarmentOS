@@ -38,6 +38,29 @@ export const createSpecificationFromExistingSchema = z.object({
 });
 export type CreateSpecificationFromExistingDto = z.infer<typeof createSpecificationFromExistingSchema>;
 
+// ПРОМПТ №3, раздел 4 — создание спецификации ИЗ уже существующего заказа
+// (production_order_id обязателен, приходит из URL/пути, не из тела — тот же
+// принцип, что и companyId). Строки/цех/модель/срок поставки берутся с
+// backend из данных заказа, ничего не передаётся в теле запроса — минимум
+// кликов (принцип 17): пользователь один раз нажимает «Создать спецификацию».
+export const createSpecificationFromProductionOrderSchema = z.object({}).optional();
+export type CreateSpecificationFromProductionOrderDto = z.infer<typeof createSpecificationFromProductionOrderSchema>;
+
+// Правка спецификации NEW-потока (ПРОМПТ №3, раздел 4/9) — все поля
+// необязательны (PATCH: передано — меняется, не передано — как было).
+// productId/productionOrderId не редактируются никогда — смена модели или
+// источника оформляется новой спецификацией, не правкой существующей.
+export const updateSpecificationSchema = z
+  .object({
+    workshopId: z.string().uuid().optional(),
+    deliveryDeadline: z.string().nullable().optional(),
+    items: z.array(specificationItemDraftSchema).min(1, "Спецификация должна содержать хотя бы одну строку").optional(),
+  })
+  .refine((value) => Object.keys(value).length > 0, {
+    message: "Не передано ни одного поля для изменения",
+  });
+export type UpdateSpecificationDto = z.infer<typeof updateSpecificationSchema>;
+
 export const listSpecificationsQuerySchema = z.object({
   productId: z.string().uuid().optional(),
   workshopId: z.string().uuid().optional(),
@@ -101,6 +124,9 @@ export const specificationResponseSchema = z.object({
   companyId: z.string().uuid(),
   workshopId: z.string().uuid(),
   productId: z.string().uuid(),
+  // NEW-поток (ПРОМПТ №3) — заказ, ИЗ которого создана эта спецификация;
+  // null у legacy-спецификаций (созданных ДО заказа, старым способом).
+  productionOrderId: z.string().uuid().nullable(),
   specNumber: z.number().int().nullable(),
   status: specificationStatusSchema,
   version: z.number().int(),

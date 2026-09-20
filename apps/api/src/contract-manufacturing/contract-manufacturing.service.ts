@@ -7,6 +7,7 @@ import {
   createProductionOrderFromSpecification,
   createWorkshop,
   receiveProductionOrder as receiveProductionOrderUseCase,
+  rollbackProductionOrderStatus as rollbackProductionOrderStatusUseCase,
   updateProductionOrderStatus as updateProductionOrderStatusUseCase,
   updateProductionOrderStatusFromWorkshop,
   updateWorkshop,
@@ -14,8 +15,11 @@ import {
   type CreateProductionOrderFromSpecificationInput,
   type ProductionOrder,
   type ProductionOrderRepository,
+  type QcResultLookupPort,
+  type RollbackProductionOrderStatusResult,
   type Workshop,
   type WorkshopRepository,
+  type WorkshopReportableStatus,
 } from "@garmentos/domain-contract-manufacturing";
 import {
   distributeQuantityByRatio,
@@ -28,13 +32,14 @@ import type {
   PreviewProductionOrderVariantsResponseDto,
   CreateProductionOrderFromQuantityDto,
   CreateWorkshopDto,
+  SizeDistributionMode,
   UpdateWorkshopDto,
 } from "@garmentos/shared-types";
 import type { AuthenticatedRequestUser } from "../auth/current-user.decorator";
 import { AuditService } from "../audit/audit.service";
 import { CatalogService } from "../catalog/catalog.service";
 import { WarehouseService } from "../warehouse/warehouse.service";
-import { BOM_APPROVAL_PORT, PRODUCTION_ORDER_REPOSITORY, WORKSHOP_REPOSITORY } from "./contract-manufacturing.tokens";
+import { BOM_APPROVAL_PORT, PRODUCTION_ORDER_REPOSITORY, QC_RESULT_LOOKUP_PORT, WORKSHOP_REPOSITORY } from "./contract-manufacturing.tokens";
 
 // Срез карточки цеха для audit_log — только содержательные поля, без
 // служебных дат и идентификаторов: они не несут смысла в диффе «до/после»,
@@ -64,6 +69,7 @@ export class ContractManufacturingService {
     @Inject(WORKSHOP_REPOSITORY) private readonly workshops: WorkshopRepository,
     @Inject(PRODUCTION_ORDER_REPOSITORY) private readonly productionOrders: ProductionOrderRepository,
     @Inject(BOM_APPROVAL_PORT) private readonly bomApproval: BomApprovalPort,
+    @Inject(QC_RESULT_LOOKUP_PORT) private readonly qcResultLookup: QcResultLookupPort,
     private readonly warehouseService: WarehouseService,
     private readonly catalogService: CatalogService,
     private readonly auditService: AuditService,
@@ -100,9 +106,14 @@ export class ContractManufacturingService {
   }
 
   async createProductionOrderDraft(companyId: string, input: CreateProductionOrderDto): Promise<ProductionOrder> {
+    // ПРОМПТ №3, раздел 8 — bomId необязателен: визард с матрицей размер×цвет
+    // не заставляет выбирать BOM, backend сам находит/заводит approved BOM
+    // модели прозрачно для пользователя (тот же путь, что и /from-quantity).
+    const bomId = input.bomId ?? (await this.bomApproval.ensureApprovedBomForProduct(companyId, input.productId, input.createdBy ?? null));
+
     return createProductionOrderDraft(
       { productionOrders: this.productionOrders, workshops: this.workshops, bomApproval: this.bomApproval },
-      { ...input, companyId },
+      { ...input, bomId, companyId },
     );
   }
 
@@ -138,6 +149,7 @@ export class ContractManufacturingService {
         sizesForColor.map((variant) => variant.size),
         ratios,
         colorQuantity,
+        input.distributionMode,
       )
         .filter((row) => row.quantity > 0)
         .map(({ size, quantity }) => ({
@@ -146,9 +158,15 @@ export class ContractManufacturingService {
         }));
     });
 
+    // ПРОМПТ №3, раздел 8 — bomId необязателен в этом эндпоинте: если не
+    // передан явно, находим/заводим approved BOM модели прозрачно для
+    // пользователя (пустой BOM = материалы для модели пока не описаны, не
+    // блокирует создание заказа).
+    const bomId = input.bomId ?? (await this.bomApproval.ensureApprovedBomForProduct(companyId, input.productId, input.createdBy ?? null));
+
     return this.createProductionOrderDraft(companyId, {
       productId: input.productId,
-      bomId: input.bomId,
+      bomId,
       workshopId: input.workshopId,
       plannedQuantity: input.totalQuantity,
       agreedUnitPrice: input.agreedUnitPrice,
@@ -169,15 +187,23 @@ export class ContractManufacturingService {
   }
 
   // Единая точка распределения количества по размерам (владелец проекта,
-  // 2026-08-30). Веса берутся из карточки модели; размеры, которых нет в
-  // ряду, получают вес 1 — иначе вариант с «забытым» размером молча выпал бы
-  // из заказа. Если раскладки нет вовсе, все веса равны, то есть деление
-  // становится равномерным.
+  // 2026-08-30; распределение по режиму — ПРОМПТ №3, раздел 2, шаг 5).
+  // "ratio" (по умолчанию) — веса берутся из карточки модели; размеры,
+  // которых нет в ряду, получают вес 1 — иначе вариант с «забытым» размером
+  // молча выпал бы из заказа. Если раскладки нет вовсе, все веса равны, то
+  // есть деление становится равномерным само по себе. "even" — явный выбор
+  // пользователя игнорировать веса модели и распределить поровну между
+  // размерами именно для этого заказа, не трогая саму карточку модели.
   private distributeAcrossSizes(
     sizes: string[],
     ratios: Map<string, number>,
     totalQuantity: number,
+    mode?: SizeDistributionMode,
   ): Array<{ size: string; quantity: number }> {
+    if (mode === "even") {
+      const quantities = distributeQuantityEvenly(sizes.length, totalQuantity);
+      return sizes.map((size, index) => ({ size, quantity: quantities[index] ?? 0 }));
+    }
     return distributeQuantityByRatio(
       sizes.map((size) => ({ size, weight: ratios.get(size) ?? 1 })),
       totalQuantity,
@@ -216,7 +242,12 @@ export class ContractManufacturingService {
       }
       if (sizesForColor.length === 0) continue;
 
-      for (const { size, quantity } of this.distributeAcrossSizes(sizesForColor, ratios, colorRow.quantity)) {
+      for (const { size, quantity } of this.distributeAcrossSizes(
+        sizesForColor,
+        ratios,
+        colorRow.quantity,
+        input.distributionMode,
+      )) {
         const variant = variants.find((row) => row.size === size && row.color === colorRow.color);
         if (!variant) continue;
         rows.push({ productVariantId: variant.id, size, color: colorRow.color, quantity });
@@ -299,7 +330,7 @@ export class ContractManufacturingService {
   async updateProductionOrderStatusFromWorkshop(
     companyId: string,
     workshopId: string,
-    status: "in_progress" | "ready_for_pickup",
+    status: WorkshopReportableStatus,
   ): Promise<ProductionOrder> {
     return updateProductionOrderStatusFromWorkshop(
       { productionOrders: this.productionOrders },
@@ -307,19 +338,46 @@ export class ContractManufacturingService {
     );
   }
 
-  // REST-путь смены статуса (P0-1, владелец проекта, 2026-09-05) — тот же
-  // инвариант, что у Telegram-пути выше, но по конкретному id заказа, не по
-  // цеху. Единственная точка входа в Web UI, пока Telegram-канал с цехом не
-  // настроен.
+  // REST-путь смены статуса (P0-1, владелец проекта, 2026-09-05; расширен
+  // ПРОМПТ №3 разделом 8 до sewing_completed/shipped_to_fulfillment) — тот
+  // же инвариант, что у Telegram-пути выше, но по конкретному id заказа, не
+  // по цеху. Единственная точка входа в Web UI, пока Telegram-канал с цехом
+  // не настроен.
   async updateProductionOrderStatus(
     companyId: string,
     productionOrderId: string,
-    status: "in_progress" | "ready_for_pickup",
+    status: WorkshopReportableStatus,
   ): Promise<ProductionOrder> {
     return updateProductionOrderStatusUseCase(
       { productionOrders: this.productionOrders },
       { companyId, productionOrderId, status },
     );
+  }
+
+  // Контролируемый rollback (ПРОМПТ №2.1, раздел C / ПРОМПТ №3, раздел 9) —
+  // право contract_manufacturing.rollback проверяется на уровне контроллера
+  // (RequirePermissions), не здесь; сервис отвечает только за вызов домена и
+  // журналирование. Целевой статус вычисляется доменом — контроллер и
+  // клиент его не выбирают.
+  async rollbackProductionOrderStatus(
+    currentUser: AuthenticatedRequestUser,
+    productionOrderId: string,
+    reason: string,
+  ): Promise<RollbackProductionOrderStatusResult> {
+    const result = await rollbackProductionOrderStatusUseCase(
+      { productionOrders: this.productionOrders, qcResults: this.qcResultLookup },
+      { companyId: currentUser.companyId, productionOrderId, reason },
+    );
+
+    await this.auditService.recordForUser(currentUser, {
+      entityType: "production_order",
+      entityId: result.order.id,
+      action: "production_order.status_rolled_back",
+      beforeJson: { status: result.fromStatus },
+      afterJson: { status: result.toStatus, reason },
+    });
+
+    return result;
   }
 
   // Приёмка партии от цеха на склад (Итерация 10, факт — P0-1, владелец

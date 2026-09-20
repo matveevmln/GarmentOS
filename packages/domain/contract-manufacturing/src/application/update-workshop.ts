@@ -56,5 +56,6 @@ export async function updateWorkshop(deps: UpdateWorkshopDeps, input: UpdateWork
     deliveryMethod: normalize(patch.deliveryMethod),
     signerRole: normalize(patch.signerRole),
     signerName: normalize(patch.signerName),
+    legalAddress: normalize(patch.legalAddress),
   });
 }

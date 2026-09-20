@@ -2,7 +2,7 @@ import { config } from "dotenv";
 
 config({ path: "../../../.env" });
 
-import { approveBom, createBomDraft, DrizzleBomRepository, getApprovedBom, type BomRepository } from "@garmentos/domain-bom";
+import { approveBom, createBomDraft, createEmptyBom, DrizzleBomRepository, getApprovedBom, type BomRepository } from "@garmentos/domain-bom";
 import {
   createCollection,
   createProduct,
@@ -26,7 +26,14 @@ import { receiveProductionOrder } from "./application/receive-production-order";
 import { updateProductionOrderStatus } from "./application/update-production-order-status";
 import { updateProductionOrderStatusFromWorkshop } from "./application/update-production-order-status-from-workshop";
 import { DomainError } from "./domain/errors";
-import { assertSourceOrderIsNotSelf } from "./domain/production-order";
+import {
+  assertCanReceive,
+  assertCanRollbackStatus,
+  assertCanUpdateStatusFromWorkshop,
+  assertSourceOrderIsNotSelf,
+} from "./domain/production-order";
+import { rollbackProductionOrderStatus } from "./application/rollback-production-order-status";
+import type { QcResultLookupPort } from "./application/ports";
 import {
   DrizzleProductionOrderRepository,
   DrizzleWorkshopRepository,
@@ -61,6 +68,13 @@ function makeBomApprovalPort(boms: BomRepository): BomApprovalPort {
     async isBomApproved(companyId, bomId, productId) {
       const approved = await getApprovedBom({ boms }, { companyId, productId });
       return approved?.id === bomId;
+    },
+    async ensureApprovedBomForProduct(companyId, productId, createdBy) {
+      const existing = await getApprovedBom({ boms }, { companyId, productId });
+      if (existing) return existing.id;
+      const draft = await createEmptyBom({ boms }, { companyId, productId, createdBy });
+      const approved = await approveBom({ boms }, { companyId, bomId: draft.id });
+      return approved.id;
     },
   };
 }
@@ -874,6 +888,142 @@ describe("domain/contract-manufacturing", () => {
         expect(caught).toBeDefined();
         const cause = caught instanceof Error && caught.cause instanceof Error ? caught.cause : caught;
         expect(String(cause)).toMatch(/production_orders_source_not_self_check/);
+      });
+    });
+  });
+
+  // ПРОМПТ №3, раздел 8 — новые статусы sewing_completed/shipped_to_fulfillment,
+  // строго вперёд по каноническому порядку, с сохранением терпимости к
+  // пропуску промежуточных статусов.
+  describe("assertCanUpdateStatusFromWorkshop — новые статусы (ПРОМПТ №3)", () => {
+    it("разрешает in_progress → sewing_completed", () => {
+      expect(() => assertCanUpdateStatusFromWorkshop("in_progress", "sewing_completed")).not.toThrow();
+    });
+    it("разрешает sewing_completed → ready_for_pickup", () => {
+      expect(() => assertCanUpdateStatusFromWorkshop("sewing_completed", "ready_for_pickup")).not.toThrow();
+    });
+    it("разрешает ready_for_pickup → shipped_to_fulfillment", () => {
+      expect(() => assertCanUpdateStatusFromWorkshop("ready_for_pickup", "shipped_to_fulfillment")).not.toThrow();
+    });
+    it("разрешает пропуск промежуточных статусов: placed → shipped_to_fulfillment напрямую", () => {
+      expect(() => assertCanUpdateStatusFromWorkshop("placed", "shipped_to_fulfillment")).not.toThrow();
+    });
+    it("разрешает пропуск: in_progress → shipped_to_fulfillment напрямую (минуя sewing_completed и ready_for_pickup)", () => {
+      expect(() => assertCanUpdateStatusFromWorkshop("in_progress", "shipped_to_fulfillment")).not.toThrow();
+    });
+    it("запрещает движение назад: shipped_to_fulfillment → sewing_completed", () => {
+      expect(() => assertCanUpdateStatusFromWorkshop("shipped_to_fulfillment", "sewing_completed")).toThrow(DomainError);
+    });
+    it("запрещает установку того же статуса повторно", () => {
+      expect(() => assertCanUpdateStatusFromWorkshop("sewing_completed", "sewing_completed")).toThrow(DomainError);
+    });
+    it("не выводит sewing_completed автоматически — функция требует явного next, никогда сама не решает", () => {
+      // Прямая проверка требования "sewing_completed НЕ устанавливать
+      // автоматически после раскроя" — у функции физически нет параметра
+      // "данные раскроя", только текущий и запрошенный статус.
+      expect(assertCanUpdateStatusFromWorkshop.length).toBe(2);
+    });
+  });
+
+  describe("assertCanReceive — расширенные точки входа (ПРОМПТ №3)", () => {
+    it("разрешает приёмку из ready_for_pickup", () => {
+      expect(() => assertCanReceive("ready_for_pickup")).not.toThrow();
+    });
+    it("разрешает приёмку из shipped_to_fulfillment", () => {
+      expect(() => assertCanReceive("shipped_to_fulfillment")).not.toThrow();
+    });
+    it("запрещает приёмку из sewing_completed", () => {
+      expect(() => assertCanReceive("sewing_completed")).toThrow(DomainError);
+    });
+  });
+
+  describe("assertCanRollbackStatus (ПРОМПТ №2.1/№3, раздел 9)", () => {
+    it("откатывает ready_for_pickup → sewing_completed на один шаг", () => {
+      expect(assertCanRollbackStatus("ready_for_pickup", false, false)).toBe("sewing_completed");
+    });
+    it("откатывает shipped_to_fulfillment → ready_for_pickup", () => {
+      expect(assertCanRollbackStatus("shipped_to_fulfillment", false, false)).toBe("ready_for_pickup");
+    });
+    it("запрещает откат из completed", () => {
+      expect(() => assertCanRollbackStatus("completed", false, false)).toThrow(DomainError);
+    });
+    it("запрещает откат из cancelled", () => {
+      expect(() => assertCanRollbackStatus("cancelled", false, false)).toThrow(DomainError);
+    });
+    it("запрещает откат из draft (нет предыдущего статуса)", () => {
+      expect(() => assertCanRollbackStatus("draft", false, false)).toThrow(DomainError);
+    });
+    it("запрещает откат из received, если уже записан факт приёмки хотя бы по одному варианту", () => {
+      expect(() => assertCanRollbackStatus("received", true, false)).toThrow(DomainError);
+    });
+    it("разрешает откат из received, если факт приёмки ещё не записан", () => {
+      expect(assertCanRollbackStatus("received", false, false)).toBe("shipped_to_fulfillment");
+    });
+    it("запрещает откат, если уже зафиксирован результат ОТК — независимо от статуса", () => {
+      expect(() => assertCanRollbackStatus("received", false, true)).toThrow(DomainError);
+      expect(() => assertCanRollbackStatus("shipped_to_fulfillment", false, true)).toThrow(DomainError);
+    });
+  });
+
+  describe("rollbackProductionOrderStatus — REST use case (ПРОМПТ №3, раздел 9)", () => {
+    function fakeQcResults(hasResult: boolean): QcResultLookupPort {
+      return { hasResultForOrder: () => Promise.resolve(hasResult) };
+    }
+
+    it("требует непустую причину", async () => {
+      await runInRolledBackTransaction(async (tx) => {
+        const { company, product, variant, boms, approvedBom, workshops, workshop } = await seedApprovedBomAndVariant(tx);
+        const productionOrders = new DrizzleProductionOrderRepository(tx);
+        const bomApproval = makeBomApprovalPort(boms);
+        const draft = await createProductionOrderDraft(
+          { productionOrders, workshops, bomApproval },
+          { companyId: company.id, productId: product.id, bomId: approvedBom.id, workshopId: workshop.id, plannedQuantity: 10, agreedUnitPrice: 450, variants: [{ productVariantId: variant.id, quantity: 10 }] },
+        );
+
+        await expect(
+          rollbackProductionOrderStatus(
+            { productionOrders, qcResults: fakeQcResults(false) },
+            { companyId: company.id, productionOrderId: draft.id, reason: "   " },
+          ),
+        ).rejects.toMatchObject({ code: "PRODUCTION_ORDER_ROLLBACK_REASON_REQUIRED" });
+      });
+    });
+
+    it("откатывает ready_for_pickup обратно в sewing_completed и пишет причину/from/to в результат", async () => {
+      await runInRolledBackTransaction(async (tx) => {
+        const { company, product, variant, boms, approvedBom, workshops, workshop } = await seedApprovedBomAndVariant(tx);
+        const productionOrders = new DrizzleProductionOrderRepository(tx);
+        const bomApproval = makeBomApprovalPort(boms);
+        const draft = await createProductionOrderDraft(
+          { productionOrders, workshops, bomApproval },
+          { companyId: company.id, productId: product.id, bomId: approvedBom.id, workshopId: workshop.id, plannedQuantity: 10, agreedUnitPrice: 450, variants: [{ productVariantId: variant.id, quantity: 10 }] },
+        );
+        await confirmProductionOrder({ productionOrders }, { companyId: company.id, productionOrderId: draft.id });
+        await updateProductionOrderStatus({ productionOrders }, { companyId: company.id, productionOrderId: draft.id, status: "sewing_completed" });
+        await updateProductionOrderStatus({ productionOrders }, { companyId: company.id, productionOrderId: draft.id, status: "ready_for_pickup" });
+
+        const result = await rollbackProductionOrderStatus(
+          { productionOrders, qcResults: fakeQcResults(false) },
+          { companyId: company.id, productionOrderId: draft.id, reason: "Ошиблись, ещё шьём" },
+        );
+
+        expect(result.fromStatus).toBe("ready_for_pickup");
+        expect(result.toStatus).toBe("sewing_completed");
+        expect(result.order.status).toBe("sewing_completed");
+      });
+    });
+
+    it("бросает PRODUCTION_ORDER_NOT_FOUND на неизвестный заказ", async () => {
+      await runInRolledBackTransaction(async (tx) => {
+        const company = await createCompany({ companies: new DrizzleCompanyRepository(tx) }, { name: "Бренд без заказа для rollback" });
+        const productionOrders = new DrizzleProductionOrderRepository(tx);
+
+        await expect(
+          rollbackProductionOrderStatus(
+            { productionOrders, qcResults: fakeQcResults(false) },
+            { companyId: company.id, productionOrderId: "00000000-0000-0000-0000-000000000000", reason: "тест" },
+          ),
+        ).rejects.toMatchObject({ code: "PRODUCTION_ORDER_NOT_FOUND" });
       });
     });
   });

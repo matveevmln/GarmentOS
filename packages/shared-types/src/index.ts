@@ -20,3 +20,5 @@ export * from "./defect";
 export * from "./document-intelligence";
 export * from "./specification";
 export * from "./audit";
+export * from "./preset";
+export * from "./fulfillment";

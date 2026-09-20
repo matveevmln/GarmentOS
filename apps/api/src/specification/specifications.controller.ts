@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Query } from "@nestjs/common";
+import { Body, Controller, Get, Param, Patch, Post, Query } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
 import { createZodDto } from "nestjs-zod";
 import {
@@ -10,6 +10,7 @@ import {
   productionOrderResponseSchema,
   specificationAvailableQuantityResponseSchema,
   specificationResponseSchema,
+  updateSpecificationSchema,
   type DocumentResponseDto,
   type ProductionOrderResponseDto,
   type SpecificationAvailableQuantityResponseDto,
@@ -23,6 +24,7 @@ class CreateSpecificationDraftDto extends createZodDto(createSpecificationDraftS
 class CreateSpecificationFromExistingDto extends createZodDto(createSpecificationFromExistingSchema) {}
 class ListSpecificationsQueryDto extends createZodDto(listSpecificationsQuerySchema) {}
 class CreateProductionOrderFromSpecificationDto extends createZodDto(createProductionOrderFromSpecificationSchema) {}
+class UpdateSpecificationDto extends createZodDto(updateSpecificationSchema) {}
 
 // Спецификация — самостоятельная бизнес-сущность, первый шаг производства
 // (владелец проекта, 2026-09-11 — «Production Master»), не производный
@@ -84,6 +86,32 @@ export class SpecificationsController {
   ): Promise<DocumentResponseDto> {
     const result = await this.specificationService.generateDocument(currentUser.companyId, id, currentUser.id);
     return documentResponseSchema.parse(result.document);
+  }
+
+  // Правка спецификации NEW-потока (ПРОМПТ №3, раздел 4/9) — редактируемый
+  // документ, без approve/freeze. Право write (не отдельное право, в отличие
+  // от rollback партии) — та же операция концептуально, что и create.
+  // Legacy-спецификации и отменённые — домен отклоняет сам (assertIsNewFlowSpecification/assertCanEdit).
+  @RequirePermissions("specification.write")
+  @Patch(":id")
+  async update(
+    @Param("id") id: string,
+    @Body() body: UpdateSpecificationDto,
+    @CurrentUser() currentUser: AuthenticatedRequestUser,
+  ): Promise<SpecificationResponseDto> {
+    const spec = await this.specificationService.update(currentUser.companyId, id, body, currentUser.id);
+    return specificationResponseSchema.parse(spec);
+  }
+
+  // Отмена спецификации NEW-потока — терминальное состояние.
+  @RequirePermissions("specification.write")
+  @Post(":id/cancel")
+  async cancel(
+    @Param("id") id: string,
+    @CurrentUser() currentUser: AuthenticatedRequestUser,
+  ): Promise<SpecificationResponseDto> {
+    const spec = await this.specificationService.cancel(currentUser.companyId, id, currentUser.id);
+    return specificationResponseSchema.parse(spec);
   }
 
   @RequirePermissions("specification.read")

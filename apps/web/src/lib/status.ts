@@ -28,10 +28,19 @@ export const STATUS_MAP: Record<string, StatusMeta> = {
   draft: { label: "Черновик", tone: "neutral" },
   placed: { label: "Размещён", tone: "info" },
   in_progress: { label: "В производстве", tone: "accent" },
+  // ПРОМПТ №2.1/№3 — отдельные явные стадии между "в работе" и "готово к
+  // отгрузке"/"принято", каждая проставляется явным действием пользователя.
+  sewing_completed: { label: "Пошив завершён", tone: "accent" },
   ready_for_pickup: { label: "Готово к отгрузке", tone: "success" },
+  shipped_to_fulfillment: { label: "На фулфилменте", tone: "info" },
   received: { label: "Принято", tone: "success" },
   completed: { label: "Завершена", tone: "success" },
   cancelled: { label: "Отменён", tone: "danger" },
+
+  // Фулфилмент ОТК (ПРОМПТ №3, раздел 10) — статус результата ОТК, не
+  // production_order_status.
+  awaiting_qc: { label: "Ожидает ОТК", tone: "warning" },
+  qc_recorded: { label: "ОТК зафиксирован", tone: "success" },
 
   // purchase_order_status — закупки
   sent: { label: "Отправлена", tone: "info" },

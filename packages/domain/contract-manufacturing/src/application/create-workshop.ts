@@ -23,6 +23,7 @@ export interface CreateWorkshopInput {
   deliveryMethod?: string;
   signerRole?: string;
   signerName?: string;
+  legalAddress?: string;
   createdBy?: string;
 }
 
@@ -47,6 +48,7 @@ export async function createWorkshop(deps: CreateWorkshopDeps, input: CreateWork
     deliveryMethod: input.deliveryMethod?.trim() ?? null,
     signerRole: input.signerRole?.trim() ?? null,
     signerName: input.signerName?.trim() ?? null,
+    legalAddress: input.legalAddress?.trim() ?? null,
     createdBy: input.createdBy ?? null,
   });
 }

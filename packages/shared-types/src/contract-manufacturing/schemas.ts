@@ -25,6 +25,10 @@ export const createWorkshopSchema = z.object({
   deliveryMethod: z.string().optional(),
   signerRole: z.string().optional(),
   signerName: z.string().optional(),
+  // Юр.адрес цеха — нужен ровно для строки "Производитель: ..." в PDF
+  // спецификации (ПРОМПТ №2.2/№3, пункт 5). Необязателен — заполняется,
+  // когда реквизиты уже известны.
+  legalAddress: z.string().optional(),
   createdBy: z.string().uuid().optional(),
 });
 export type CreateWorkshopDto = z.infer<typeof createWorkshopSchema>;
@@ -51,6 +55,7 @@ export const updateWorkshopSchema = z
     deliveryMethod: z.string().optional(),
     signerRole: z.string().optional(),
     signerName: z.string().optional(),
+    legalAddress: z.string().optional(),
   })
   .refine((value) => Object.keys(value).length > 0, {
     message: "Не передано ни одного поля для изменения",
@@ -73,6 +78,7 @@ export const workshopResponseSchema = z.object({
   deliveryMethod: z.string().nullable(),
   signerRole: z.string().nullable(),
   signerName: z.string().nullable(),
+  legalAddress: z.string().nullable(),
   createdBy: z.string().uuid().nullable(),
   createdAt: z.date(),
   updatedAt: z.date(),
@@ -93,7 +99,12 @@ export const productionOrderStatusSchema = z.enum([
   "draft",
   "placed",
   "in_progress",
+  // sewing_completed / shipped_to_fulfillment — ПРОМПТ №3, раздел 8: два
+  // новых явных факта, только через явное действие пользователя, никогда не
+  // выводятся автоматически (например, из завершения раскроя).
+  "sewing_completed",
   "ready_for_pickup",
+  "shipped_to_fulfillment",
   "received",
   // completed — партия закрыта явным действием пользователя после приёмки
   // (ПРОМПТ №10.1/10.2, владелец проекта, 2026-09-15). "received" больше не
@@ -118,7 +129,10 @@ export type ProductionOrderVariantDraft = z.infer<typeof productionOrderVariantD
 
 export const createProductionOrderSchema = z.object({
   productId: z.string().uuid(),
-  bomId: z.string().uuid(),
+  // ПРОМПТ №3, раздел 8 — новый визард (матрица размер×цвет) не требует
+  // выбора BOM: если не передан, backend сам находит/заводит approved BOM
+  // модели прозрачно для пользователя (см. ensureApprovedBomForProduct).
+  bomId: z.string().uuid().optional(),
   workshopId: z.string().uuid(),
   plannedQuantity: z.number().positive(),
   agreedUnitPrice: z.number().min(0),
@@ -142,15 +156,28 @@ export type CreateProductionOrderDto = z.infer<typeof createProductionOrderSchem
 // используется единственный цвет модели; если у модели несколько цветов,
 // общее количество делится между ними поровну, затем внутри каждого цвета —
 // по размерам (см. contract-manufacturing.service.ts).
+// Режим распределения по размерам (ПРОМПТ №3, раздел 2, шаг 5) — выбор
+// пользователя на уровне ЗАКАЗА, а не только настройка модели: "ratio"
+// (по умолчанию) использует сохранённые веса модели (product_sizes.ratioWeight
+// — уже существующий distributeQuantityByRatio); "even" распределяет
+// поровну между размерами независимо от весов модели (distributeQuantityEvenly),
+// не требуя менять веса самой модели ради разового равномерного заказа.
+export const sizeDistributionModeSchema = z.enum(["ratio", "even"]);
+export type SizeDistributionMode = z.infer<typeof sizeDistributionModeSchema>;
+
 export const createProductionOrderFromQuantitySchema = z.object({
   productId: z.string().uuid(),
-  bomId: z.string().uuid(),
+  // ПРОМПТ №3, раздел 8 — новый визард не требует выбора BOM: если не
+  // передан, backend сам находит/заводит approved BOM модели прозрачно для
+  // пользователя (см. BomApprovalPort.ensureApprovedBomForProduct).
+  bomId: z.string().uuid().optional(),
   workshopId: z.string().uuid(),
   totalQuantity: z.number().int().positive(),
   agreedUnitPrice: z.number().min(0),
   materialsProvidedByUs: z.boolean().optional(),
   dueDate: z.string().optional(),
   createdBy: z.string().uuid().optional(),
+  distributionMode: sizeDistributionModeSchema.optional(),
 });
 export type CreateProductionOrderFromQuantityDto = z.infer<typeof createProductionOrderFromQuantitySchema>;
 
@@ -184,9 +211,25 @@ export type ReceiveProductionOrderDto = z.infer<typeof receiveProductionOrderSch
 // входит — приёмка остаётся отдельным эндпоинтом (receiveProductionOrderSchema),
 // потому что зачисляет остаток на склад, а не просто меняет статус.
 export const updateProductionOrderStatusSchema = z.object({
-  status: z.enum(["in_progress", "ready_for_pickup"]),
+  status: z.enum(["in_progress", "sewing_completed", "ready_for_pickup", "shipped_to_fulfillment"]),
 });
 export type UpdateProductionOrderStatusDto = z.infer<typeof updateProductionOrderStatusSchema>;
+
+// Контролируемый rollback (ПРОМПТ №2.1, раздел C / ПРОМПТ №3, раздел 9) —
+// целевой статус НЕ передаётся клиентом, вычисляется на backend (строго на
+// один шаг назад по каноническому порядку) — здесь только обязательная
+// причина.
+export const rollbackProductionOrderStatusSchema = z.object({
+  reason: z.string().min(1, "Для отката статуса обязательно нужно указать причину"),
+});
+export type RollbackProductionOrderStatusDto = z.infer<typeof rollbackProductionOrderStatusSchema>;
+
+export const rollbackProductionOrderStatusResponseSchema = z.object({
+  order: z.lazy(() => productionOrderResponseSchema),
+  fromStatus: productionOrderStatusSchema,
+  toStatus: productionOrderStatusSchema,
+});
+export type RollbackProductionOrderStatusResponseDto = z.infer<typeof rollbackProductionOrderStatusResponseSchema>;
 
 export const productionOrderVariantTypeSchema = z.enum(["new", "rework"]);
 
@@ -342,6 +385,7 @@ export const previewProductionOrderVariantsSchema = z.object({
       }),
     )
     .min(1, "Укажите хотя бы один цвет с количеством"),
+  distributionMode: sizeDistributionModeSchema.optional(),
 });
 export type PreviewProductionOrderVariantsDto = z.infer<typeof previewProductionOrderVariantsSchema>;
 

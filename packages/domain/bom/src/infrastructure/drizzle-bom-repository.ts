@@ -49,17 +49,22 @@ export class DrizzleBomRepository implements BomRepository {
         .returning();
       if (!bomRow) throw new Error("INSERT boms не вернул строку");
 
-      const itemRows = await tx
-        .insert(bomItems)
-        .values(
-          input.items.map((item) => ({
-            bomId: bomRow.id,
-            materialId: item.materialId,
-            quantityPerUnit: String(item.quantityPerUnit),
-            ...(item.wastePercent !== undefined ? { wastePercent: String(item.wastePercent) } : {}),
-          })),
-        )
-        .returning();
+      // items === [] — пустой BOM (ПРОМПТ №3, раздел 8: createEmptyBom для
+      // заказов пошива без выбора норм расхода); INSERT ... VALUES() без
+      // единого значения — синтаксическая ошибка, а не "0 строк вставлено".
+      const itemRows = input.items.length === 0
+        ? []
+        : await tx
+            .insert(bomItems)
+            .values(
+              input.items.map((item) => ({
+                bomId: bomRow.id,
+                materialId: item.materialId,
+                quantityPerUnit: String(item.quantityPerUnit),
+                ...(item.wastePercent !== undefined ? { wastePercent: String(item.wastePercent) } : {}),
+              })),
+            )
+            .returning();
 
       return toBom(bomRow, itemRows);
     });

@@ -77,7 +77,10 @@ export function batchCompletionState(status: string, hasAction: boolean): BatchC
     };
   }
 
-  if (status !== "ready_for_pickup") {
+  // assertCanReceive (backend) принимает и "ready_for_pickup", и
+  // "shipped_to_fulfillment" (ПРОМПТ №3, раздел 8 — sewing_completed/
+  // shipped_to_fulfillment — отдельные явные стадии между этими двумя).
+  if (status !== "ready_for_pickup" && status !== "shipped_to_fulfillment") {
     return {
       completed: false,
       interactive: false,

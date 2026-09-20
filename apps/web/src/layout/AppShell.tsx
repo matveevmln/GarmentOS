@@ -60,6 +60,7 @@ const NAV_PRODUCTION: NavItem[] = [
   { to: "/specifications", label: "Спецификации", icon: IconDocument, match: "/specifications/*" },
   { to: "/workshops", label: "Цеха", icon: IconWorkshop },
   { to: "/production-orders", label: "Заказы пошива", icon: IconBatch, match: "/production-orders/*" },
+  { to: "/fulfillment", label: "Фулфилмент ОТК", icon: IconCheck },
 ];
 
 const NAV_SUPPLY: NavItem[] = [

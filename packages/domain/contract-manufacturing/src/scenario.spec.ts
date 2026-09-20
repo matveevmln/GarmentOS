@@ -2,7 +2,7 @@ import { config } from "dotenv";
 
 config({ path: "../../../.env" });
 
-import { approveBom, createBomDraft, DrizzleBomRepository, getApprovedBom, type BomRepository } from "@garmentos/domain-bom";
+import { approveBom, createBomDraft, createEmptyBom, DrizzleBomRepository, getApprovedBom, type BomRepository } from "@garmentos/domain-bom";
 import {
   createCollection,
   createProduct,
@@ -53,6 +53,13 @@ function makeBomApprovalPort(boms: BomRepository): BomApprovalPort {
     async isBomApproved(companyId, bomId, productId) {
       const approved = await getApprovedBom({ boms }, { companyId, productId });
       return approved?.id === bomId;
+    },
+    async ensureApprovedBomForProduct(companyId, productId, createdBy) {
+      const existing = await getApprovedBom({ boms }, { companyId, productId });
+      if (existing) return existing.id;
+      const draft = await createEmptyBom({ boms }, { companyId, productId, createdBy });
+      const approved = await approveBom({ boms }, { companyId, bomId: draft.id });
+      return approved.id;
     },
   };
 }

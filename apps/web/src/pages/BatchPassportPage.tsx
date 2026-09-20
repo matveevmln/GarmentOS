@@ -534,21 +534,79 @@ export function BatchPassportPage() {
     }
   };
 
-  // P0-1 (владелец проекта, 2026-09-05) — переходы «Размещён» → «В работе» →
-  // «Готово к отгрузке», которые сегодня приходят только через Telegram-ответ
-  // цеха. Единственный способ провести партию дальше из интерфейса, пока
-  // Telegram не настроен ни для одного цеха на пилоте.
-  const changeOrderStatus = async (status: "in_progress" | "ready_for_pickup") => {
+  // ПРОМПТ №3, раздел 1/2 — создание спецификации ИЗ заказа (NEW-поток):
+  // отдельное действие от legacy generateSpecification выше (та собирает PDF
+  // из снимка старого потока). Здесь backend создаёт запись Specification
+  // (редактируемый документ, без approve/freeze) и мы сразу открываем её —
+  // "создать спецификацию → открыть спецификацию" одним нажатием.
+  const [isCreatingSpecFromOrder, setIsCreatingSpecFromOrder] = useState(false);
+  const createSpecificationFromOrder = async () => {
+    if (!id) return;
+    setIsCreatingSpecFromOrder(true);
+    try {
+      const spec = await apiRequest<{ id: string }>(`/production-orders/${id}/specification`, { method: "POST" });
+      toast.success("Спецификация создана");
+      void navigate(`/specifications/${spec.id}`);
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Не удалось создать спецификацию");
+    } finally {
+      setIsCreatingSpecFromOrder(false);
+    }
+  };
+
+  // P0-1 (владелец проекта, 2026-09-05) — переходы статуса, которые сегодня
+  // приходят только через Telegram-ответ цеха. Единственный способ провести
+  // партию дальше из интерфейса, пока Telegram не настроен ни для одного
+  // цеха на пилоте. Расширено ПРОМПТ №3 (раздел 8): sewing_completed и
+  // shipped_to_fulfillment — отдельные явные стадии, каждая — собственное
+  // нажатие пользователя, не выводятся автоматически из косвенных данных.
+  const ORDER_STATUS_LABELS: Record<string, string> = {
+    in_progress: "Начали шить",
+    sewing_completed: "Пошив завершён",
+    ready_for_pickup: "Готово к отгрузке",
+    shipped_to_fulfillment: "Отправлено на фулфилмент",
+  };
+  const NEXT_STATUS: Record<string, "in_progress" | "sewing_completed" | "ready_for_pickup" | "shipped_to_fulfillment"> = {
+    placed: "in_progress",
+    in_progress: "sewing_completed",
+    sewing_completed: "ready_for_pickup",
+    ready_for_pickup: "shipped_to_fulfillment",
+  };
+  const changeOrderStatus = async (
+    status: "in_progress" | "sewing_completed" | "ready_for_pickup" | "shipped_to_fulfillment",
+  ) => {
     if (!id) return;
     setIsChangingStatus(true);
     try {
       await apiRequest(`/production-orders/${id}/status`, { method: "POST", body: { status } });
       load();
-      toast.success(status === "in_progress" ? "Заказ переведён «В работе»" : "Заказ переведён «Готово к отгрузке»");
+      toast.success(`Заказ переведён «${ORDER_STATUS_LABELS[status]}»`);
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "Не удалось сменить статус заказа");
     } finally {
       setIsChangingStatus(false);
+    }
+  };
+
+  // Контролируемый rollback (ПРОМПТ №2.1/№3, раздел 9) — один шаг назад,
+  // причина обязательна, доступно только owner/director (право
+  // contract_manufacturing.rollback, проверяется backend).
+  const [rollbackReason, setRollbackReason] = useState("");
+  const [showRollbackDialog, setShowRollbackDialog] = useState(false);
+  const [isRollingBack, setIsRollingBack] = useState(false);
+  const rollbackStatus = async () => {
+    if (!id || !rollbackReason.trim()) return;
+    setIsRollingBack(true);
+    try {
+      await apiRequest(`/production-orders/${id}/rollback-status`, { method: "POST", body: { reason: rollbackReason.trim() } });
+      load();
+      toast.success("Статус заказа откачен на один шаг назад");
+      setShowRollbackDialog(false);
+      setRollbackReason("");
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Не удалось откатить статус");
+    } finally {
+      setIsRollingBack(false);
     }
   };
 
@@ -1427,13 +1485,15 @@ export function BatchPassportPage() {
             <Button variant="secondary" size="sm" onClick={() => void navigate("/production-orders")}>
               К списку
             </Button>
-            {/* Спецификация выпускается по подтверждённому заказу: реквизиты
+            {/* Спецификация создаётся из подтверждённого заказа (ПРОМПТ №3,
+                раздел 1/2 — NEW-поток, основной путь нового UI): реквизиты
                 договора и себестоимость фиксируются в момент подтверждения,
-                у черновика их ещё нет. Поэтому у черновика вместо кнопки —
-                подсказка, что нужно сделать раньше. */}
-            {canGenerate && !currentDoc ? (
-              <Button size="sm" loading={isGenerating} onClick={() => void generateSpecification()}>
-                Сформировать спецификацию
+                у черновика их ещё нет. Legacy-путь (generateSpecification,
+                снимок старого потока) в новом UI не показывается — см.
+                CLAUDE.md, «новый UI не использует старый flow». */}
+            {canGenerate && !passport.specification ? (
+              <Button size="sm" loading={isCreatingSpecFromOrder} onClick={() => void createSpecificationFromOrder()}>
+                Создать спецификацию
               </Button>
             ) : null}
             {/* В шапке — не больше двух действий: на 390px третья кнопка
@@ -1581,21 +1641,26 @@ export function BatchPassportPage() {
           )}
 
           {/* Текущее действие цеха — ровно одна кнопка на стадию (P0-1: переход
-              без Telegram, канал не настроен ни для одного цеха на пилоте). */}
-          {passport.status === "placed" || passport.status === "in_progress" ? (
-            <div className="mt-4 flex items-center gap-2 border-t border-border pt-4">
+              без Telegram, канал не настроен ни для одного цеха на пилоте).
+              ПРОМПТ №3, раздел 8 — sewing_completed/shipped_to_fulfillment
+              такие же явные отдельные шаги, не пропускаются автоматически. */}
+          {NEXT_STATUS[passport.status] ? (
+            <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-border pt-4">
               <span className="t-secondary">Цех сообщил:</span>
               <Button
                 type="button"
                 size="sm"
                 variant="secondary"
                 loading={isChangingStatus}
-                onClick={() =>
-                  void changeOrderStatus(passport.status === "placed" ? "in_progress" : "ready_for_pickup")
-                }
+                onClick={() => void changeOrderStatus(NEXT_STATUS[passport.status])}
               >
-                {passport.status === "placed" ? "Начали шить" : "Готово к отгрузке"}
+                {ORDER_STATUS_LABELS[NEXT_STATUS[passport.status]]}
               </Button>
+              {passport.status !== "placed" ? (
+                <Button type="button" size="sm" variant="ghost" onClick={() => setShowRollbackDialog(true)}>
+                  Откатить на шаг назад
+                </Button>
+              ) : null}
             </div>
           ) : null}
 
@@ -1648,6 +1713,36 @@ export function BatchPassportPage() {
             </Button>
             <Button size="sm" loading={isCompleting} onClick={() => void completeOrder()}>
               Всё равно завершить
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Rollback (ПРОМПТ №2.1/№3, раздел 9) — контролируемый откат на один
+          шаг назад с обязательной причиной; backend сам проверяет допустимость
+          (нельзя из completed/cancelled, нельзя если есть факт приёмки/ОТК). */}
+      <Dialog open={showRollbackDialog} onOpenChange={setShowRollbackDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Откатить статус на один шаг назад?</DialogTitle>
+            <DialogDescription>
+              Заказ вернётся к предыдущему статусу производственной шкалы. Действие логируется — укажите причину
+              отката.
+            </DialogDescription>
+          </DialogHeader>
+          <Field label="Причина отката (обязательно)">
+            <Input
+              value={rollbackReason}
+              onChange={(e) => setRollbackReason(e.target.value)}
+              placeholder="Например: статус изменён по ошибке"
+            />
+          </Field>
+          <DialogFooter>
+            <Button variant="secondary" size="sm" onClick={() => setShowRollbackDialog(false)}>
+              Отмена
+            </Button>
+            <Button size="sm" loading={isRollingBack} disabled={!rollbackReason.trim()} onClick={() => void rollbackStatus()}>
+              Откатить
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1925,6 +2020,19 @@ export function BatchPassportPage() {
               Добавьте строки переделки и/или нового пошива.
             </DialogDescription>
           </DialogHeader>
+
+          {/* Баннер компенсации (ПРОМПТ №3, раздел 4) — по партии-источнику
+              есть брак, ещё не покрытый переделкой/новым пошивом. Только
+              предупреждение: количество в форме ниже НЕ меняется
+              автоматически — пользователь сам решает, что и сколько
+              добавить строкой "Переделка". */}
+          {defectSummary && defectSummary.remainingToCompensate > 0 ? (
+            <div className="rounded-[10px] border border-warning/30 bg-warning/[0.06] px-3 py-2.5 text-[13px] text-warning">
+              По этой партии есть непокрытый брак: {formatQuantity(defectSummary.remainingToCompensate, "шт")} ещё не
+              компенсировано переделкой или новым пошивом. Добавьте строку «Переделка» ниже, если нужно закрыть его
+              этим заказом — количество нужно указать вручную.
+            </div>
+          ) : null}
 
           <div className="space-y-4">
             {nextOrderLines.length > 0 ? (

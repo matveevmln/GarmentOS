@@ -225,6 +225,20 @@
       "when": 1789488724247,
       "tag": "0031_smooth_human_robot",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1789646376877,
+      "tag": "0032_production_master_stage4_status_specification_link",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1789646402681,
+      "tag": "0033_seed_rollback_permission_and_presets",
+      "breakpoints": true
     }
   ]
 }

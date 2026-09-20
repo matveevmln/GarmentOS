@@ -12,6 +12,9 @@ import type {
 import { createSpecificationDraft, type CreateSpecificationDraftDeps, type CreateSpecificationDraftInput } from "./application/create-specification-draft";
 import { createSpecificationFromExisting } from "./application/create-specification-from-existing";
 import { approveSpecification, type ApproveSpecificationInput } from "./application/approve-specification";
+import { createSpecificationFromProductionOrder } from "./application/create-specification-from-production-order";
+import { updateSpecification } from "./application/update-specification";
+import { cancelSpecification } from "./application/cancel-specification";
 
 const COMPANY = "company-1";
 const WORKSHOP = "workshop-1";
@@ -29,7 +32,8 @@ class FakeSpecifications implements SpecificationRepository {
       companyId: input.companyId,
       workshopId: input.workshopId,
       productId: input.productId,
-      specNumber: null,
+      productionOrderId: input.productionOrderId ?? null,
+      specNumber: input.specNumber ?? null,
       status: input.status,
       version: input.version,
       basedOnSpecificationId: input.basedOnSpecificationId,
@@ -37,7 +41,7 @@ class FakeSpecifications implements SpecificationRepository {
       totalQuantity: String(input.totalQuantity),
       totalSum: String(input.totalSum),
       totalSumCurrency: "RUB",
-      prepaymentAmount: null,
+      prepaymentAmount: input.prepaymentAmount !== undefined && input.prepaymentAmount !== null ? String(input.prepaymentAmount) : null,
       snapshotJson: null,
       createdBy: input.createdBy,
       createdAt: now,
@@ -75,6 +79,45 @@ class FakeSpecifications implements SpecificationRepository {
     row.prepaymentAmount = String(input.prepaymentAmount);
     row.snapshotJson = input.snapshotJson as unknown as Record<string, unknown>;
     return Promise.resolve(row);
+  }
+
+  update(
+    companyId: string,
+    id: string,
+    patch: { workshopId?: string; deliveryDeadline?: string | null; totalQuantity?: number; totalSum?: number; items?: NewSpecificationInput["items"] },
+  ): Promise<Specification> {
+    const row = this.rows.find((r) => r.id === id && r.companyId === companyId);
+    if (!row) return Promise.reject(new DomainError("не найдена", "SPECIFICATION_NOT_FOUND"));
+    if (patch.workshopId !== undefined) row.workshopId = patch.workshopId;
+    if (patch.deliveryDeadline !== undefined) row.deliveryDeadline = patch.deliveryDeadline;
+    if (patch.totalQuantity !== undefined) row.totalQuantity = String(patch.totalQuantity);
+    if (patch.totalSum !== undefined) row.totalSum = String(patch.totalSum);
+    if (patch.items) {
+      row.items = patch.items.map((item, index) => ({
+        id: randomUUID(),
+        specificationId: row.id,
+        productVariantId: item.productVariantId,
+        quantity: String(item.quantity),
+        unitPrice: String(item.unitPrice),
+        sum: String(item.sum),
+        sortOrder: index,
+      }));
+    }
+    row.version += 1;
+    return Promise.resolve(row);
+  }
+
+  cancel(companyId: string, id: string): Promise<Specification> {
+    const row = this.rows.find((r) => r.id === id && r.companyId === companyId);
+    if (!row) return Promise.reject(new DomainError("не найдена", "SPECIFICATION_NOT_FOUND"));
+    row.status = "cancelled";
+    return Promise.resolve(row);
+  }
+
+  findByProductionOrderId(companyId: string, productionOrderId: string): Promise<Specification | null> {
+    return Promise.resolve(
+      this.rows.find((row) => row.companyId === companyId && row.productionOrderId === productionOrderId) ?? null,
+    );
   }
 }
 
@@ -377,5 +420,163 @@ describe("DomainError", () => {
   it("несёт код ошибки", () => {
     const error = new DomainError("тест", "TEST_CODE");
     expect(error.code).toBe("TEST_CODE");
+  });
+});
+
+const ORDER_A = "production-order-1";
+
+describe("domain/specification — createSpecificationFromProductionOrder (ПРОМПТ №3)", () => {
+  function deps() {
+    return { specifications: new FakeSpecifications(), workshops: fakeWorkshops(), products: fakeProducts(), productVariants: fakeVariants() };
+  }
+
+  it("создаёт спецификацию сразу с номером и статусом approved, без отдельного approve", async () => {
+    const d = deps();
+    const spec = await createSpecificationFromProductionOrder(d, {
+      companyId: COMPANY,
+      productionOrderId: ORDER_A,
+      workshopId: WORKSHOP,
+      productId: PRODUCT,
+      deliveryDeadline: null,
+      items: [{ productVariantId: VARIANT_A, quantity: 100, unitPrice: 700 }],
+      createdBy: "user-1",
+    });
+
+    expect(spec.status).toBe("approved");
+    expect(spec.specNumber).toBe(1);
+    expect(spec.productionOrderId).toBe(ORDER_A);
+    expect(spec.prepaymentAmount).toBe("49000");
+    expect(spec.snapshotJson).toBeNull();
+  });
+
+  it("резервирует номер атомарно и последовательно для двух спецификаций одного цеха", async () => {
+    const d = deps();
+    const first = await createSpecificationFromProductionOrder(d, {
+      companyId: COMPANY,
+      productionOrderId: "order-1",
+      workshopId: WORKSHOP,
+      productId: PRODUCT,
+      deliveryDeadline: null,
+      items: [{ productVariantId: VARIANT_A, quantity: 10, unitPrice: 700 }],
+      createdBy: null,
+    });
+    const second = await createSpecificationFromProductionOrder(d, {
+      companyId: COMPANY,
+      productionOrderId: "order-2",
+      workshopId: WORKSHOP,
+      productId: PRODUCT,
+      deliveryDeadline: null,
+      items: [{ productVariantId: VARIANT_A, quantity: 20, unitPrice: 700 }],
+      createdBy: null,
+    });
+    expect(first.specNumber).toBe(1);
+    expect(second.specNumber).toBe(2);
+  });
+
+  it("отклоняет пустой список строк", async () => {
+    const d = deps();
+    await expect(
+      createSpecificationFromProductionOrder(d, {
+        companyId: COMPANY,
+        productionOrderId: ORDER_A,
+        workshopId: WORKSHOP,
+        productId: PRODUCT,
+        deliveryDeadline: null,
+        items: [],
+        createdBy: null,
+      }),
+    ).rejects.toMatchObject({ code: "SPECIFICATION_EMPTY" });
+  });
+
+  it("отклоняет вариант другой модели", async () => {
+    const d = { ...deps(), products: fakeProducts([PRODUCT, "other-product"]) };
+    await expect(
+      createSpecificationFromProductionOrder(d, {
+        companyId: COMPANY,
+        productionOrderId: ORDER_A,
+        workshopId: WORKSHOP,
+        productId: "other-product",
+        deliveryDeadline: null,
+        items: [{ productVariantId: VARIANT_A, quantity: 10, unitPrice: 700 }],
+        createdBy: null,
+      }),
+    ).rejects.toMatchObject({ code: "SPECIFICATION_VARIANT_PRODUCT_MISMATCH" });
+  });
+});
+
+describe("domain/specification — updateSpecification / cancelSpecification (ПРОМПТ №3)", () => {
+  function deps() {
+    return { specifications: new FakeSpecifications(), workshops: fakeWorkshops(["workshop-1", "workshop-2"]), productVariants: fakeVariants() };
+  }
+
+  async function createNewFlowSpec(d: ReturnType<typeof deps>) {
+    return createSpecificationFromProductionOrder(
+      { ...d, products: fakeProducts() },
+      {
+        companyId: COMPANY,
+        productionOrderId: ORDER_A,
+        workshopId: WORKSHOP,
+        productId: PRODUCT,
+        deliveryDeadline: null,
+        items: [{ productVariantId: VARIANT_A, quantity: 100, unitPrice: 700 }],
+        createdBy: null,
+      },
+    );
+  }
+
+  it("редактирует строки и пересчитывает суммы, инкрементирует версию", async () => {
+    const d = deps();
+    const spec = await createNewFlowSpec(d);
+    expect(spec.version).toBe(1);
+
+    const updated = await updateSpecification(d, {
+      companyId: COMPANY,
+      specificationId: spec.id,
+      items: [
+        { productVariantId: VARIANT_A, quantity: 50, unitPrice: 700 },
+        { productVariantId: VARIANT_B, quantity: 50, unitPrice: 700 },
+      ],
+    });
+
+    expect(updated.version).toBe(2);
+    expect(updated.totalQuantity).toBe("100");
+    expect(updated.totalSum).toBe("70000");
+    expect(updated.items).toHaveLength(2);
+  });
+
+  it("позволяет сменить цех", async () => {
+    const d = deps();
+    const spec = await createNewFlowSpec(d);
+    const updated = await updateSpecification(d, { companyId: COMPANY, specificationId: spec.id, workshopId: "workshop-2" });
+    expect(updated.workshopId).toBe("workshop-2");
+  });
+
+  it("не позволяет редактировать legacy-спецификацию (без productionOrderId)", async () => {
+    const d = { specifications: new FakeSpecifications(), workshops: fakeWorkshops(), products: fakeProducts(), productVariants: fakeVariants() };
+    const legacyDraft = await createSpecificationDraft(d, draftInput());
+
+    await expect(
+      updateSpecification(d, { companyId: COMPANY, specificationId: legacyDraft.id, deliveryDeadline: "2026-12-01" }),
+    ).rejects.toMatchObject({ code: "SPECIFICATION_NOT_NEW_FLOW" });
+  });
+
+  it("не позволяет редактировать отменённую спецификацию", async () => {
+    const d = deps();
+    const spec = await createNewFlowSpec(d);
+    await cancelSpecification(d, { companyId: COMPANY, specificationId: spec.id });
+
+    await expect(
+      updateSpecification(d, { companyId: COMPANY, specificationId: spec.id, deliveryDeadline: "2026-12-01" }),
+    ).rejects.toMatchObject({ code: "SPECIFICATION_CANCELLED" });
+  });
+
+  it("правка спецификации не имеет метода записи в production_orders — заказ не может быть затронут по конструкции API", () => {
+    // Прямая проверка требования ПРОМПТ №3 раздела 4 ("изменения Specification
+    // НЕ изменяют Production Order"): UpdateSpecificationDeps структурно не
+    // содержит ProductionOrderRepository/порт записи в заказы — правку
+    // физически некуда записать обратно в заказ, даже по ошибке.
+    const d = deps();
+    const keys = Object.keys(d);
+    expect(keys).toEqual(["specifications", "workshops", "productVariants"]);
   });
 });

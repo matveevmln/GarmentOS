@@ -3,21 +3,37 @@ import { type AnyPgColumn, date, index, integer, jsonb, numeric, pgEnum, pgTable
 import { auditColumns, id } from "./_shared";
 import { companies, users } from "./identity";
 import { products, productVariants } from "./catalog";
-import { workshops } from "./contract-manufacturing";
+import { productionOrders, workshops } from "./contract-manufacturing";
 
-// Спецификация — самостоятельная бизнес-сущность, первый шаг производства
-// (владелец проекта, 2026-09-11 — «Production Master»): создаётся ДО
-// производственной партии, а не как производный документ подтверждённого
-// заказа. Партия (production_orders) ссылается на утверждённую спецификацию
-// через production_orders.specification_id (добавлено миграцией Этапа 3,
-// 2026-09-12 — см. packages/db-schema/src/schema/contract-manufacturing.ts),
-// но не наоборот — спецификация ничего не знает о партии, и создание партии
-// никогда не меняет её status/snapshotJson/items (одна спецификация может
-// породить 0..N партий, требование владельца проекта).
+// Спецификация — редактируемый документ (ПРОМПТ №2/№2.1, владелец проекта,
+// уточнено 2026-09-16 — «Production Order → Specification»). ДВА
+// одновременно живых, ВЗАИМНО ИСКЛЮЧАЮЩИХ по направлению потока пути:
 //
-// PDF — представление сохранённой спецификации, не источник истины
-// (владелец проекта, критическое требование №7): документ генерируется из
-// snapshot_json, никогда наоборот.
+// LEGACY (Production Master, 2026-09-11): спецификация создаётся ДО партии,
+// проходит draft -> approve (снимок замораживается, номер резервируется),
+// партия создаётся ИЗ утверждённой спецификации и ссылается на неё через
+// production_orders.specification_id (contract-manufacturing.ts). Этот путь
+// НЕ меняется и не удаляется — читается только для обратной совместимости.
+//
+// NEW (ПРОМПТ №3): партия создаётся ПЕРВОЙ. Специфика создаётся кнопкой
+// «Создать спецификацию» ИЗ уже существующей партии и ссылается на неё через
+// specifications.production_order_id (эта колонка, ниже) — обратное
+// направление FK, не то же самое поле. Номер резервируется СРАЗУ при
+// создании (не при approve), статус выставляется сразу 'approved' (то же
+// значение enum, что и legacy — physически enum не меняется, п.6
+// ПРОМПТ №2.1 — но для нового потока это означает не «согласовано», а просто
+// «не черновик, готов к использованию»), редактирование строк разрешено в
+// любой момент, пока status != 'cancelled' (не только пока 'draft', как в
+// legacy). PDF генерируется из ТЕКУЩЕГО состояния специфики (не из
+// snapshot_json — тот остаётся только для legacy-пути и для коммерческих
+// полей cost_snapshot партии, см. specification.service.ts).
+//
+// Обе колонки-связи (production_orders.specification_id ЗДЕСЬ,
+// specifications.production_order_id НИЖЕ) — НЕ конкурирующие источники
+// истины для одной и той же пары: каждая пишется только своим потоком,
+// никогда обеими одновременно для одной пары заказ+спецификация. Единая
+// точка чтения — resolveOrderSpecificationLink
+// (apps/api/src/specification/order-specification-link.resolver.ts).
 export const specificationStatusEnum = pgEnum("specification_status", ["draft", "approved", "cancelled"]);
 
 export const specifications = pgTable(
@@ -37,6 +53,12 @@ export const specifications = pgTable(
     productId: uuid("product_id")
       .notNull()
       .references(() => products.id),
+    // NEW-поток (ПРОМПТ №3): заказ, ИЗ которого создана эта спецификация —
+    // 1:1 (одна партия -> максимум одна спецификация нового потока; в
+    // отличие от legacy-направления, где 1 спецификация -> N партий).
+    // NULL для спецификаций, созданных legacy-путём (там связь обратная —
+    // production_orders.specification_id).
+    productionOrderId: uuid("production_order_id").references(() => productionOrders.id),
     // Номер, который буквально появляется в тексте PDF («Спецификация №7») —
     // NULL, пока черновик не утверждён (владелец проекта, требование №11:
     // резервируется атомарно в момент approve, не при создании черновика —
@@ -85,6 +107,12 @@ export const specifications = pgTable(
       .where(sql`${table.specNumber} IS NOT NULL`),
     index("specifications_company_status_idx").on(table.companyId, table.status),
     index("specifications_based_on_idx").on(table.basedOnSpecificationId),
+    // 1:1 для NEW-потока — одна партия не может породить две спецификации
+    // этим путём (сколько угодно раз можно перегенерировать PDF, но не
+    // создать вторую строку specifications для того же заказа).
+    uniqueIndex("specifications_production_order_idx")
+      .on(table.productionOrderId)
+      .where(sql`${table.productionOrderId} IS NOT NULL`),
   ],
 );
 

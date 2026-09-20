@@ -47,7 +47,12 @@ function statusForCode(code: string): number {
     code.endsWith("_NOT_IN_PROGRESS") ||
     code.endsWith("_NOT_READY_FOR_PICKUP") ||
     code.endsWith("_NOT_RECEIVED") ||
-    code.endsWith("_INVALID_STATUS_TRANSITION")
+    code.endsWith("_INVALID_STATUS_TRANSITION") ||
+    // Откат статуса (ПРОМПТ №2.1/№3, раздел 9) — все пять причин отказа
+    // (кроме отсутствия обязательной причины — та BAD_REQUEST) описывают
+    // конфликт с текущим состоянием заказа, тот же класс ошибок, что и
+    // остальные строки выше.
+    (code.startsWith("PRODUCTION_ORDER_ROLLBACK_") && code !== "PRODUCTION_ORDER_ROLLBACK_REASON_REQUIRED")
   ) {
     return HttpStatus.CONFLICT;
   }

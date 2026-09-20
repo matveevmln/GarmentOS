@@ -1,14 +1,14 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  type BomResponseDto,
   type DocumentResponseDto,
-  type MaterialResponseDto,
+  type PresetResponseDto,
   type ProductResponseDto,
   type ProductVariantResponseDto,
   type ProductionOrderResponseDto,
   type PreviewProductionOrderVariantsResponseDto,
   type ProductionOrderVariantDraft,
+  type SizeDistributionMode,
   type SpecificationResponseDto,
   type WarehouseResponseDto,
   type WorkshopResponseDto,
@@ -20,31 +20,41 @@ import { Button } from "../design-system/Button/Button";
 import { PageHeader, Breadcrumbs } from "../design-system/PageHeader/PageHeader";
 import { SearchBar } from "../design-system/Search/SearchBar";
 import { EmptyState } from "../design-system/Feedback/EmptyState";
-import { Accordion, BatchCard } from "../design-system/Blocks";
-import { formatQuantity, unitLabel } from "../lib/format";
+import { Accordion, BatchCard, usePhotoUrl } from "../design-system/Blocks";
+import { formatQuantity } from "../lib/format";
 import { buildBatchCardFromOrder } from "../lib/batch-card";
 import { Combobox } from "../design-system/Select/Combobox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../design-system/Select/Select";
-import { MoneyInput, NumberInput } from "../design-system/Input/NumberInput";
+import { NumberInput } from "../design-system/Input/NumberInput";
 import { DatePicker } from "../design-system/Form/DatePicker";
 import { SkeletonList } from "../design-system/Feedback/Skeleton";
 import { ErrorState } from "../design-system/Feedback/ErrorState";
-import { Tooltip, TooltipContent, TooltipTrigger } from "../design-system/Tooltip/Tooltip";
 import { toast } from "../design-system/Toast/Toast";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "../design-system/Modal/Dialog";
+import { cn } from "../design-system/utils";
 
 // Форма-эталон (docs/UI_FOUNDATION.md, шаг 5) — первый экран, полностью
 // собранный из GarmentInput/GarmentSelect/GarmentDatePicker/GarmentButton/
 // GarmentCard вместо голого HTML. После утверждения владельцем — образец
 // для переноса остальных 7 форм (не переносятся в этом же цикле работ).
 const STATUS_FILTERS: FilterOption<
-  "all" | "draft" | "placed" | "in_progress" | "ready_for_pickup" | "received" | "completed"
+  | "all"
+  | "draft"
+  | "placed"
+  | "in_progress"
+  | "sewing_completed"
+  | "ready_for_pickup"
+  | "shipped_to_fulfillment"
+  | "received"
+  | "completed"
 >[] = [
   { value: "all", label: "Все" },
   { value: "draft", label: "Черновик" },
   { value: "placed", label: "Размещён" },
   { value: "in_progress", label: "В работе" },
+  { value: "sewing_completed", label: "Пошив завершён" },
   { value: "ready_for_pickup", label: "Готово" },
+  { value: "shipped_to_fulfillment", label: "На фулфилменте" },
   { value: "received", label: "Принято" },
   { value: "completed", label: "Завершена" },
 ];
@@ -55,9 +65,7 @@ export function ProductionOrdersPage() {
   const [products, setProducts] = useState<ProductResponseDto[]>([]);
   const [workshops, setWorkshops] = useState<WorkshopResponseDto[]>([]);
   const [warehouses, setWarehouses] = useState<WarehouseResponseDto[]>([]);
-  const [materials, setMaterials] = useState<MaterialResponseDto[]>([]);
   const [variants, setVariants] = useState<ProductVariantResponseDto[]>([]);
-  const [approvedBom, setApprovedBom] = useState<BomResponseDto | null>(null);
 
   const [productId, setProductId] = useState("");
   const [workshopId, setWorkshopId] = useState("");
@@ -68,9 +76,20 @@ export function ProductionOrdersPage() {
   // по размерам, пользователь при необходимости правит отдельные ячейки —
   // и только потом сохраняет (владелец проекта, 2026-08-30).
   const [colorRows, setColorRows] = useState<Array<{ color: string; quantity: number | undefined }>>([]);
+  // Режим распределения размеров (ПРОМПТ №3, раздел 3) — "Равномерно" делит
+  // количество поровну между размерами, "Стандарт производства" — по весам
+  // размерного ряда карточки модели (уже существующий distributeQuantityByRatio).
+  const [distributionMode, setDistributionMode] = useState<SizeDistributionMode>("ratio");
   const [matrix, setMatrix] = useState<PreviewProductionOrderVariantsResponseDto | null>(null);
   const [matrixQuantities, setMatrixQuantities] = useState<Record<string, number>>({});
   const [isPreviewing, setIsPreviewing] = useState(false);
+
+  // Пресеты стоимости пошива (ПРОМПТ №3, раздел 5) — сохранённые значения
+  // вместо повторного ручного ввода каждый раз; новое значение сохраняется
+  // для будущего выбора через POST /presets.
+  const [sewingCostPresets, setSewingCostPresets] = useState<PresetResponseDto[]>([]);
+  const [customSewingCost, setCustomSewingCost] = useState<number | undefined>(undefined);
+  const [isSavingPreset, setIsSavingPreset] = useState(false);
 
   const [pendingVariantId, setPendingVariantId] = useState("");
   const [pendingQuantity, setPendingQuantity] = useState<number | undefined>(undefined);
@@ -99,9 +118,6 @@ export function ProductionOrdersPage() {
       apiRequest<ProductResponseDto[]>("/products").then(setProducts),
       apiRequest<WorkshopResponseDto[]>("/workshops").then(setWorkshops),
       apiRequest<WarehouseResponseDto[]>("/warehouses").then(setWarehouses),
-      // Материалы нужны, чтобы показать потребность по нормам понятными
-      // словами («ткань, 1 365 м»), а не идентификаторами.
-      apiRequest<MaterialResponseDto[]>("/materials").then(setMaterials),
       apiRequest<SpecificationResponseDto[]>("/specifications").then(setSpecifications),
     ]).catch(() => setReferenceError(true));
   };
@@ -131,14 +147,51 @@ export function ProductionOrdersPage() {
   useEffect(() => {
     if (!productId) {
       setVariants([]);
-      setApprovedBom(null);
       return;
     }
     void apiRequest<ProductVariantResponseDto[]>(`/product-variants?productId=${productId}`).then(setVariants);
-    apiRequest<BomResponseDto>(`/boms/approved?productId=${productId}`)
-      .then(setApprovedBom)
-      .catch(() => setApprovedBom(null));
+    // Фото модели для визарда (ПРОМПТ №3, раздел 1: "Модель → фото/название")
+    // — переиспользует ту же карту photoByProduct, что и карточки заказов
+    // ниже, не заводит отдельный запрос ради того же документа.
+    if (!(productId in photoByProduct)) {
+      void apiRequest<DocumentResponseDto[]>(`/documents?entityType=product&entityId=${productId}`)
+        .then((docs) => {
+          const photo = docs.find((doc) => doc.docType === "photo_product" && doc.isCurrentVersion) ?? null;
+          setPhotoByProduct((prev) => ({ ...prev, [productId]: photo?.id ?? null }));
+        })
+        .catch(() => setPhotoByProduct((prev) => ({ ...prev, [productId]: null })));
+    }
   }, [productId]);
+
+  // Пресеты стоимости пошива (ПРОМПТ №3, раздел 5) — загружаются один раз,
+  // сервер сам досеивает значения по умолчанию (350/380/450 сом) для новых
+  // компаний при первом обращении.
+  useEffect(() => {
+    apiRequest<PresetResponseDto[]>("/presets?kind=sewing_cost")
+      .then(setSewingCostPresets)
+      .catch(() => setSewingCostPresets([]));
+  }, []);
+
+  const selectedProductPhotoUrl = usePhotoUrl(photoByProduct[productId] ?? null);
+
+  const addSewingCostPreset = async () => {
+    if (!customSewingCost) return;
+    setIsSavingPreset(true);
+    try {
+      const preset = await apiRequest<PresetResponseDto>("/presets", {
+        method: "POST",
+        body: { kind: "sewing_cost", value: customSewingCost, currency: "KGS" },
+      });
+      setSewingCostPresets((prev) => (prev.some((p) => p.id === preset.id) ? prev : [...prev, preset]));
+      setUnitPrice(Number(preset.value));
+      setCustomSewingCost(undefined);
+      toast.success("Значение сохранено — доступно при следующем выборе");
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Не удалось сохранить значение");
+    } finally {
+      setIsSavingPreset(false);
+    }
+  };
 
   const productName = (id: string) => products.find((p) => p.id === id)?.name ?? id;
   const workshopName = (id: string) => workshops.find((w) => w.id === id)?.name ?? id;
@@ -160,7 +213,7 @@ export function ProductionOrdersPage() {
         "/production-orders/preview-variants",
         {
           method: "POST",
-          body: { productId, colors: rows.map((row) => ({ color: row.color, quantity: row.quantity })) },
+          body: { productId, colors: rows.map((row) => ({ color: row.color, quantity: row.quantity })), distributionMode },
         },
       );
       setMatrix(preview);
@@ -196,44 +249,18 @@ export function ProductionOrdersPage() {
     : lines;
   const totalQuantity = effectiveLines.reduce((sum, line) => sum + line.quantity, 0);
 
-  // Предварительный расчёт потребности в материалах: сколько ткани и
-  // фурнитуры уйдёт на набранное количество. Показывается до создания
-  // заказа — чтобы решение «делать партию 500 или 300» принималось со
-  // знанием, хватит ли материала, а не постфактум.
-  //
-  // Формула та же, что применяет сервер к зафиксированным нормам партии
-  // (apps/api/src/reporting/batch-passport.service.ts, computeMaterialRequirement):
-  // расход на изделие = норма × (1 + отходы%), потребность = расход × количество.
-  // Это именно предварительный расчёт по сегодняшним нормам модели —
-  // окончательные числа партии определяются нормами, которые зафиксируются
-  // при подтверждении заказа.
-  const previewRequirement =
-    approvedBom && totalQuantity > 0
-      ? approvedBom.items.flatMap((item) => {
-          const material = materials.find((row) => row.id === item.materialId);
-          if (!material) return [];
-          const consumptionPerUnit = Number(item.quantityPerUnit) * (1 + Number(item.wastePercent) / 100);
-          return [
-            {
-              materialId: item.materialId,
-              name: material.name,
-              unit: material.unit,
-              consumptionPerUnit,
-              totalRequired: consumptionPerUnit * totalQuantity,
-            },
-          ];
-        })
-      : [];
+  // ПРОМПТ №3, раздел 6 — материалы/BOM не показываются и не проверяются в
+  // этом визарде: предпросмотр потребности в материалах убран вместе с
+  // требованием approvedBom (backend сам находит/заводит BOM прозрачно).
 
   const submitOrder = async () => {
-    if (!productId || !workshopId || !approvedBom || !unitPrice || effectiveLines.length === 0) return;
+    if (!productId || !workshopId || !unitPrice || effectiveLines.length === 0) return;
     setIsSubmitting(true);
     try {
       await apiRequest("/production-orders", {
         method: "POST",
         body: {
           productId,
-          bomId: approvedBom.id,
           workshopId,
           plannedQuantity: totalQuantity,
           agreedUnitPrice: unitPrice,
@@ -275,12 +302,21 @@ export function ProductionOrdersPage() {
   // только через Telegram-ответ цеха. Единственный способ провести партию
   // дальше «Размещён» из интерфейса, пока Telegram не настроен ни для
   // одного цеха на пилоте.
-  const changeStatus = async (orderId: string, status: "in_progress" | "ready_for_pickup") => {
+  const ORDER_STATUS_LABELS: Record<string, string> = {
+    in_progress: "Начали шить",
+    sewing_completed: "Пошив завершён",
+    ready_for_pickup: "Готово к отгрузке",
+    shipped_to_fulfillment: "Отправлено на фулфилмент",
+  };
+  const changeStatus = async (
+    orderId: string,
+    status: "in_progress" | "sewing_completed" | "ready_for_pickup" | "shipped_to_fulfillment",
+  ) => {
     setPendingOrderAction(orderId);
     try {
       await apiRequest(`/production-orders/${orderId}/status`, { method: "POST", body: { status } });
       await reload();
-      toast.success(status === "in_progress" ? "Заказ переведён «В работе»" : "Заказ переведён «Готово к отгрузке»");
+      toast.success(`Заказ переведён «${ORDER_STATUS_LABELS[status]}»`);
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "Не удалось сменить статус заказа");
     } finally {
@@ -384,7 +420,11 @@ export function ProductionOrdersPage() {
         // Сама форма и её логика не изменены, только убрана из-под первого
         // взгляда: создание заказа здесь — редкое действие, основной путь
         // теперь Модель → Спецификация → Партия.
-        <Accordion title="Новый заказ пошива" hint="создать вручную">
+        // ПРОМПТ №3, раздел 1 — визард в новом порядке: модель (фото/название
+        // подтягиваются сами) → цвета/количество → распределение размеров →
+        // матрица → стоимость пошива (пресеты) → цех → создать. Без BOM,
+        // материалов и проверки склада (раздел 6 — явные исключения).
+        <Accordion title="Создать производственную партию" hint="модель → количество → цех">
           <div className="flex flex-col gap-4">
             <label className="flex flex-col gap-1.5 text-[0.9rem] font-semibold text-muted-foreground">
               Модель
@@ -397,49 +437,16 @@ export function ProductionOrdersPage() {
               />
             </label>
 
-            {productId && !approvedBom && (
-              <p className="text-[0.85rem] font-semibold text-destructive">
-                У этой модели не заданы нормы расхода материалов — задайте их на карточке модели.
-              </p>
+            {productId && (
+              <div className="flex items-center gap-3 rounded-[12px] border border-border bg-secondary/40 p-3">
+                {selectedProductPhotoUrl ? (
+                  <img src={selectedProductPhotoUrl} alt="" className="h-12 w-12 rounded-[8px] object-cover" />
+                ) : (
+                  <div className="h-12 w-12 rounded-[8px] bg-muted" />
+                )}
+                <span className="t-object">{productName(productId)}</span>
+              </div>
             )}
-
-            <label className="flex flex-col gap-1.5 text-[0.9rem] font-semibold text-muted-foreground">
-              Цех
-              <Combobox
-                value={workshopId}
-                onChange={setWorkshopId}
-                placeholder="Выберите цех"
-                searchPlaceholder="Поиск цеха..."
-                options={workshops.map((workshop) => ({ value: workshop.id, label: workshop.name }))}
-              />
-            </label>
-
-            <label className="flex flex-col gap-1.5 text-[0.9rem] font-semibold text-muted-foreground">
-              <span className="inline-flex items-center gap-1.5">
-                Цена пошива за единицу
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <button
-                      type="button"
-                      className="h-4 min-h-0 w-4 rounded-full bg-transparent p-0 text-muted-foreground/70 shadow-none hover:text-muted-foreground"
-                      aria-label="Пояснение"
-                    >
-                      <svg viewBox="0 0 20 20" fill="none" className="h-3.5 w-3.5">
-                        <circle cx="10" cy="10" r="8.5" stroke="currentColor" strokeWidth="1.5" />
-                        <path d="M10 9v4.5M10 6.5v.01" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-                      </svg>
-                    </button>
-                  </TooltipTrigger>
-                  <TooltipContent>Расчёты с цехами ведутся в рублях (docs/PRINCIPLES.md, принцип 21)</TooltipContent>
-                </Tooltip>
-              </span>
-              <MoneyInput currency="₽" value={unitPrice} onChange={setUnitPrice} />
-            </label>
-
-            <label className="flex flex-col gap-1.5 text-[0.9rem] font-semibold text-muted-foreground">
-              Срок сдачи
-              <DatePicker value={dueDate} onChange={setDueDate} />
-            </label>
 
             {/* Матрица размер × цвет. Выбираем цвета с количеством, система
                 раскладывает по размерам из карточки модели, ячейки можно
@@ -457,6 +464,34 @@ export function ProductionOrdersPage() {
                   Добавить цвет
                 </Button>
               </div>
+
+              {/* Режим распределения размеров (ПРОМПТ №3, раздел 3) —
+                  "Равномерно" делит количество поровну между размерами,
+                  "Стандарт производства" — по весам размерного ряда модели. */}
+              {colorRows.length > 0 && (
+                <div className="flex items-center gap-1 self-start rounded-[10px] border border-border bg-secondary/40 p-0.5">
+                  <button
+                    type="button"
+                    onClick={() => setDistributionMode("even")}
+                    className={cn(
+                      "rounded-[8px] px-2.5 py-1.5 text-[12.5px] font-medium transition-colors",
+                      distributionMode === "even" ? "bg-card shadow-sm" : "text-muted-foreground",
+                    )}
+                  >
+                    Равномерно
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDistributionMode("ratio")}
+                    className={cn(
+                      "rounded-[8px] px-2.5 py-1.5 text-[12.5px] font-medium transition-colors",
+                      distributionMode === "ratio" ? "bg-card shadow-sm" : "text-muted-foreground",
+                    )}
+                  >
+                    Стандарт производства
+                  </button>
+                </div>
+              )}
 
               {colorRows.map((row, index) => (
                 <div key={index} className="flex flex-wrap items-end gap-2">
@@ -589,6 +624,62 @@ export function ProductionOrdersPage() {
               )}
             </div>
 
+            {/* Стоимость пошива — сохранённые значения вместо повторного
+                ручного ввода (ПРОМПТ №3, раздел 5): 350/380/450 сом плюс
+                возможность добавить и сохранить своё. */}
+            <div className="flex flex-col gap-2">
+              <span className="text-[0.9rem] font-semibold text-muted-foreground">Стоимость пошива за единицу</span>
+              <div className="flex flex-wrap items-center gap-2">
+                {sewingCostPresets.map((preset) => (
+                  <button
+                    key={preset.id}
+                    type="button"
+                    onClick={() => setUnitPrice(Number(preset.value))}
+                    className={cn(
+                      "rounded-[10px] border px-3 py-1.5 text-[13px] font-medium transition-colors",
+                      unitPrice === Number(preset.value)
+                        ? "border-primary bg-primary/10 text-primary"
+                        : "border-border bg-card text-muted-foreground hover:border-primary/30",
+                    )}
+                  >
+                    {formatQuantity(Number(preset.value))} {preset.currency === "KGS" ? "сом" : preset.currency}
+                  </button>
+                ))}
+              </div>
+              <div className="flex flex-wrap items-end gap-2">
+                <label className="flex w-[140px] flex-col gap-1.5 text-[12px] font-medium text-muted-foreground">
+                  Своё значение
+                  <NumberInput value={customSewingCost} onChange={setCustomSewingCost} min={0} />
+                </label>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  loading={isSavingPreset}
+                  disabled={!customSewingCost}
+                  onClick={() => void addSewingCostPreset()}
+                >
+                  Сохранить и выбрать
+                </Button>
+              </div>
+            </div>
+
+            <label className="flex flex-col gap-1.5 text-[0.9rem] font-semibold text-muted-foreground">
+              Цех
+              <Combobox
+                value={workshopId}
+                onChange={setWorkshopId}
+                placeholder="Выберите цех"
+                searchPlaceholder="Поиск цеха..."
+                options={workshops.map((workshop) => ({ value: workshop.id, label: workshop.name }))}
+              />
+            </label>
+
+            <label className="flex flex-col gap-1.5 text-[0.9rem] font-semibold text-muted-foreground">
+              Срок сдачи (необязательно)
+              <DatePicker value={dueDate} onChange={setDueDate} />
+            </label>
+
             <div className="flex flex-col gap-3 rounded-[16px] bg-secondary p-3.5 sm:flex-row sm:items-end sm:flex-wrap">
               <label className="flex flex-1 min-w-[140px] flex-col gap-1.5 text-[0.9rem] font-semibold text-muted-foreground">
                 Размер и цвет
@@ -625,32 +716,10 @@ export function ProductionOrdersPage() {
               </ul>
             )}
 
-            {previewRequirement.length > 0 && (
-              <div className="rounded-[16px] border border-border bg-secondary/50 p-3.5">
-                <div className="text-[0.9rem] font-semibold">
-                  Потребуется материалов на {formatQuantity(totalQuantity, "изделий")}
-                </div>
-                <ul className="m-0 mt-2 list-none p-0 text-[0.9rem] text-muted-foreground">
-                  {previewRequirement.map((row) => (
-                    <li key={row.materialId} className="flex justify-between gap-3 border-b border-border py-1.5 last:border-none">
-                      <span>{row.name}</span>
-                      <span className="tabular-nums">
-                        {formatQuantity(row.totalRequired, unitLabel(row.unit), 2)}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-                <p className="mt-2 text-[0.8rem] text-muted-foreground">
-                  Предварительно, по нормам расхода из карточки модели. Нормы этой партии зафиксируются при
-                  подтверждении заказа и дальше меняться не будут.
-                </p>
-              </div>
-            )}
-
             <Button
               type="button"
               loading={isSubmitting}
-              disabled={!productId || !workshopId || !approvedBom || !unitPrice || effectiveLines.length === 0}
+              disabled={!productId || !workshopId || !unitPrice || effectiveLines.length === 0}
               onClick={() => void submitOrder()}
             >
               {isSubmitting ? "Создаём заказ..." : "Создать заказ пошива"}
@@ -765,9 +834,29 @@ export function ProductionOrdersPage() {
                       size="sm"
                       variant="secondary"
                       loading={pendingOrderAction === row.id}
+                      onClick={() => void changeStatus(row.id, "sewing_completed")}
+                    >
+                      Пошив завершён
+                    </Button>
+                  ) : row.status === "sewing_completed" ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="secondary"
+                      loading={pendingOrderAction === row.id}
                       onClick={() => void changeStatus(row.id, "ready_for_pickup")}
                     >
                       Готово к отгрузке
+                    </Button>
+                  ) : row.status === "ready_for_pickup" ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="secondary"
+                      loading={pendingOrderAction === row.id}
+                      onClick={() => void changeStatus(row.id, "shipped_to_fulfillment")}
+                    >
+                      Отправлено на фулфилмент
                     </Button>
                   ) : undefined
                   // Отдельной кнопки «Принять партию» здесь больше нет:

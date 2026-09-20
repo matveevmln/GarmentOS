@@ -6,6 +6,7 @@ export { DomainError } from "./domain/errors";
 export type { BomRepository, NewBomInput } from "./application/ports";
 export { createBomDraft, type CreateBomDraftDeps, type CreateBomDraftInput } from "./application/create-bom";
 export { approveBom, type ApproveBomDeps, type ApproveBomInput } from "./application/approve-bom";
+export { createEmptyBom, type CreateEmptyBomDeps, type CreateEmptyBomInput } from "./application/create-empty-bom";
 export {
   getApprovedBom,
   type GetApprovedBomDeps,

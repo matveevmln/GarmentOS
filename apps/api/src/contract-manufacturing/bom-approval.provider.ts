@@ -1,6 +1,6 @@
 import type { Provider } from "@nestjs/common";
 import type { Database } from "@garmentos/db-schema";
-import { DrizzleBomRepository, getApprovedBom } from "@garmentos/domain-bom";
+import { approveBom, createEmptyBom, DrizzleBomRepository, getApprovedBom } from "@garmentos/domain-bom";
 import type { BomApprovalPort } from "@garmentos/domain-contract-manufacturing";
 import { DATABASE_CONNECTION } from "../database/database.module";
 import { BOM_APPROVAL_PORT } from "./contract-manufacturing.tokens";
@@ -20,6 +20,15 @@ export const bomApprovalProvider: Provider = {
       async isBomApproved(companyId, bomId, productId) {
         const approved = await getApprovedBom({ boms }, { companyId, productId });
         return approved?.id === bomId;
+      },
+      // ПРОМПТ №3, раздел 8 — см. комментарий на BomApprovalPort.
+      async ensureApprovedBomForProduct(companyId, productId, createdBy) {
+        const existing = await getApprovedBom({ boms }, { companyId, productId });
+        if (existing) return existing.id;
+
+        const draft = await createEmptyBom({ boms }, { companyId, productId, createdBy });
+        const approved = await approveBom({ boms }, { companyId, bomId: draft.id });
+        return approved.id;
       },
     };
   },

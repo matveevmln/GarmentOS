@@ -19,6 +19,7 @@ export interface NewWorkshopInput {
   deliveryMethod: string | null;
   signerRole: string | null;
   signerName: string | null;
+  legalAddress: string | null;
   createdBy: string | null;
 }
 
@@ -38,6 +39,7 @@ export interface WorkshopPatch {
   deliveryMethod?: string | null;
   signerRole?: string | null;
   signerName?: string | null;
+  legalAddress?: string | null;
 }
 
 export interface WorkshopRepository {
@@ -124,4 +126,20 @@ export interface ProductionOrderRepository {
 // только к инфраструктуре).
 export interface BomApprovalPort {
   isBomApproved(companyId: string, bomId: string, productId: string): Promise<boolean>;
+  // ПРОМПТ №3, раздел 8 — новый визард заказа пошива не требует выбора BOM.
+  // Возвращает id уже существующего approved BOM модели; если такого нет —
+  // прозрачно заводит и утверждает пустой BOM (0 позиций материалов) и
+  // возвращает его id. bom_id в production_orders остаётся NOT NULL — этот
+  // метод существует, чтобы вызывающему никогда не приходилось создавать BOM
+  // самому/показывать его пользователю.
+  ensureApprovedBomForProduct(companyId: string, productId: string, createdBy: string | null): Promise<string>;
+}
+
+// Порт в модуль QC (ПРОМПТ №2.1, раздел C / ПРОМПТ №3, раздел 9) — узкий
+// срез, нужный только rollbackProductionOrderStatus, чтобы запретить откат
+// статуса, для которого уже зафиксирован результат ОТК (тот же паттерн
+// Dependency Inversion, что и BomApprovalPort — Contract Manufacturing не
+// импортирует @garmentos/domain-qc напрямую).
+export interface QcResultLookupPort {
+  hasResultForOrder(companyId: string, productionOrderId: string): Promise<boolean>;
 }

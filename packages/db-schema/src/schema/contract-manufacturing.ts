@@ -17,7 +17,16 @@ export const productionOrderStatusEnum = pgEnum("production_order_status", [
   "draft",
   "placed",
   "in_progress",
+  // sewing_completed / shipped_to_fulfillment — ПРОМПТ №2.1 (владелец
+  // проекта, п.1-2): два новых явных факта между "пошив" и "приёмка",
+  // каждый — только ручное действие пользователя, никогда не выводится
+  // автоматически (например, из завершения раскроя или из чего-либо ещё).
+  // Существующая терпимость к пропуску промежуточных статусов (например,
+  // placed -> ready_for_pickup напрямую) сохранена и для этих двух —
+  // цех не всегда отчитывается по каждому шагу.
+  "sewing_completed",
   "ready_for_pickup",
+  "shipped_to_fulfillment",
   "received",
   // completed — партия закрыта явным действием пользователя после приёмки
   // (и, как правило, после ОТК) — ПРОМПТ №10.1/10.2 (владелец проекта,
@@ -54,6 +63,10 @@ export const workshops = pgTable("workshops", {
   // корректного заголовка спецификации; nullable, пока договор не заведён.
   contractNumber: text("contract_number"),
   contractDate: text("contract_date"),
+  // Юр.адрес цеха — нужен ровно для одного места: строка "Производитель: ..."
+  // в PDF спецификации (эталон, ПРОМПТ №2.2/№3, пункт 5). Не отдельная
+  // универсальная таблица адресов — минимум, нужный только этому полю.
+  legalAddress: text("legal_address"),
   // Следующий номер спецификации по этому договору — атомарно увеличивается
   // при каждой генерации (docs/DOCUMENT_ENGINE_ARCHITECTURE.md, Итерация 7).
   nextSpecificationNumber: integer("next_specification_number").notNull().default(1),

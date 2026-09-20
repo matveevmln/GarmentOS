@@ -7,6 +7,7 @@ export type {
   ProductionOrderVariant,
   ProductionOrderVariantDraft,
   ProductionOrderVariantType,
+  WorkshopReportableStatus,
 } from "./domain/production-order";
 export {
   assertVariantsMatchPlannedQuantity,
@@ -16,6 +17,7 @@ export {
   assertSourceOrderIsNotSelf,
   assertSourceOrderExists,
   assertCanComplete,
+  assertCanRollbackStatus,
 } from "./domain/production-order";
 export { DomainError } from "./domain/errors";
 
@@ -24,6 +26,7 @@ export type {
   NewProductionOrderInput,
   NewWorkshopInput,
   ProductionOrderRepository,
+  QcResultLookupPort,
   WorkshopPatch,
   WorkshopRepository,
 } from "./application/ports";
@@ -74,6 +77,12 @@ export {
   type CompleteProductionOrderDeps,
   type CompleteProductionOrderInput,
 } from "./application/complete-production-order";
+export {
+  rollbackProductionOrderStatus,
+  type RollbackProductionOrderStatusDeps,
+  type RollbackProductionOrderStatusInput,
+  type RollbackProductionOrderStatusResult,
+} from "./application/rollback-production-order-status";
 
 export {
   DrizzleProductionOrderRepository,

@@ -1,11 +1,11 @@
 import { DomainError } from "../domain/errors";
-import { assertCanUpdateStatusFromWorkshop, type ProductionOrder } from "../domain/production-order";
+import { assertCanUpdateStatusFromWorkshop, type ProductionOrder, type WorkshopReportableStatus } from "../domain/production-order";
 import type { ProductionOrderRepository } from "./ports";
 
 export interface UpdateProductionOrderStatusInput {
   companyId: string;
   productionOrderId: string;
-  status: "in_progress" | "ready_for_pickup";
+  status: WorkshopReportableStatus;
 }
 
 export interface UpdateProductionOrderStatusDeps {

@@ -9,9 +9,12 @@ import {
   previewProductionOrderVariantsSchema,
   productionOrderResponseSchema,
   receiveProductionOrderSchema,
+  rollbackProductionOrderStatusResponseSchema,
+  rollbackProductionOrderStatusSchema,
   updateProductionOrderStatusSchema,
   type PreviewProductionOrderVariantsResponseDto,
   type ProductionOrderResponseDto,
+  type RollbackProductionOrderStatusResponseDto,
 } from "@garmentos/shared-types";
 import { CurrentUser, type AuthenticatedRequestUser } from "../auth/current-user.decorator";
 import { RequirePermissions } from "../auth/require-permissions.decorator";
@@ -22,6 +25,7 @@ class CreateProductionOrderFromQuantityDto extends createZodDto(createProduction
 class ReceiveProductionOrderDto extends createZodDto(receiveProductionOrderSchema) {}
 class PreviewProductionOrderVariantsDto extends createZodDto(previewProductionOrderVariantsSchema) {}
 class UpdateProductionOrderStatusDto extends createZodDto(updateProductionOrderStatusSchema) {}
+class RollbackProductionOrderStatusDto extends createZodDto(rollbackProductionOrderStatusSchema) {}
 class ListProductionOrdersQueryDto extends createZodDto(listProductionOrdersQuerySchema) {}
 
 @ApiTags("production-orders")
@@ -103,6 +107,21 @@ export class ProductionOrdersController {
       body.status,
     );
     return productionOrderResponseSchema.parse(productionOrder);
+  }
+
+  // Контролируемый rollback (ПРОМПТ №2.1, раздел C / ПРОМПТ №3, раздел 9) —
+  // отдельное право (не contract_manufacturing.write): только owner/director
+  // по умолчанию (миграция 0033). reason обязателен (валидируется схемой);
+  // целевой статус вычисляется доменом, не принимается от клиента.
+  @RequirePermissions("contract_manufacturing.rollback")
+  @Post(":id/rollback-status")
+  async rollbackStatus(
+    @Param("id") id: string,
+    @Body() body: RollbackProductionOrderStatusDto,
+    @CurrentUser() currentUser: AuthenticatedRequestUser,
+  ): Promise<RollbackProductionOrderStatusResponseDto> {
+    const result = await this.contractManufacturingService.rollbackProductionOrderStatus(currentUser, id, body.reason);
+    return rollbackProductionOrderStatusResponseSchema.parse(result);
   }
 
   // Приёмка партии на склад (Итерация 10) — доступна только когда цех

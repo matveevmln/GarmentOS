@@ -1,8 +1,8 @@
 import { specifications, specificationItems, type DbOrTx } from "@garmentos/db-schema";
-import { and, asc, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { DomainError } from "../domain/errors";
 import type { Specification, SpecificationItem, SpecificationSnapshot, SpecificationStatus } from "../domain/specification";
-import type { NewSpecificationInput, SpecificationRepository } from "../application/ports";
+import type { NewSpecificationInput, SpecificationRepository, SpecificationUpdatePatch } from "../application/ports";
 
 type SpecificationRow = typeof specifications.$inferSelect;
 type SpecificationItemRow = typeof specificationItems.$inferSelect;
@@ -25,6 +25,7 @@ function toSpecification(row: SpecificationRow, itemRows: SpecificationItemRow[]
     companyId: row.companyId,
     workshopId: row.workshopId,
     productId: row.productId,
+    productionOrderId: row.productionOrderId,
     specNumber: row.specNumber,
     status: row.status,
     version: row.version,
@@ -56,9 +57,12 @@ export class DrizzleSpecificationRepository implements SpecificationRepository {
           companyId: input.companyId,
           workshopId: input.workshopId,
           productId: input.productId,
+          productionOrderId: input.productionOrderId ?? null,
           status: input.status,
           version: input.version,
           basedOnSpecificationId: input.basedOnSpecificationId,
+          specNumber: input.specNumber ?? null,
+          prepaymentAmount: input.prepaymentAmount !== undefined && input.prepaymentAmount !== null ? String(input.prepaymentAmount) : null,
           deliveryDeadline: input.deliveryDeadline,
           totalQuantity: String(input.totalQuantity),
           totalSum: String(input.totalSum),
@@ -163,6 +167,85 @@ export class DrizzleSpecificationRepository implements SpecificationRepository {
         "SPECIFICATION_NOT_DRAFT",
       );
     }
+
+    const itemRows = await this.db
+      .select()
+      .from(specificationItems)
+      .where(eq(specificationItems.specificationId, specRow.id))
+      .orderBy(asc(specificationItems.sortOrder));
+    return toSpecification(specRow, itemRows);
+  }
+
+  // NEW-поток (ПРОМПТ №3) — правка полей и, если переданы, полная замена
+  // строк (удалить все, вставить заново — тот же паттерн, что
+  // replaceProductSizes в catalog). Версия инкрементируется всегда, даже
+  // если менялись только workshopId/deliveryDeadline — единая точка "что-то
+  // изменилось с момента создания".
+  async update(companyId: string, id: string, patch: SpecificationUpdatePatch): Promise<Specification> {
+    return this.db.transaction(async (tx) => {
+      const [specRow] = await tx
+        .update(specifications)
+        .set({
+          ...(patch.workshopId !== undefined ? { workshopId: patch.workshopId } : {}),
+          ...(patch.deliveryDeadline !== undefined ? { deliveryDeadline: patch.deliveryDeadline } : {}),
+          ...(patch.totalQuantity !== undefined ? { totalQuantity: String(patch.totalQuantity) } : {}),
+          ...(patch.totalSum !== undefined ? { totalSum: String(patch.totalSum) } : {}),
+          version: sql`${specifications.version} + 1`,
+          updatedAt: new Date(),
+        })
+        .where(and(eq(specifications.id, id), eq(specifications.companyId, companyId)))
+        .returning();
+      if (!specRow) {
+        throw new DomainError(`Спецификация ${id} не найдена`, "SPECIFICATION_NOT_FOUND");
+      }
+
+      if (patch.items) {
+        await tx.delete(specificationItems).where(eq(specificationItems.specificationId, id));
+        await tx.insert(specificationItems).values(
+          patch.items.map((item, index) => ({
+            specificationId: id,
+            productVariantId: item.productVariantId,
+            quantity: String(item.quantity),
+            unitPrice: String(item.unitPrice),
+            sum: String(item.sum),
+            sortOrder: index,
+          })),
+        );
+      }
+
+      const itemRows = await tx
+        .select()
+        .from(specificationItems)
+        .where(eq(specificationItems.specificationId, id))
+        .orderBy(asc(specificationItems.sortOrder));
+      return toSpecification(specRow, itemRows);
+    });
+  }
+
+  async cancel(companyId: string, id: string): Promise<Specification> {
+    const [specRow] = await this.db
+      .update(specifications)
+      .set({ status: "cancelled", updatedAt: new Date() })
+      .where(and(eq(specifications.id, id), eq(specifications.companyId, companyId)))
+      .returning();
+    if (!specRow) {
+      throw new DomainError(`Спецификация ${id} не найдена`, "SPECIFICATION_NOT_FOUND");
+    }
+    const itemRows = await this.db
+      .select()
+      .from(specificationItems)
+      .where(eq(specificationItems.specificationId, specRow.id))
+      .orderBy(asc(specificationItems.sortOrder));
+    return toSpecification(specRow, itemRows);
+  }
+
+  async findByProductionOrderId(companyId: string, productionOrderId: string): Promise<Specification | null> {
+    const [specRow] = await this.db
+      .select()
+      .from(specifications)
+      .where(and(eq(specifications.companyId, companyId), eq(specifications.productionOrderId, productionOrderId)))
+      .limit(1);
+    if (!specRow) return null;
 
     const itemRows = await this.db
       .select()

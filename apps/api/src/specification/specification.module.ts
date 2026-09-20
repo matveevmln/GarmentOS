@@ -14,6 +14,7 @@ import {
   SpecificationWorkshopLookupAdapter,
 } from "./lookup-adapters";
 import { SpecificationsController } from "./specifications.controller";
+import { CreateSpecificationFromOrderController } from "./production-order-specification.controller";
 import {
   SPECIFICATION_PRODUCT_PORT,
   SPECIFICATION_PRODUCT_VARIANT_PORT,
@@ -29,7 +30,7 @@ import { SpecificationService } from "./specification.service";
 // сервисы, не заводят параллельный доступ к чужим таблицам.
 @Module({
   imports: [ContractManufacturingModule, CatalogModule, IdentityModule, DocumentModule, ReportingModule, BomModule],
-  controllers: [SpecificationsController],
+  controllers: [SpecificationsController, CreateSpecificationFromOrderController],
   providers: [
     SpecificationService,
     SpecificationWorkshopLookupAdapter,

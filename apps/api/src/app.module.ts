@@ -26,6 +26,8 @@ import { QcModule } from "./qc/qc.module";
 import { DefectModule } from "./defect/defect.module";
 import { DocumentIntelligenceModule } from "./document-intelligence/document-intelligence.module";
 import { SpecificationModule } from "./specification/specification.module";
+import { PresetModule } from "./preset/preset.module";
+import { FulfillmentModule } from "./fulfillment/fulfillment.module";
 
 // Presentation-слой (docs/ARCHITECTURE.md, п.2). Доменные модули
 // (packages/domain/*) подключаются сюда по мере реализации итераций
@@ -56,6 +58,8 @@ import { SpecificationModule } from "./specification/specification.module";
     DefectModule,
     DocumentIntelligenceModule,
     SpecificationModule,
+    PresetModule,
+    FulfillmentModule,
   ],
   providers: [
     { provide: APP_PIPE, useClass: ZodValidationPipe },
