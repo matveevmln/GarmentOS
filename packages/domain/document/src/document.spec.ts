@@ -100,7 +100,7 @@ function buildSpecificationData(): SpecificationDocumentData {
       specNumber: "1",
       paymentTerms:
         "70% стоимости товара, указанной в спецификации, оплачиваются Заказчиком в течение 3 (трёх) рабочих дней после получения счёта от Исполнителя.",
-      deliveryDeadline: "30 июня 2026 г.",
+      deliveryDeadline: "30 июня 2026",
       deliveryMethod: "Самовывоз.",
       contractorSignerRole: "Генеральный директор",
       contractorSignerName: "Нормуродов О.А.",

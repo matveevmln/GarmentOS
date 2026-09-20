@@ -16,16 +16,30 @@ import type { TelegramClient } from "../telegram/telegram-client";
 import { TELEGRAM_CLIENT } from "../telegram/telegram.tokens";
 import { WarehouseService } from "../warehouse/warehouse.service";
 import { ProductionRequestService } from "./production-request.service";
-import { formatRuAmount, formatRuDate, formatRuQuantity } from "./ru-number-format";
+import {
+  formatDeliveryPeriodText,
+  formatRuAmount,
+  formatRuDate,
+  formatRuQuantity,
+  formatRuQuantityNoGrouping,
+} from "./ru-number-format";
 import { computeSpecificationLinePricing } from "./specification-pricing";
 
-// Стандартное условие оплаты компании (владелец проекта, 2026-08-03):
-// 70% предоплата после выставления счёта, 30% при отгрузке товара со склада
-// цеха — используется, только если у конкретного цеха (workshop.paymentTerms)
-// ещё не настроено собственное условие.
-const DEFAULT_PAYMENT_TERMS =
-  "70% стоимости товара, указанной в спецификации, оплачиваются Заказчиком в течение 3 (трёх) рабочих дней после " +
-  "получения счёта от Исполнителя. Остальные 30% оплачиваются Заказчиком в момент отгрузки Товара со склада Исполнителя.";
+// Условие оплаты по умолчанию — тот же текст и та же правка, что в
+// specification.service.ts (ПРОМПТ №10.3, дословно по эталону): используется,
+// только если у конкретного цеха (workshop.paymentTerms) собственное условие
+// не настроено. Дублирование — см. комментарий у оригинала.
+function formatDefaultPaymentTerms(totalSum: number): string {
+  const prepaymentPercent = 70;
+  const prepaymentAmount = formatRuAmount((totalSum * prepaymentPercent) / 100);
+  return (
+    `Предоплата ${prepaymentPercent}% составляет ${prepaymentAmount} руб. Окончательный расчёт производится на основании ` +
+    "фактически отгруженного количества единиц товара, указанного в Электронном счете-фактуре (ЭСФ), в течение 5 рабочих " +
+    "дней с даты выставления ЭСФ.\n\n" +
+    "Допускается отклонение фактического количества товара от указанного в настоящей Спецификации в пределах ±10% без " +
+    "составления дополнительного соглашения."
+  );
+}
 
 // Форма {message, code} — распознаётся DomainExceptionFilter по duck typing
 // (apps/api/src/common/domain-exception.filter.ts), тот же паттерн, что
@@ -428,7 +442,7 @@ export class ProductionOrderOrchestrationService {
       deductionPerUnit: pricing.deductionPerUnit,
       specificationPricePerUnit: pricing.specificationPricePerUnit,
       materialsWithoutPriceHistory: pricing.materialsWithoutPriceHistory,
-      paymentTerms: workshop.paymentTerms ?? DEFAULT_PAYMENT_TERMS,
+      paymentTerms: workshop.paymentTerms ?? formatDefaultPaymentTerms(Number(draft.plannedQuantity) * Number(draft.agreedUnitPrice)),
       deliveryMethod: workshop.deliveryMethod ?? "",
       contractNumber: workshop.contractNumber,
       contractDate: workshop.contractDate ?? "",
@@ -505,7 +519,9 @@ export class ProductionOrderOrchestrationService {
       totalQuantity += quantity;
       totalSum += sum;
       items.push({
-        name: `${product.name}, ${productVariant.color}`,
+        // Перенос строки вместо запятой перед цветом (ПРОМПТ №11.4, тот же
+        // фикс, что в specification.service.ts).
+        name: `${product.name}\n${productVariant.color}`,
         unit: "шт",
         size: productVariant.size,
         quantity: formatRuQuantity(quantity),
@@ -538,15 +554,15 @@ export class ProductionOrderOrchestrationService {
         customerName: snapshot?.customerName ?? company.legalName ?? company.name,
         contractorName: snapshot?.contractorName ?? workshop.name,
         specNumber: String(specNumber),
-        paymentTerms: snapshot?.paymentTerms ?? workshop.paymentTerms ?? DEFAULT_PAYMENT_TERMS,
-        deliveryDeadline: formatRuDate(order.dueDate),
+        paymentTerms: snapshot?.paymentTerms ?? workshop.paymentTerms ?? formatDefaultPaymentTerms(totalSum),
+        deliveryDeadline: formatDeliveryPeriodText(order.dueDate, String(order.createdAt.getFullYear())),
         deliveryMethod: snapshot?.deliveryMethod ?? workshop.deliveryMethod ?? "",
         contractorSignerRole: snapshot?.contractorSignerRole ?? workshop.signerRole ?? "",
         contractorSignerName: snapshot?.contractorSignerName ?? workshop.signerName ?? "",
         customerSignerName: snapshot?.customerSignerName ?? company.signerName ?? "",
       },
       items,
-      totals: { quantity: formatRuQuantity(totalQuantity), sum: formatRuAmount(totalSum) },
+      totals: { quantity: formatRuQuantityNoGrouping(totalQuantity), sum: formatRuAmount(totalSum) },
     };
 
     const result = await this.documentService.generateSpecification(companyId, productionOrderId, uploadedBy, data);
