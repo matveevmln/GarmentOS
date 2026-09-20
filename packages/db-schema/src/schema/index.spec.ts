@@ -62,8 +62,11 @@ const EXPECTED_TABLES = [
   "cutting_order_materials",
   "cutting_order_results",
   "production_order_qc_results",
+  "production_order_defects",
+  "production_order_defect_compensations",
   "specifications",
   "specification_items",
+  "numeric_value_presets",
 ];
 
 function collectTables(): Record<string, unknown> {
