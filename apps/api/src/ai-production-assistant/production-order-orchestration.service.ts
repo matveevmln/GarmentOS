@@ -533,4 +533,29 @@ export class ProductionOrderOrchestrationService {
 
     return result.document;
   }
+
+  // Акт приёмки оказанных услуг (владелец проекта, 2026-09-21) — тонкая
+  // обёртка вокруг SpecificationService.generateAct, тот же приём, что и
+  // generateAndSendSpecification выше: сама генерация PDF/DTO принадлежит
+  // SpecificationService (единственный источник истины для документов
+  // заказа), здесь только аудит и отправка в Telegram цеху, если чат
+  // привязан.
+  async generateAndSendAct(companyId: string, productionOrderId: string, uploadedBy: string | null): Promise<DocumentEntity> {
+    const result = await this.specificationService.generateAct(companyId, productionOrderId, uploadedBy);
+
+    await this.auditService.record(companyId, uploadedBy, "http_api", {
+      entityType: "production_order",
+      entityId: productionOrderId,
+      action: "document.act_generated",
+      afterJson: { documentId: result.document.id },
+    });
+
+    const order = await this.contractManufacturingService.findProductionOrderById(companyId, productionOrderId);
+    const workshop = order ? await this.contractManufacturingService.findWorkshopById(companyId, order.workshopId) : null;
+    if (workshop?.telegramChatId) {
+      await this.telegramClient.sendDocument(workshop.telegramChatId, result.document.fileUrl, result.document.title ?? "Акт");
+    }
+
+    return result.document;
+  }
 }

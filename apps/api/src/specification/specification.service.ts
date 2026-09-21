@@ -675,4 +675,106 @@ export class SpecificationService {
 
     return this.documentService.generateSpecificationForSpecification(companyId, spec.id, uploadedBy, data);
   }
+
+  // Акт приёмки оказанных услуг (владелец проекта, 2026-09-21 — «Контрактное
+  // производство»: закрывающий документ после приёмки партии, основание для
+  // оплаты цеху). В отличие от спецификации (коммерческий заказ, количество
+  // ЗАКАЗАНО), акт фиксирует ФАКТИЧЕСКИ ПРИНЯТОЕ количество
+  // (production_order_variants.received_quantity) — тот же принцип
+  // "ordered ≠ received", что и в приёмке на склад (WarehouseService).
+  // Цена по строке — тот же расчёт, что уже используется для "Суммы партии"
+  // на фронтенде (apps/web/src/lib/production-order-pricing.ts,
+  // computeProductionOrderBatchSum): rework-строки по цене 0, у остальных —
+  // собственная unitPrice строки или agreedUnitPrice заказа. Дублирование
+  // мотивировано границей рантайма (фронтенд/бэкенд), не тем, что правило
+  // должно отличаться — при изменении правила проверить оба места.
+  async generateAct(companyId: string, productionOrderId: string, uploadedBy: string | null): Promise<AttachDocumentResult> {
+    const order = await this.contractManufacturingService.findProductionOrderById(companyId, productionOrderId);
+    if (!order) {
+      throw new NotFoundException({ statusCode: HttpStatus.NOT_FOUND, code: "PRODUCTION_ORDER_NOT_FOUND", message: `Заказ пошива ${productionOrderId} не найден` });
+    }
+    if (!order.receivedAt) {
+      throw new BadRequestException({
+        statusCode: HttpStatus.BAD_REQUEST,
+        code: "ACT_REQUIRES_RECEIVED_ORDER",
+        message: "Акт можно сформировать только после приёмки партии на склад",
+      });
+    }
+
+    const receivedVariants = order.variants.filter((v) => v.receivedQuantity !== null && Number(v.receivedQuantity) > 0);
+    if (receivedVariants.length === 0) {
+      throw new BadRequestException({
+        statusCode: HttpStatus.BAD_REQUEST,
+        code: "ACT_NO_RECEIVED_QUANTITY",
+        message: "Нет ни одной строки с фактически принятым количеством — нечего включать в акт",
+      });
+    }
+
+    const [workshop, product, company] = await Promise.all([
+      this.contractManufacturingService.findWorkshopById(companyId, order.workshopId),
+      this.catalogService.findProductById(companyId, order.productId),
+      this.identityService.findCompanyById(companyId),
+    ]);
+    if (!workshop) {
+      throw new NotFoundException({ statusCode: HttpStatus.NOT_FOUND, code: "SPECIFICATION_WORKSHOP_NOT_FOUND", message: `Цех ${order.workshopId} не найден` });
+    }
+    if (!product) {
+      throw new NotFoundException({ statusCode: HttpStatus.NOT_FOUND, code: "SPECIFICATION_PRODUCT_NOT_FOUND", message: `Модель ${order.productId} не найдена` });
+    }
+    if (!company) {
+      throw new NotFoundException({ statusCode: HttpStatus.NOT_FOUND, code: "SPECIFICATION_COMPANY_NOT_FOUND", message: `Компания ${companyId} не найдена` });
+    }
+
+    const orderAgreedUnitPrice = Number(order.agreedUnitPrice);
+    const customerName = company.legalName ?? company.name;
+
+    const items = await Promise.all(
+      receivedVariants.map(async (variant) => {
+        const productVariant = await this.catalogService.findProductVariantById(companyId, variant.productVariantId);
+        if (!productVariant) {
+          throw new NotFoundException({
+            statusCode: HttpStatus.NOT_FOUND,
+            code: "SPECIFICATION_VARIANT_NOT_FOUND",
+            message: `Вариант ${variant.productVariantId} не найден`,
+          });
+        }
+        const receivedQuantity = Number(variant.receivedQuantity);
+        const unitPrice = variant.variantType === "rework" ? 0 : variant.unitPrice !== null ? Number(variant.unitPrice) : orderAgreedUnitPrice;
+        return { receivedQuantity, unitPrice, sum: receivedQuantity * unitPrice, color: productVariant.color, size: productVariant.size };
+      }),
+    );
+
+    const totalQuantity = items.reduce((sum, item) => sum + item.receivedQuantity, 0);
+    const totalSum = items.reduce((sum, item) => sum + item.sum, 0);
+
+    const data: SpecificationDocumentData = {
+      fields: {
+        actNumber: order.orderNumber !== null ? String(order.orderNumber) : "б/н",
+        actDate: formatRuDate(order.receivedAt.toISOString().slice(0, 10)),
+        contractNumber: workshop.contractNumber ?? "",
+        contractDate: formatRuDate(workshop.contractDate),
+        customerName,
+        contractorName: workshop.name,
+        legalAddress: workshop.legalAddress ?? "",
+        contractorSignerRole: workshop.signerRole ?? "",
+        contractorSignerName: workshop.signerName ?? "",
+        customerSignerName: company.signerName ?? "",
+        totalSumNoDecimals: formatRuAmountNoDecimals(totalSum),
+      },
+      items: items.map((item) => ({
+        name: `${product.name}\n${item.color}`,
+        unit: "шт",
+        size: item.size,
+        quantity: formatRuQuantity(item.receivedQuantity),
+        unitPrice: formatRuAmount(item.unitPrice),
+        sum: formatRuAmount(item.sum),
+      })),
+      totals: {
+        quantity: formatRuQuantityNoGrouping(totalQuantity),
+        sum: formatRuAmount(totalSum),
+      },
+    };
+
+    return this.documentService.generateAct(companyId, productionOrderId, uploadedBy, data);
+  }
 }

@@ -1,6 +1,7 @@
 import { Inject, Injectable } from "@nestjs/common";
 import {
   CUTTING_ORDER_DOC_TYPE,
+  generateActDocument,
   generateCuttingOrderDocument,
   generateSpecificationDocument,
   type CuttingOrderDocumentData,
@@ -85,6 +86,24 @@ export class DocumentService {
     return generateSpecificationDocument(
       { documents: this.documents, documentLinks: this.documentLinks, documentDerivatives: this.documentDerivatives, storage: this.storage, renderer: this.renderer },
       { companyId, entityType: "specification", entityId: specificationId, uploadedBy, data, supersedesDocumentIds },
+    );
+  }
+
+  // Акт приёмки оказанных услуг (владелец проекта, 2026-09-21) — тот же
+  // механизм версий, что у спецификации, но собственный docType "act": одна
+  // спецификация и один акт — разные документы одного заказа, не должны
+  // гасить версии друг друга.
+  async generateAct(
+    companyId: string,
+    productionOrderId: string,
+    uploadedBy: string | null,
+    data: SpecificationDocumentData,
+  ): Promise<AttachDocumentResult> {
+    const existing = await this.listForEntity(companyId, "production_order", productionOrderId);
+    const supersedesDocumentIds = existing.filter((doc) => doc.isCurrentVersion && doc.docType === "act").map((doc) => doc.id);
+    return generateActDocument(
+      { documents: this.documents, documentLinks: this.documentLinks, documentDerivatives: this.documentDerivatives, storage: this.storage, renderer: this.renderer },
+      { companyId, entityType: "production_order", entityId: productionOrderId, uploadedBy, data, supersedesDocumentIds },
     );
   }
 

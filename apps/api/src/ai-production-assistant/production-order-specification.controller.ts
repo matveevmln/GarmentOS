@@ -42,4 +42,18 @@ export class ProductionOrderSpecificationController {
     );
     return documentResponseSchema.parse(document);
   }
+
+  // Акт приёмки оказанных услуг (владелец проекта, 2026-09-21) — доступен
+  // только после приёмки партии на склад (SpecificationService.generateAct
+  // проверяет order.receivedAt); permission та же, что у спецификации —
+  // формирование документов заказа принадлежит тому же праву, не отдельному.
+  @RequirePermissions("contract_manufacturing.write")
+  @Post(":id/generate-act")
+  async generateAct(
+    @Param("id") id: string,
+    @CurrentUser() currentUser: AuthenticatedRequestUser,
+  ): Promise<DocumentResponseDto> {
+    const document = await this.orchestrationService.generateAndSendAct(currentUser.companyId, id, currentUser.id);
+    return documentResponseSchema.parse(document);
+  }
 }

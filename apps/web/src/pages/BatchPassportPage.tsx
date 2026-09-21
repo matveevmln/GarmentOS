@@ -554,6 +554,29 @@ export function BatchPassportPage() {
     }
   };
 
+  // Акт приёмки оказанных услуг (владелец проекта, 2026-09-21) — доступен
+  // только после приёмки партии на склад (backend проверяет order.receivedAt,
+  // тот же источник фактического количества, что и вкладка «Размеры и
+  // цвета» выше). Перегенерация не расходует отдельный номер (номер акта =
+  // номер заказа), поэтому, в отличие от спецификации, без подтверждающего
+  // диалога.
+  const [isGeneratingAct, setIsGeneratingAct] = useState(false);
+  const generateAct = async () => {
+    if (!id) return;
+    setIsGeneratingAct(true);
+    try {
+      const document = await apiRequest<DocumentResponseDto>(`/production-orders/${id}/generate-act`, {
+        method: "POST",
+      });
+      load();
+      toast.success("Акт сформирован", { description: document.title ?? undefined });
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Не удалось сформировать акт");
+    } finally {
+      setIsGeneratingAct(false);
+    }
+  };
+
   // ПРОМПТ №3, раздел 1/2 — создание спецификации ИЗ заказа (NEW-поток):
   // отдельное действие от legacy generateSpecification выше (та собирает PDF
   // из снимка старого потока). Здесь backend создаёт запись Specification
@@ -766,11 +789,24 @@ export function BatchPassportPage() {
   // Прежний комментарий здесь утверждал, что повторное формирование создаёт
   // независимый документ — это неверно: Document Engine связывает редакции
   // через supersedesDocumentId и гасит флаг у предыдущей (проверено).
+  //
+  // isCurrentVersion гасится только среди документов ОДНОГО docType
+  // (DocumentService фильтрует supersedesDocumentIds по своему типу перед
+  // вызовом) — поэтому у заказа может быть одновременно текущая
+  // спецификация И текущий акт (владелец проекта, 2026-09-21, «Акт»), и оба
+  // это законно "Актуальная", а не одна "Актуальная" и другая ошибочно
+  // "Предыдущая редакция". Раньше здесь брался только ОДИН currentDoc на
+  // весь список (самый свежий isCurrentVersion), что при появлении второго
+  // типа документа (акт) неверно утопило бы его в "Предыдущая редакция".
   const sortedDocuments = [...passport.documents].sort(
     (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
   );
-  const currentDoc = sortedDocuments.find((doc) => doc.isCurrentVersion) ?? sortedDocuments[0];
-  const previousDocs = sortedDocuments.filter((doc) => doc.id !== currentDoc?.id);
+  const currentDocs = sortedDocuments.filter((doc) => doc.isCurrentVersion);
+  const previousDocs = sortedDocuments.filter((doc) => !doc.isCurrentVersion);
+  // Кнопка «Скачать спецификацию» в шапке и диалог перегенерации — именно
+  // про спецификацию, не про «какой угодно текущий документ» (с появлением
+  // акта в currentDocs может быть больше одного элемента).
+  const currentSpecDoc = currentDocs.find((doc) => doc.docType === "specification");
 
   // Спецификация выпускается по подтверждённому заказу — у черновика ещё нет
   // ни зафиксированных данных партии, ни основания для номера документа.
@@ -1390,9 +1426,16 @@ export function BatchPassportPage() {
               }
               action={
                 canGenerate ? (
-                  <Button size="sm" loading={isGenerating} onClick={() => void generateSpecification()}>
-                    Сформировать спецификацию
-                  </Button>
+                  <div className="flex flex-wrap justify-center gap-2">
+                    <Button size="sm" loading={isGenerating} onClick={() => void generateSpecification()}>
+                      Сформировать спецификацию
+                    </Button>
+                    {passport.status === "received" || passport.status === "completed" ? (
+                      <Button size="sm" variant="secondary" loading={isGeneratingAct} onClick={() => void generateAct()}>
+                        Сформировать акт
+                      </Button>
+                    ) : null}
+                  </div>
                 ) : undefined
               }
             />
@@ -1402,15 +1445,16 @@ export function BatchPassportPage() {
       }
       return (
         <div className="divide-y divide-border">
-          {currentDoc ? (
+          {currentDocs.map((doc) => (
             <DocumentRow
-              title={`${documentTypeLabel(currentDoc.docType)} · ${currentDoc.title ?? ""}`.replace(/ · $/, "")}
+              key={doc.id}
+              title={`${documentTypeLabel(doc.docType)} · ${doc.title ?? ""}`.replace(/ · $/, "")}
               version="Актуальная"
               format="PDF"
-              date={currentDoc.createdAt}
-              onOpen={() => void openDocument(currentDoc.id, currentDoc.title ?? "Спецификация")}
+              date={doc.createdAt}
+              onOpen={() => void openDocument(doc.id, doc.title ?? documentTypeLabel(doc.docType))}
             />
-          ) : null}
+          ))}
           {previousDocs.map((doc) => (
             <DocumentRow
               key={doc.id}
@@ -1418,16 +1462,26 @@ export function BatchPassportPage() {
               version="Предыдущая редакция"
               format="PDF"
               date={doc.createdAt}
-              onOpen={() => void openDocument(doc.id, doc.title ?? "Спецификация")}
+              onOpen={() => void openDocument(doc.id, doc.title ?? documentTypeLabel(doc.docType))}
             />
           ))}
-          {canGenerate ? (
-            <div className="pt-3">
+          <div className="flex flex-wrap gap-2 pt-3">
+            {canGenerate ? (
               <Button variant="secondary" size="sm" onClick={() => setConfirmRegenerate(true)}>
                 Сформировать заново
               </Button>
-            </div>
-          ) : null}
+            ) : null}
+            {/* Акт приёмки — только после приёмки партии на склад (владелец
+                проекта, 2026-09-21, «Контрактное производство»): фиксирует
+                фактически принятое количество, документ-основание для
+                оплаты цеху. Перегенерация не расходует номер (использует
+                номер заказа) — отдельного подтверждения не требует. */}
+            {passport.status === "received" || passport.status === "completed" ? (
+              <Button variant="secondary" size="sm" loading={isGeneratingAct} onClick={() => void generateAct()}>
+                {currentDocs.some((doc) => doc.docType === "act") ? "Сформировать акт заново" : "Сформировать акт"}
+              </Button>
+            ) : null}
+          </div>
           {uploadForm}
         </div>
       );
@@ -1564,11 +1618,11 @@ export function BatchPassportPage() {
                 выталкивала страницу за пределы экрана (поймано проверкой
                 адаптива). Повторное формирование живёт во вкладке
                 «Документы», рядом с самими документами. */}
-            {currentDoc ? (
+            {currentSpecDoc ? (
               <Button
                 size="sm"
-                loading={downloadingId === currentDoc.id}
-                onClick={() => void openDocument(currentDoc.id, currentDoc.title ?? "Спецификация")}
+                loading={downloadingId === currentSpecDoc.id}
+                onClick={() => void openDocument(currentSpecDoc.id, currentSpecDoc.title ?? "Спецификация")}
               >
                 Скачать спецификацию
               </Button>
@@ -1586,7 +1640,7 @@ export function BatchPassportPage() {
             <DialogTitle>Сформировать спецификацию заново?</DialogTitle>
             <DialogDescription>
               Будет создана новая редакция со следующим номером по договору цеха.
-              {currentDoc?.title ? ` Текущая — «${currentDoc.title}» — ` : " Текущая редакция "}
+              {currentSpecDoc?.title ? ` Текущая — «${currentSpecDoc.title}» — ` : " Текущая редакция "}
               станет неактуальной, но останется в документах партии.
             </DialogDescription>
           </DialogHeader>

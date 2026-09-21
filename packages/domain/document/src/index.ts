@@ -12,6 +12,7 @@ export {
   type SpecificationTemplateColumn,
   type SpecificationTemplateDefinition,
 } from "./domain/specification-template";
+export { ACT_TEMPLATE } from "./domain/act-template";
 
 export type {
   DocumentDerivativeEntity,
@@ -48,6 +49,11 @@ export {
   type GenerateSpecificationDocumentDeps,
   type GenerateSpecificationDocumentInput,
 } from "./application/generate-specification-document";
+export {
+  generateActDocument,
+  type GenerateActDocumentDeps,
+  type GenerateActDocumentInput,
+} from "./application/generate-act-document";
 export {
   uploadDocument,
   resolveContentType,
