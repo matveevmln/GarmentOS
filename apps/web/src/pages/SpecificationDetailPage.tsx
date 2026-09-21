@@ -66,6 +66,9 @@ function SpecificationWizard() {
   const [newColor, setNewColor] = useState("");
   const [newColorCode, setNewColorCode] = useState("");
   const [isAddingColor, setIsAddingColor] = useState(false);
+  // Подсказки для «Цвет» — уже встречавшиеся у компании названия (владелец
+  // проекта, 2026-09-21): «цвет один раз ввёл, дальше выбираешь из списка».
+  const [colorPresets, setColorPresets] = useState<string[]>([]);
 
   const [workshops, setWorkshops] = useState<WorkshopResponseDto[]>([]);
   const [workshopId, setWorkshopId] = useState("");
@@ -79,6 +82,7 @@ function SpecificationWizard() {
 
   useEffect(() => {
     void apiRequest<ProductResponseDto[]>("/products").then(setProducts);
+    void apiRequest<string[]>("/products/colors").then(setColorPresets).catch(() => setColorPresets([]));
     // Шаг «Цех» скрыт (владелец проекта, 2026-09-21 — «пока цех всего один,
     // не заставлять выбирать его каждый раз»): первый цех из списка
     // выбирается автоматически и молча, шаг остаётся скрытым, пока цехов
@@ -152,10 +156,12 @@ function SpecificationWizard() {
     if (!productId || !newColor.trim() || !newColorCode.trim()) return;
     setIsAddingColor(true);
     try {
+      const addedColor = newColor.trim();
       await apiRequest(`/products/${productId}/colors`, {
         method: "POST",
-        body: { color: newColor.trim(), colorCode: newColorCode.trim() },
+        body: { color: addedColor, colorCode: newColorCode.trim() },
       });
+      setColorPresets((prev) => (prev.includes(addedColor) ? prev : [...prev, addedColor].sort()));
       setNewColor("");
       setNewColorCode("");
       loadVariantsAndSizes(productId);
@@ -328,7 +334,13 @@ function SpecificationWizard() {
               <SectionLabel>Цвета модели ({new Set(variants.map((v) => v.color)).size})</SectionLabel>
               <div className="mt-2 flex flex-wrap items-end gap-2">
                 <Field label="Цвет" className="min-w-[130px] flex-1">
-                  <Input value={newColor} onChange={(e) => setNewColor(e.target.value)} placeholder="Графит" />
+                  <Combobox
+                    options={colorPresets.map((color) => ({ value: color, label: color }))}
+                    value={newColor}
+                    onChange={setNewColor}
+                    placeholder="Впишите или выберите цвет..."
+                    allowCustomValue
+                  />
                 </Field>
                 <Field label="Код цвета" className="min-w-[130px] flex-1">
                   <Input value={newColorCode} onChange={(e) => setNewColorCode(e.target.value)} placeholder="GRAFIT" />

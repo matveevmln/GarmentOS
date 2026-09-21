@@ -179,3 +179,18 @@ export const productAttributeResponseSchema = z.object({
   updatedAt: z.date(),
 });
 export type ProductAttributeResponseDto = z.infer<typeof productAttributeResponseSchema>;
+
+// Подсказки для полей «Цвет» и «Характеристика» — уже встречавшиеся у
+// компании значения (владелец проекта, 2026-09-21), а не отдельный
+// справочник: оба поля остаются свободным текстом, эти эндпоинты только
+// подсказывают то, что уже вводили.
+export const productColorPresetsResponseSchema = z.array(z.string());
+export type ProductColorPresetsResponseDto = z.infer<typeof productColorPresetsResponseSchema>;
+
+export const productAttributePresetResponseSchema = z.object({
+  name: z.string(),
+  value: z.string(),
+});
+export const productAttributePresetsResponseSchema = z.array(productAttributePresetResponseSchema);
+export type ProductAttributePresetResponseDto = z.infer<typeof productAttributePresetResponseSchema>;
+export type ProductAttributePresetsResponseDto = z.infer<typeof productAttributePresetsResponseSchema>;

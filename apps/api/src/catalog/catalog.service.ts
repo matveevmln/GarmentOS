@@ -215,6 +215,17 @@ export class CatalogService {
     return this.productVariants.listByProduct(companyId, productId);
   }
 
+  // Автозаполнение полей «Цвет»/характеристики уже встречавшимися у компании
+  // значениями (владелец проекта, 2026-09-21) — снимает ручной повторный ввод
+  // одного и того же текста для каждой новой модели.
+  async listCompanyColors(companyId: string): Promise<string[]> {
+    return this.productVariants.listDistinctColorsByCompany(companyId);
+  }
+
+  async listCompanyAttributePresets(companyId: string): Promise<Array<{ name: string; value: string }>> {
+    return this.productAttributes.listDistinctByCompany(companyId);
+  }
+
   async findProductVariantById(companyId: string, id: string): Promise<ProductVariant | null> {
     return this.productVariants.findById(companyId, id);
   }

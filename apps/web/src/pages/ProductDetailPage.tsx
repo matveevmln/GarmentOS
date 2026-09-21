@@ -105,6 +105,11 @@ export function ProductDetailPage() {
   const [previewQuantity, setPreviewQuantity] = useState<number | undefined>(500);
   const [newColor, setNewColor] = useState("");
   const [newColorCode, setNewColorCode] = useState("");
+  // Подсказки для «Цвет»/характеристик — уже встречавшиеся у компании
+  // значения (владелец проекта, 2026-09-21): «цвет один раз ввёл, дальше
+  // выбираешь из списка».
+  const [colorPresets, setColorPresets] = useState<string[]>([]);
+  const [attributePresets, setAttributePresets] = useState<Array<{ name: string; value: string }>>([]);
   const [isAddingColor, setIsAddingColor] = useState(false);
 
   // Паспорт модели (Этап 2, владелец проекта, 2026-09-12): фото, описание,
@@ -159,6 +164,15 @@ export function ProductDetailPage() {
       .catch(() => setPhotoDoc(null));
   };
   useEffect(loadPhoto, [id]);
+
+  // Подсказки — по компании в целом, не по конкретной модели, поэтому
+  // загружаются один раз, без зависимости от id.
+  useEffect(() => {
+    void apiRequest<string[]>("/products/colors").then(setColorPresets).catch(() => setColorPresets([]));
+    void apiRequest<Array<{ name: string; value: string }>>("/products/attribute-presets")
+      .then(setAttributePresets)
+      .catch(() => setAttributePresets([]));
+  }, []);
 
   const loadAttributes = () => {
     if (!id) return;
@@ -234,10 +248,17 @@ export function ProductDetailPage() {
     if (!id || !newAttrName.trim() || !newAttrValue.trim()) return;
     setIsAddingAttribute(true);
     try {
+      const addedName = newAttrName.trim();
+      const addedValue = newAttrValue.trim();
       await apiRequest<ProductAttributeResponseDto>(`/products/${id}/attributes`, {
         method: "POST",
-        body: { name: newAttrName.trim(), value: newAttrValue.trim() },
+        body: { name: addedName, value: addedValue },
       });
+      setAttributePresets((prev) =>
+        prev.some((preset) => preset.name === addedName && preset.value === addedValue)
+          ? prev
+          : [...prev, { name: addedName, value: addedValue }],
+      );
       setNewAttrName("");
       setNewAttrValue("");
       loadAttributes();
@@ -339,6 +360,8 @@ export function ProductDetailPage() {
         method: "POST",
         body: { color: newColor.trim(), colorCode: newColorCode.trim() },
       });
+      const addedColor = newColor.trim();
+      setColorPresets((prev) => (prev.includes(addedColor) ? prev : [...prev, addedColor].sort()));
       setNewColor("");
       setNewColorCode("");
       await reloadVariants();
@@ -756,13 +779,23 @@ export function ProductDetailPage() {
 
           <div className="flex flex-wrap items-end gap-2 rounded-[10px] border border-border bg-muted/40 p-3.5">
             <Field label="Название" className="min-w-[140px] flex-1">
-              <Input value={newAttrName} onChange={(event) => setNewAttrName(event.target.value)} placeholder="Состав" />
+              <Combobox
+                options={[...new Set(attributePresets.map((preset) => preset.name))].map((name) => ({ value: name, label: name }))}
+                value={newAttrName}
+                onChange={setNewAttrName}
+                placeholder="Впишите или выберите..."
+                allowCustomValue
+              />
             </Field>
             <Field label="Значение" className="min-w-[180px] flex-1">
-              <Input
+              <Combobox
+                options={attributePresets
+                  .filter((preset) => preset.name === newAttrName)
+                  .map((preset) => ({ value: preset.value, label: preset.value }))}
                 value={newAttrValue}
-                onChange={(event) => setNewAttrValue(event.target.value)}
+                onChange={setNewAttrValue}
                 placeholder="95% хлопок, 5% лайкра"
+                allowCustomValue
               />
             </Field>
             <Button
@@ -924,7 +957,13 @@ export function ProductDetailPage() {
             <SectionLabel>Добавить цвет на все размеры</SectionLabel>
             <div className="mt-2 flex flex-wrap items-end gap-2">
               <Field label="Цвет" className="min-w-[140px] flex-1">
-                <Input value={newColor} onChange={(event) => setNewColor(event.target.value)} placeholder="Петроль" />
+                <Combobox
+                  options={colorPresets.map((color) => ({ value: color, label: color }))}
+                  value={newColor}
+                  onChange={setNewColor}
+                  placeholder="Впишите или выберите цвет..."
+                  allowCustomValue
+                />
               </Field>
               <Field label="Код цвета для артикула" className="min-w-[160px] flex-1">
                 <Input value={newColorCode} onChange={(event) => setNewColorCode(event.target.value)} placeholder="PETROL" />

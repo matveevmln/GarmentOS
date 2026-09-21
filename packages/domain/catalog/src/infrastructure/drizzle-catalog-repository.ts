@@ -250,6 +250,16 @@ export class DrizzleProductVariantRepository implements ProductVariantRepository
       .where(and(eq(products.companyId, companyId), eq(productVariants.productId, productId)));
     return rows.map((row) => toProductVariant(row.variant));
   }
+
+  async listDistinctColorsByCompany(companyId: string): Promise<string[]> {
+    const rows = await this.db
+      .selectDistinct({ color: productVariants.color })
+      .from(productVariants)
+      .innerJoin(products, eq(products.id, productVariants.productId))
+      .where(eq(products.companyId, companyId))
+      .orderBy(asc(productVariants.color));
+    return rows.map((row) => row.color);
+  }
 }
 
 function toProductSize(row: typeof productSizes.$inferSelect): ProductSize {
@@ -353,5 +363,15 @@ export class DrizzleProductAttributeRepository implements ProductAttributeReposi
 
   async remove(attributeId: string): Promise<void> {
     await this.db.delete(productAttributes).where(eq(productAttributes.id, attributeId));
+  }
+
+  async listDistinctByCompany(companyId: string): Promise<Array<{ name: string; value: string }>> {
+    const rows = await this.db
+      .selectDistinct({ name: productAttributes.name, value: productAttributes.value })
+      .from(productAttributes)
+      .innerJoin(products, eq(products.id, productAttributes.productId))
+      .where(eq(products.companyId, companyId))
+      .orderBy(asc(productAttributes.name));
+    return rows;
   }
 }

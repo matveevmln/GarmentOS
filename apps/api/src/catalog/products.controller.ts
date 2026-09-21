@@ -6,13 +6,17 @@ import {
   createProductSchema,
   findProductByNameQuerySchema,
   productAttributeDraftSchema,
+  productAttributePresetsResponseSchema,
   productAttributeResponseSchema,
+  productColorPresetsResponseSchema,
   productResponseSchema,
   productSizeResponseSchema,
   replaceProductSizesSchema,
   updateProductCostsSchema,
   updateProductDetailsSchema,
+  type ProductAttributePresetsResponseDto,
   type ProductAttributeResponseDto,
+  type ProductColorPresetsResponseDto,
   type ProductResponseDto,
   type ProductSizeResponseDto,
 } from "@garmentos/shared-types";
@@ -190,6 +194,26 @@ export class ProductsController {
   ): Promise<{ removed: true }> {
     await this.catalogService.removeProductAttribute(currentUser, id, attributeId);
     return { removed: true };
+  }
+
+  // Автозаполнение полей «Цвет»/«Характеристика» (владелец проекта,
+  // 2026-09-21) — уже встречавшиеся у компании значения, не отдельный
+  // справочник. Статичные пути объявлены раньше ":id" ниже — иначе
+  // "/products/colors" был бы ошибочно распознан как ":id" = "colors".
+  @RequirePermissions("catalog.read")
+  @Get("colors")
+  async listColors(@CurrentUser() currentUser: AuthenticatedRequestUser): Promise<ProductColorPresetsResponseDto> {
+    const colors = await this.catalogService.listCompanyColors(currentUser.companyId);
+    return productColorPresetsResponseSchema.parse(colors);
+  }
+
+  @RequirePermissions("catalog.read")
+  @Get("attribute-presets")
+  async listAttributePresets(
+    @CurrentUser() currentUser: AuthenticatedRequestUser,
+  ): Promise<ProductAttributePresetsResponseDto> {
+    const presets = await this.catalogService.listCompanyAttributePresets(currentUser.companyId);
+    return productAttributePresetsResponseSchema.parse(presets);
   }
 
   @RequirePermissions("catalog.read")

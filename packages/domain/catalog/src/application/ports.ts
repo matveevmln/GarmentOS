@@ -108,6 +108,12 @@ export interface ProductVariantRepository {
   // Template Engine).
   findById(companyId: string, id: string): Promise<ProductVariant | null>;
   listByProduct(companyId: string, productId: string): Promise<ProductVariant[]>;
+  // Автозаполнение поля «Цвет» уже встречавшимися у компании названиями
+  // (владелец проекта, 2026-09-21 — «цвет один раз ввёл, дальше выбираешь
+  // из списка»): цвет — свободный текст без своего справочника, поэтому
+  // источник подсказок — уже сохранённые product_variants, не отдельная
+  // таблица цветов, которую пришлось бы поддерживать параллельно.
+  listDistinctColorsByCompany(companyId: string): Promise<string[]>;
 }
 
 // Характеристики модели (Этап 2 — «Паспорт модели»). Как и у product_sizes
@@ -122,4 +128,9 @@ export interface ProductAttributeRepository {
   create(productId: string, draft: ProductAttributeDraft): Promise<ProductAttribute>;
   update(attributeId: string, draft: ProductAttributeDraft): Promise<ProductAttribute>;
   remove(attributeId: string): Promise<void>;
+  // Автозаполнение «Название»/«Значение» уже встречавшимися у компании
+  // парами (владелец проекта, 2026-09-21) — то же обоснование, что у
+  // listDistinctColorsByCompany выше: характеристика — свободный текст,
+  // источник подсказок — уже сохранённые product_attributes.
+  listDistinctByCompany(companyId: string): Promise<Array<{ name: string; value: string }>>;
 }
