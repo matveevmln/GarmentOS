@@ -352,7 +352,7 @@ describe("Specification → Production Order (Этап 3, e2e)", () => {
     expect(materialRow).toMatchObject({ totalRequired: 10, onHand: 100, isAvailable: true, deficit: 0 });
   });
 
-  it("draft спецификация — 400; отсутствие утверждённых норм расхода — 400 с понятным (не-BOM) текстом", async () => {
+  it("draft спецификация — 400; отсутствие утверждённых норм расхода МОДЕЛИ — не блокирует создание партии (ПРОМПТ №3, раздел 8: нет обязательного BOM-гейта)", async () => {
     const companyName = `E2E SpecPO NotApproved ${Date.now()}`;
     const { accessToken } = await createCompanyWithRoleToken(companyName, "owner");
     const { workshop, product, variant } = await setupApprovedProduct(accessToken, "B", 100);
@@ -397,16 +397,24 @@ describe("Specification → Production Order (Этап 3, e2e)", () => {
     if (!variantNoBom) throw new Error("Вариант модели не создался");
 
     const specNoBom = await createApprovedSpecification(accessToken, workshop.id, productNoBom.id, variantNoBom.id, 5, 100);
+    // Аудит пользовательского пути (owner, 2026-09-21, живой прогон «QA
+    // Стеганка»): раньше это было 400 SPECIFICATION_PRODUCT_NORMS_NOT_APPROVED
+    // — единственный путь создания партии, требовавший заранее заведённого
+    // BOM, хотя прямой POST /production-orders уже давно (fe043dd,
+    // create-empty-bom.ts) сам заводит пустой approved BOM без участия
+    // пользователя. Два входа в создание партии обязаны вести себя одинаково —
+    // модель без единого BOM больше не блокирует утверждённую спецификацию.
     const noBomResponse = await request(httpServer)
       .post(`/v1/specifications/${specNoBom.id}/production-order`)
       .set(...authHeader(accessToken))
       .send({})
-      .expect(400);
-    const body = noBomResponse.body as ErrorResponseBody;
-    expect(body.code).toBe("SPECIFICATION_PRODUCT_NORMS_NOT_APPROVED");
-    // Терминология: пользователь не должен видеть слово BOM.
-    expect(body.message).not.toMatch(/BOM/i);
-    expect(body.message).toBe("Для модели нет утверждённой спецификации норм расхода материалов");
+      .expect(201);
+    const orderNoBom = noBomResponse.body as ProductionOrderResponseDto;
+    expect(orderNoBom.bomId).toBeTruthy();
+    const [autoBom] = await db.select().from(boms).where(eq(boms.id, orderNoBom.bomId));
+    expect(autoBom?.status).toBe("approved");
+    const autoBomItemRows = await db.select().from(bomItems).where(eq(bomItems.bomId, orderNoBom.bomId));
+    expect(autoBomItemRows).toHaveLength(0);
   });
 
   it("чужая компания получает 404 при попытке создать партию из чужой спецификации", async () => {

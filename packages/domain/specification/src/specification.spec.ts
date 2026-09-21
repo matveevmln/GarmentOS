@@ -570,6 +570,40 @@ describe("domain/specification — updateSpecification / cancelSpecification (П
     ).rejects.toMatchObject({ code: "SPECIFICATION_CANCELLED" });
   });
 
+  it("отменяет LEGACY-черновик (без productionOrderId) — раньше у него не было ни одного выхода, кроме утверждения", async () => {
+    const d = { specifications: new FakeSpecifications(), workshops: fakeWorkshops(), products: fakeProducts(), productVariants: fakeVariants() };
+    const legacyDraft = await createSpecificationDraft(d, draftInput());
+
+    const cancelled = await cancelSpecification(d, { companyId: COMPANY, specificationId: legacyDraft.id });
+    expect(cancelled.status).toBe("cancelled");
+  });
+
+  it("не позволяет отменить УЖЕ УТВЕРЖДЁННУЮ LEGACY-спецификацию — она могла породить производственные партии", async () => {
+    const d = { specifications: new FakeSpecifications(), workshops: fakeWorkshops(), products: fakeProducts(), productVariants: fakeVariants() };
+    const legacyDraft = await createSpecificationDraft(d, draftInput());
+    const approved = await approveSpecification(d, {
+      companyId: COMPANY,
+      specificationId: legacyDraft.id,
+      product: { name: "Худи Пилот", code: "HUD-01" },
+      workshop: {
+        name: "Цех №1",
+        contractNumber: "П-22-04",
+        contractDate: "2026-04-22",
+        paymentTerms: null,
+        deliveryMethod: null,
+        legalAddress: null,
+        signerRole: null,
+        signerName: null,
+      },
+      company: { legalName: "ООО Пример", signerName: null },
+      itemLines: [{ productVariantId: VARIANT_A, name: "Худи Пилот, Чёрный", unit: "шт", size: "48-50" }],
+    });
+
+    await expect(cancelSpecification(d, { companyId: COMPANY, specificationId: approved.id })).rejects.toMatchObject({
+      code: "SPECIFICATION_NOT_EDITABLE",
+    });
+  });
+
   it("правка спецификации не имеет метода записи в production_orders — заказ не может быть затронут по конструкции API", () => {
     // Прямая проверка требования ПРОМПТ №3 раздела 4 ("изменения Specification
     // НЕ изменяют Production Order"): UpdateSpecificationDeps структурно не

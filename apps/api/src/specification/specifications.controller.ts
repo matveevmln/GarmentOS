@@ -103,7 +103,11 @@ export class SpecificationsController {
     return specificationResponseSchema.parse(spec);
   }
 
-  // Отмена спецификации NEW-потока — терминальное состояние.
+  // Отмена — терминальное состояние. NEW-поток: доступна, пока не отменена
+  // (assertCanEdit). LEGACY-поток: только пока черновик (assertIsDraft) —
+  // утверждённую LEGACY-спецификацию эта операция не трогает (аудит
+  // пользовательского пути, owner, 2026-09-21 — см. cancel-specification.ts).
+
   @RequirePermissions("specification.write")
   @Post(":id/cancel")
   async cancel(

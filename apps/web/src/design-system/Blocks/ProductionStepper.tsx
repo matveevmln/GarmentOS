@@ -19,7 +19,15 @@ export const PRODUCTION_STAGES = [
   "draft",
   "placed",
   "in_progress",
+  // sewing_completed / shipped_to_fulfillment (ПРОМПТ №2.1) отсутствовали
+  // здесь при первом переносе шкалы — заказ в одном из этих двух статусов
+  // не находил себя в массиве, isProductionStage(status) возвращал false, и
+  // шкала подменялась текстом «Заказ отменён» для партии, которая совсем не
+  // отменена (аудит пользовательского пути, owner, 2026-09-21). Порядок —
+  // как в production_order_status (packages/db-schema/contract-manufacturing.ts).
+  "sewing_completed",
   "ready_for_pickup",
+  "shipped_to_fulfillment",
   "received",
   // completed — отдельное явное завершение партии (ПРОМПТ №10.1/10.2,
   // владелец проекта, 2026-09-15), не совпадает с "received" — приёмка на

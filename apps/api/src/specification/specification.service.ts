@@ -221,8 +221,8 @@ export class SpecificationService {
     return spec;
   }
 
-  // Отмена спецификации NEW-потока — терминальное состояние, доступное
-  // только для этого потока (assertIsNewFlowSpecification в домене).
+  // Отмена — терминальное состояние. NEW-поток: пока не отменена. LEGACY-
+  // поток: только пока черновик (см. cancelSpecification в домене).
   async cancel(companyId: string, specificationId: string, cancelledBy: string | null): Promise<Specification> {
     const spec = await cancelSpecification({ specifications: this.specifications }, { companyId, specificationId });
 
@@ -420,14 +420,11 @@ export class SpecificationService {
       });
     }
 
-    const bom = await this.bomService.getApproved(companyId, { productId: spec.productId });
-    if (!bom) {
-      throw new BadRequestException({
-        statusCode: HttpStatus.BAD_REQUEST,
-        code: "SPECIFICATION_PRODUCT_NORMS_NOT_APPROVED",
-        message: "Для модели нет утверждённой спецификации норм расхода материалов",
-      });
-    }
+    // ensureApproved — не getApproved+throw (см. комментарий в BomService):
+    // этот путь обязан вести себя так же, как прямой POST /production-orders,
+    // а не требовать от пользователя заранее сходить в карточку модели за
+    // BOM, о котором мастер спецификации нигде не предупреждал.
+    const bom = await this.bomService.ensureApproved(companyId, spec.productId, createdBy);
 
     const itemByVariant = new Map(spec.items.map((item) => [item.productVariantId, item]));
     const variants: ProductionOrderVariantDraft[] = requestedLines.map((line) => {

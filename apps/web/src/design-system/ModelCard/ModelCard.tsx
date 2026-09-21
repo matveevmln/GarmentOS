@@ -1,6 +1,7 @@
 import { usePhotoUrl } from "../Blocks/BatchCard";
 import { ColorDot } from "../Blocks/Breakdown";
 import { StatusBadge } from "../StatusBadge/StatusBadge";
+import { initialsFromName } from "../../lib/product-code";
 
 // ModelCard — карточка модели для витрины «Модели». ПРОМПТ №09.2 v2
 // (владелец проекта, 2026-09-15) — полный перенос последней утверждённой
@@ -44,7 +45,10 @@ export function ModelCard({
   onClick?: () => void;
 }) {
   const photoUrl = usePhotoUrl(photoDocumentId);
-  const [codePrefix, codeSuffix] = model.code.split("-");
+  // Артикул больше не показывается пользователю (владелец проекта,
+  // 2026-09-21 — он теперь генерируется автоматически и не несёт смысла);
+  // заглушка без фото строится из инициалов названия, не из кода.
+  const initials = initialsFromName(model.name);
 
   return (
     <button type="button" onClick={onClick} className="model-card focus-ring anim-rise text-left">
@@ -57,8 +61,7 @@ export function ModelCard({
           </div>
         ) : (
           <div className="model-card-placeholder">
-            <span className="model-card-placeholder-code">{codePrefix}</span>
-            {codeSuffix ? <span className="model-card-placeholder-suffix">{codeSuffix}</span> : null}
+            <span className="model-card-placeholder-code">{initials}</span>
           </div>
         )}
         <div className="model-card-badge">
@@ -69,7 +72,6 @@ export function ModelCard({
       <div className="model-card-body">
         {model.category ? <span className="model-card-category">{model.category}</span> : null}
         <h3 className="model-card-name truncate">{model.name}</h3>
-        <p className="model-card-article">{model.code}</p>
 
         {colorNames.length > 0 ? (
           <div className="model-card-colors">

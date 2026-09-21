@@ -193,7 +193,7 @@ describe("domain/cutting — создание задания", () => {
     expect(repo.created?.number).toBe(2);
   });
 
-  it("не кроит по черновику заказа и по партии без зафиксированных норм", async () => {
+  it("не кроит по черновику заказа", async () => {
     const draftPort: ProductionOrderSnapshotPort = {
       findForCutting() {
         return Promise.resolve({ status: "draft", plannedQuantity: 500, variants: [], materialNorms: [] });
@@ -205,7 +205,9 @@ describe("domain/cutting — создание задания", () => {
         { companyId: "company-1", productionOrderId: "production-1" },
       ),
     ).rejects.toThrow(DomainError);
+  });
 
+  it("кроит партию без зафиксированных норм расхода (модель без BOM, ПРОМПТ №3 раздел 8) — задание создаётся с пустым materials[]", async () => {
     const noNormsPort: ProductionOrderSnapshotPort = {
       findForCutting() {
         return Promise.resolve({
@@ -216,12 +218,12 @@ describe("domain/cutting — создание задания", () => {
         });
       },
     };
-    await expect(
-      createCuttingOrder(
-        { cuttingOrders: repo, productionOrders: noNormsPort },
-        { companyId: "company-1", productionOrderId: "production-1" },
-      ),
-    ).rejects.toThrow(/нормы расхода/i);
+    await createCuttingOrder(
+      { cuttingOrders: repo, productionOrders: noNormsPort },
+      { companyId: "company-1", productionOrderId: "production-1" },
+    );
+    expect(repo.created?.materials).toEqual([]);
+    expect(repo.created?.results).toEqual([{ productVariantId: VARIANT_S, plannedQuantity: 500 }]);
   });
 
   it("требует цех для раскроя у подрядчика и запрещает его для собственного", async () => {

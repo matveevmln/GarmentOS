@@ -9,7 +9,6 @@ import { Field } from "../design-system/Form/Field";
 import { PageHeader, Breadcrumbs } from "../design-system/PageHeader/PageHeader";
 import { EmptyState } from "../design-system/Feedback/EmptyState";
 import { formatDate, formatQuantity } from "../lib/format";
-import { FilterTabs, type FilterOption } from "../design-system/Tabs/FilterTabs";
 import { SearchBar } from "../design-system/Search/SearchBar";
 import { StatusBadge } from "../design-system/StatusBadge/StatusBadge";
 import { Card, CardContent, CardHeader, CardTitle } from "../design-system/Card/Card";
@@ -44,12 +43,13 @@ import { ApiError, apiRequest } from "../api/client";
 //    заполненной. Раньше действий на строках сознательно не было, потому
 //    что у API не существовало эндпоинта правки (см. историю ниже) —
 //    теперь есть PATCH /workshops/:id, и «мёртвой кнопки» не возникает.
-const STATUS_FILTERS: FilterOption<"all" | "draft" | "active" | "archived">[] = [
-  { value: "all", label: "Все" },
-  { value: "draft", label: "Черновик" },
-  { value: "active", label: "Активные" },
-  { value: "archived", label: "Архив" },
-];
+//
+// Убраны вкладки «Черновик»/«Архив» (docs/PILOT_BUGS.md): create-workshop
+// всегда проставляет status='active' (черновик зарезервирован под будущий
+// Inbox-сценарий, архивации нигде не существует), а GET /workshops и так
+// отдаёт только активные — обе вкладки были гарантированно пустыми не из-за
+// бага фильтрации, а потому что показывать было нечего. Сам фильтр по
+// статусу с единственным реальным значением тоже смысла не имеет.
 
 // Договорная дата хранится в БД строкой (workshops.contract_date — text), а
 // DatePicker работает с Date. Обе стороны конвертации — здесь, чтобы формат
@@ -91,7 +91,6 @@ export function WorkshopsPage() {
   const { items, isLoading, error, reload, create } = useCrudResource<WorkshopResponseDto, CreateWorkshopDto>(
     "/workshops",
   );
-  const [statusFilter, setStatusFilter] = useState<(typeof STATUS_FILTERS)[number]["value"]>("all");
   const [query, setQuery] = useState("");
   // null — режим создания, иначе правим этот цех той же формой.
   const [editing, setEditing] = useState<WorkshopResponseDto | null>(null);
@@ -154,11 +153,8 @@ export function WorkshopsPage() {
   };
 
   const filtered = useMemo(
-    () =>
-      items
-        .filter((row) => statusFilter === "all" || row.status === statusFilter)
-        .filter((row) => row.name.toLowerCase().includes(query.trim().toLowerCase())),
-    [items, statusFilter, query],
+    () => items.filter((row) => row.name.toLowerCase().includes(query.trim().toLowerCase())),
+    [items, query],
   );
 
   return (
@@ -240,9 +236,8 @@ export function WorkshopsPage() {
 
       {!isLoading && !error && (
         <>
-          <div className="mb-3 flex flex-col gap-2.5 md:flex-row md:items-center md:justify-between">
+          <div className="mb-3">
             <SearchBar value={query} onChange={setQuery} placeholder="Поиск цеха" className="md:w-[340px]" />
-            <FilterTabs options={STATUS_FILTERS} value={statusFilter} onChange={setStatusFilter} />
           </div>
 
           {filtered.length === 0 ? (

@@ -36,6 +36,7 @@ import { SkeletonList } from "../design-system/Feedback/Skeleton";
 import { ErrorState } from "../design-system/Feedback/ErrorState";
 import { toast } from "../design-system/Toast/Toast";
 import { currencyLabel, formatDate, formatMoney, formatQuantity, unitLabel } from "../lib/format";
+import { SIZE_PRESETS } from "../lib/size-presets";
 
 // Вкладки карточки модели (Model-first Minimal Core, владелец проекта,
 // 2026-09-12, ПРОМПТ №06.1) — «Производство» открывается первой: 9 из 10
@@ -496,8 +497,11 @@ export function ProductDetailPage() {
         title={product.name}
         subtitle={
           <span className="flex flex-col gap-1">
+            {/* Артикул модели больше не показывается пользователю (владелец
+                проекта, 2026-09-21) — генерируется автоматически и не несёт
+                смысла; артикул варианта (product.code-размер-цвет) ниже на
+                этой странице остаётся — это реальный SKU для склада. */}
             <span className="flex items-center gap-2">
-              <span className="num">Артикул {product.code}</span>
               <StatusBadge status={product.status} />
             </span>
             {/* Строка агрегатов (§10 отчёта Model-first) — «4 партии · 3 600
@@ -791,12 +795,13 @@ export function ProductDetailPage() {
             {sizeRows.map((row, index) => (
               <div key={index} className="flex flex-wrap items-end gap-2 rounded-[10px] border border-border bg-muted/40 p-2.5">
                 <Field label="Размер" className="min-w-[110px] flex-1">
-                  <Input
+                  <Combobox
+                    options={SIZE_PRESETS.filter(
+                      (size) => size === row.size || !sizeRows.some((r) => r.size === size),
+                    ).map((size) => ({ value: size, label: size }))}
                     value={row.size}
-                    onChange={(event) =>
-                      setSizeRows((prev) => prev.map((r, i) => (i === index ? { ...r, size: event.target.value } : r)))
-                    }
-                    placeholder="48-50"
+                    onChange={(size) => setSizeRows((prev) => prev.map((r, i) => (i === index ? { ...r, size } : r)))}
+                    placeholder="Выберите размер..."
                   />
                 </Field>
                 <Field label="Доля" className="min-w-[100px] flex-1">

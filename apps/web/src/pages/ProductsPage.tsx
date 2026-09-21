@@ -11,6 +11,7 @@ import {
 } from "@garmentos/shared-types";
 import { apiRequest } from "../api/client";
 import { useCrudResource } from "../api/useCrudResource";
+import { generateProductCode } from "../lib/product-code";
 import { ModelGrid, type ModelGridItem } from "../design-system/ModelCard/ModelGrid";
 import { SearchBar } from "../design-system/Search/SearchBar";
 import { Card, CardContent, CardHeader, CardTitle } from "../design-system/Card/Card";
@@ -68,13 +69,21 @@ export function ProductsPage() {
         .catch(() => setPhotoByProduct((prev) => ({ ...prev, [productId]: null })));
     }
   }, [items]);
+  // Артикул и категория (владелец проекта, 2026-09-21 — «скрыть, они
+  // никому не нужны») убраны из формы: артикул генерируется автоматически
+  // из названия (products.code остаётся NOT NULL UNIQUE в БД, но
+  // пользователь его никогда не вводит и не видит), категория просто не
+  // заполняется (поле опционально уже на уровне схемы). Форма валидирует
+  // только name — остальное собирается в onSubmit.
   const {
     register,
     handleSubmit,
     reset,
     setFocus,
     formState: { errors, isSubmitting },
-  } = useForm<CreateProductDto>({ resolver: zodResolver(createProductSchema) });
+  } = useForm<Pick<CreateProductDto, "name">>({
+    resolver: zodResolver(createProductSchema.pick({ name: true })),
+  });
 
   // Цвета/размеры/партии — агрегированы из breakdown реальных партий этой
   // модели (тот же формат, что у BatchCard), не из выдуманного справочника.
@@ -99,9 +108,9 @@ export function ProductsPage() {
     };
   }
 
-  const onSubmit = async (data: CreateProductDto) => {
+  const onSubmit = async (data: Pick<CreateProductDto, "name">) => {
     try {
-      await create(data);
+      await create({ name: data.name, code: generateProductCode(data.name) });
       reset();
       toast.success("Модель добавлена");
     } catch (err) {
@@ -123,15 +132,9 @@ export function ProductsPage() {
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
           <form className="flex flex-col gap-4" onSubmit={(event) => void handleSubmit(onSubmit)(event)}>
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+            <div className="grid grid-cols-1 gap-4 md:max-w-sm">
               <Field label="Название модели" error={errors.name?.message}>
                 <Input {...register("name")} placeholder="Двойка" />
-              </Field>
-              <Field label="Артикул" error={errors.code?.message}>
-                <Input {...register("code")} placeholder="DVOIKA-001" />
-              </Field>
-              <Field label="Категория">
-                <Input {...register("category")} placeholder="Худи" />
               </Field>
             </div>
 

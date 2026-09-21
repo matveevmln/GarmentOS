@@ -17,7 +17,6 @@ import {
   IconSearch,
   IconSupplier,
   IconWarehouse,
-  IconWorkshop,
   IconCheck,
   IconDocument,
   IconUser,
@@ -54,11 +53,15 @@ interface NavItem {
 // (POST /specifications/:id/production-order, Этап 3), страница и её
 // маршрут (/new-batch) НЕ удалены — прежний ручной путь остаётся доступен
 // по прямой ссылке, только не выведен в навигацию.
+// «Цеха» убран из меню (владелец проекта, 2026-09-22 — «пока цех всего
+// один, отдельный раздел не нужен»): тот же приём, что уже применён к
+// «Новой партии» выше — маршрут /workshops и WorkshopsPage.tsx НЕ удалены,
+// доступны по прямой ссылке; создание цеха внутри мастера спецификации
+// (SpecificationDetailPage.tsx) по-прежнему работает, если цехов вообще нет.
 const NAV_PRODUCTION: NavItem[] = [
   { to: "/dashboard", label: "Главная", icon: IconHome },
   { to: "/products", label: "Модели", icon: IconModel, match: "/products/*" },
   { to: "/specifications", label: "Спецификации", icon: IconDocument, match: "/specifications/*" },
-  { to: "/workshops", label: "Цеха", icon: IconWorkshop },
   { to: "/production-orders", label: "Заказы пошива", icon: IconBatch, match: "/production-orders/*" },
   { to: "/fulfillment", label: "Фулфилмент ОТК", icon: IconCheck },
 ];

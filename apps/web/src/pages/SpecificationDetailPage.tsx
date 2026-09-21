@@ -18,6 +18,7 @@ import { Combobox } from "../design-system/Select/Combobox";
 import { FilterTabs } from "../design-system/Tabs/FilterTabs";
 import { Button } from "../design-system/Button/Button";
 import { DatePicker } from "../design-system/Form/DatePicker";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "../design-system/Modal/Dialog";
 import { PageHeader, Breadcrumbs } from "../design-system/PageHeader/PageHeader";
 import { StatusBadge } from "../design-system/StatusBadge/StatusBadge";
 import { EmptyState } from "../design-system/Feedback/EmptyState";
@@ -26,6 +27,7 @@ import { ErrorState } from "../design-system/Feedback/ErrorState";
 import { DataTable, Td } from "../design-system/Blocks";
 import { toast } from "../design-system/Toast/Toast";
 import { currencyLabel, formatDate, formatMoney, formatQuantity } from "../lib/format";
+import { SIZE_PRESETS } from "../lib/size-presets";
 import { cn } from "../design-system/utils";
 
 // Единый мастер спецификации (Этап 2 — «Паспорт модели», владелец проекта,
@@ -65,7 +67,6 @@ function SpecificationWizard() {
   const [newColorCode, setNewColorCode] = useState("");
   const [isAddingColor, setIsAddingColor] = useState(false);
 
-  const [workshopMode, setWorkshopMode] = useState<"select" | "create">("select");
   const [workshops, setWorkshops] = useState<WorkshopResponseDto[]>([]);
   const [workshopId, setWorkshopId] = useState("");
   const [newWorkshopName, setNewWorkshopName] = useState("");
@@ -78,7 +79,15 @@ function SpecificationWizard() {
 
   useEffect(() => {
     void apiRequest<ProductResponseDto[]>("/products").then(setProducts);
-    void apiRequest<WorkshopResponseDto[]>("/workshops").then(setWorkshops);
+    // Шаг «Цех» скрыт (владелец проекта, 2026-09-21 — «пока цех всего один,
+    // не заставлять выбирать его каждый раз»): первый цех из списка
+    // выбирается автоматически и молча, шаг остаётся скрытым, пока цехов
+    // хотя бы один. Явный выбор цеха на конкретную партию переносится в
+    // карточку заказа пошива.
+    void apiRequest<WorkshopResponseDto[]>("/workshops").then((rows) => {
+      setWorkshops(rows);
+      if (rows.length > 0 && rows[0]) setWorkshopId(rows[0].id);
+    });
   }, []);
 
   const loadVariantsAndSizes = (pid: string) => {
@@ -168,7 +177,6 @@ function SpecificationWizard() {
       });
       setWorkshops((prev) => [...prev, created]);
       setWorkshopId(created.id);
-      setWorkshopMode("select");
       toast.success("Цех создан");
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "Не удалось создать цех");
@@ -177,7 +185,6 @@ function SpecificationWizard() {
     }
   };
 
-  const selectedWorkshop = workshops.find((w) => w.id === workshopId);
   const activeItems = Object.values(items).filter((row) => (row.quantity ?? 0) > 0);
   const canCreateDraft = productId && workshopId && activeItems.length > 0;
 
@@ -239,7 +246,10 @@ function SpecificationWizard() {
           {productMode === "select" ? (
             <Field label="Модель">
               <Combobox
-                options={products.map((p) => ({ value: p.id, label: `${p.name} (${p.code})` }))}
+                // Артикул больше не показывается пользователю (владелец
+                // проекта, 2026-09-21) — он автогенерируемый и ничего не
+                // значит; в списке моделей достаточно названия.
+                options={products.map((p) => ({ value: p.id, label: p.name }))}
                 value={productId}
                 onChange={selectProduct}
                 placeholder="Выберите модель..."
@@ -270,16 +280,22 @@ function SpecificationWizard() {
           {productId && !hasSizes && (
             <div className="rounded-[10px] border border-border bg-muted/40 p-3.5">
               <SectionLabel>Размерный ряд ещё не задан — задайте его сейчас</SectionLabel>
+              <p className="t-secondary mt-1">
+                «Доля» — это пропорция размера в будущих заказах (например, 1 / 2 / 1), а не количество для этой
+                спецификации. Само количество по размерам и цветам вы укажете чуть ниже, в строках спецификации; если
+                распределение по размерам не важно, оставьте у каждого размера значение 1.
+              </p>
               <div className="mt-2 flex flex-col gap-2">
                 {quickSizes.map((row, index) => (
                   <div key={index} className="flex flex-wrap items-end gap-2">
                     <Field label="Размер" className="min-w-[100px] flex-1">
-                      <Input
+                      <Combobox
+                        options={SIZE_PRESETS.filter(
+                          (size) => size === row.size || !quickSizes.some((r) => r.size === size),
+                        ).map((size) => ({ value: size, label: size }))}
                         value={row.size}
-                        onChange={(e) =>
-                          setQuickSizes((prev) => prev.map((r, i) => (i === index ? { ...r, size: e.target.value } : r)))
-                        }
-                        placeholder="48-50"
+                        onChange={(size) => setQuickSizes((prev) => prev.map((r, i) => (i === index ? { ...r, size } : r)))}
+                        placeholder="Выберите размер..."
                       />
                     </Field>
                     <Field label="Доля" className="min-w-[90px] flex-1">
@@ -332,31 +348,17 @@ function SpecificationWizard() {
         </CardContent>
       </Card>
 
-      {/* Шаг 2 — Цех */}
-      <Card>
-        <CardHeader>
-          <CardTitle>2. Цех</CardTitle>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-3">
-          <FilterTabs
-            options={[
-              { value: "select", label: "Выбрать существующий" },
-              { value: "create", label: "+ Создать цех" },
-            ]}
-            value={workshopMode}
-            onChange={setWorkshopMode}
-          />
-          {workshopMode === "select" ? (
-            <Field label="Цех">
-              <Combobox
-                options={workshops.map((w) => ({ value: w.id, label: w.name }))}
-                value={workshopId}
-                onChange={setWorkshopId}
-                placeholder="Выберите цех..."
-                emptyText="Цехов пока нет — создайте новый"
-              />
-            </Field>
-          ) : (
+      {/* Шаг «Цех» скрыт, пока есть хотя бы один цех (см. useEffect выше) —
+          выбор цеха на конкретную партию живёт в карточке заказа пошива, не
+          здесь. Единственный случай, когда шаг всё же нужен — совсем новая
+          компания без единого цеха: тогда скрывать нечего, выбирать не из
+          чего. */}
+      {workshops.length === 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>2. Цех</CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-3">
             <div className="grid gap-3 sm:grid-cols-2">
               <Field label="Название">
                 <Input value={newWorkshopName} onChange={(e) => setNewWorkshopName(e.target.value)} placeholder="Ак-Сарай Текстиль" />
@@ -375,16 +377,9 @@ function SpecificationWizard() {
                 Создать цех
               </Button>
             </div>
-          )}
-          {selectedWorkshop && (
-            <p className="t-secondary">
-              Договор: <strong>{selectedWorkshop.contractNumber ?? "не указан"}</strong>
-              {selectedWorkshop.contractDate ? ` от ${formatDate(selectedWorkshop.contractDate)}` : ""} — реквизиты подставятся
-              автоматически при утверждении. Изменить их можно в разделе «Цеха».
-            </p>
-          )}
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Шаг 3 — Строки: модель → цвет → размер → количество → цена. Строки
           собираются из уже существующих product_variants — пользователь не
@@ -483,6 +478,12 @@ function SpecificationView({ id }: { id: string }) {
   const [editItems, setEditItems] = useState<Record<string, { quantity: number; unitPrice: number }>>({});
   const [allWorkshops, setAllWorkshops] = useState<WorkshopResponseDto[]>([]);
   const [isSavingEdit, setIsSavingEdit] = useState(false);
+  // Отмена спецификации NEW-потока (backend: POST /specifications/:id/cancel,
+  // терминальное состояние) — до этой правки была вызываема только напрямую
+  // через API, без кнопки в интерфейсе (owner, 2026-09-21, аудит пользовательского
+  // пути).
+  const [showCancelConfirm, setShowCancelConfirm] = useState(false);
+  const [isCancelling, setIsCancelling] = useState(false);
   // Пресеты цены спецификации (ПРОМПТ №3, раздел 5) — 700 RUB по умолчанию,
   // применяется сразу ко всем строкам вместо ручного ввода в каждую.
   const [pricePresets, setPricePresets] = useState<PresetResponseDto[]>([]);
@@ -575,6 +576,21 @@ function SpecificationView({ id }: { id: string }) {
       toast.error(err instanceof ApiError ? err.message : "Не удалось сформировать PDF");
     } finally {
       setIsGeneratingPdf(false);
+    }
+  };
+
+  const cancelSpecification = async () => {
+    if (!spec) return;
+    setIsCancelling(true);
+    try {
+      await apiRequest(`/specifications/${spec.id}/cancel`, { method: "POST" });
+      setShowCancelConfirm(false);
+      load();
+      toast.success("Спецификация отменена");
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Не удалось отменить спецификацию");
+    } finally {
+      setIsCancelling(false);
     }
   };
 
@@ -677,13 +693,28 @@ function SpecificationView({ id }: { id: string }) {
               </Button>
             </span>
           ) : canEdit ? (
-            <Button size="sm" variant="secondary" onClick={startEdit}>
-              Изменить
-            </Button>
+            <span className="flex flex-wrap items-center gap-2">
+              <Button size="sm" variant="secondary" onClick={startEdit}>
+                Изменить
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => setShowCancelConfirm(true)}>
+                Отменить
+              </Button>
+            </span>
           ) : spec.status === "draft" ? (
-            <Button size="sm" loading={isApproving} onClick={() => void approve()}>
-              Утвердить спецификацию
-            </Button>
+            // LEGACY-черновик — единственный статус, где отмена этой
+            // спецификации вообще допустима backend'ом (assertIsDraft в
+            // cancelSpecification); без этой кнопки ошибочный черновик было
+            // невозможно ничем закрыть — только бросить (аудит
+            // пользовательского пути, owner, 2026-09-21).
+            <span className="flex flex-wrap items-center gap-2">
+              <Button size="sm" loading={isApproving} onClick={() => void approve()}>
+                Утвердить спецификацию
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => setShowCancelConfirm(true)}>
+                Отменить
+              </Button>
+            </span>
           ) : spec.status === "approved" && !isNewFlow ? (
             <span className="flex flex-wrap items-center gap-2">
               {hasAvailableQuantity && (
@@ -914,6 +945,26 @@ function SpecificationView({ id }: { id: string }) {
           onCreated={(newId) => void navigate(`/specifications/${newId}`)}
         />
       )}
+
+      <Dialog open={showCancelConfirm} onOpenChange={setShowCancelConfirm}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Отменить спецификацию?</DialogTitle>
+            <DialogDescription>
+              Спецификация перейдёт в статус «Отменена» — это действие необратимо. PDF по ней больше нельзя будет
+              сформировать.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="secondary" size="sm" onClick={() => setShowCancelConfirm(false)}>
+              Не отменять
+            </Button>
+            <Button variant="destructive" size="sm" loading={isCancelling} onClick={() => void cancelSpecification()}>
+              Отменить спецификацию
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
