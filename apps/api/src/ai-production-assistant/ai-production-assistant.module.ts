@@ -2,10 +2,10 @@ import { Module } from "@nestjs/common";
 import { BomModule } from "../bom/bom.module";
 import { CatalogModule } from "../catalog/catalog.module";
 import { ContractManufacturingModule } from "../contract-manufacturing/contract-manufacturing.module";
-import { DocumentModule } from "../document/document.module";
 import { IdentityModule } from "../identity/identity.module";
 import { ProcurementModule } from "../procurement/procurement.module";
 import { ReportingModule } from "../reporting/reporting.module";
+import { SpecificationModule } from "../specification/specification.module";
 import { TelegramClientModule } from "../telegram/telegram-client.module";
 import { WarehouseModule } from "../warehouse/warehouse.module";
 import { AnthropicAIClassifier, RuleBasedAIClassifier } from "./ai-classifier";
@@ -23,6 +23,14 @@ import { ProductionRequestService } from "./production-request.service";
 // application-сервисы — сама оркестрация не содержит доменной логики.
 // ReportingModule (CostingService) добавлен для фиксации Snapshot партии при
 // подтверждении заказа (owner, 2026-08-03 — «Паспорт партии»).
+// SpecificationModule (ПРОМПТ №12.2, 2026-09-21) — generateAndSendSpecification
+// делегирует построение PDF-DTO и версионирование документа
+// SpecificationService целиком (canonical data flow), больше не строит
+// параллельный DTO из production_orders.cost_snapshot напрямую; DocumentModule
+// здесь больше не нужен впрямую — PDF генерируется внутри SpecificationModule.
+// Не создаёт цикл: SpecificationModule не импортирует AiProductionAssistantModule
+// ни прямо, ни транзитивно через свои импорты (ContractManufacturing/Catalog/
+// Identity/Document/Reporting/Bom).
 // Импортирует только TelegramClientModule (не полный TelegramModule) —
 // TelegramModule сам импортирует этот модуль для сценария "текст →
 // подтверждение → заказ" (Telegram — тонкий интерфейс над этой
@@ -32,7 +40,7 @@ import { ProductionRequestService } from "./production-request.service";
     CatalogModule,
     BomModule,
     ContractManufacturingModule,
-    DocumentModule,
+    SpecificationModule,
     TelegramClientModule,
     IdentityModule,
     ProcurementModule,

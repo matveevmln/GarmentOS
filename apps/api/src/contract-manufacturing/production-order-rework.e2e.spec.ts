@@ -24,6 +24,8 @@ import {
   productVariants,
   products,
   refreshTokens,
+  specificationItems,
+  specifications,
   stockItems,
   stockMovements,
   userRoles,
@@ -82,6 +84,14 @@ describe("Production order — REWORK + NEW следующий заказ (P5-2,
     for (const name of createdCompanyNames) {
       const [company] = await db.select().from(companies).where(eq(companies.name, name));
       if (company) {
+        // Canonical Specification/PDF flow (ПРОМПТ №12.2) — generate-specification
+        // теперь создаёт настоящую запись specifications, ссылающуюся на
+        // production_orders — удалить до самих заказов, иначе FK не даст.
+        const companySpecs = await db.select().from(specifications).where(eq(specifications.companyId, company.id));
+        for (const spec of companySpecs) {
+          await db.delete(specificationItems).where(eq(specificationItems.specificationId, spec.id));
+        }
+        await db.delete(specifications).where(eq(specifications.companyId, company.id));
         const companyOrders = await db
           .select()
           .from(productionOrders)

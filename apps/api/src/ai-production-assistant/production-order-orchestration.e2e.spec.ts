@@ -21,6 +21,8 @@ import {
   productVariants,
   products,
   refreshTokens,
+  specificationItems,
+  specifications,
   telegramInviteCodes,
   userRoles,
   users,
@@ -38,8 +40,9 @@ import type {
 } from "@garmentos/shared-types";
 import { eq } from "drizzle-orm";
 import request from "supertest";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { AppModule } from "../app.module";
+import { DocumentService } from "../document/document.service";
 import { authHeader, setupAuthenticatedCompany } from "../test-support/auth-test-helper";
 
 const databaseUrl = process.env.DATABASE_URL;
@@ -82,6 +85,11 @@ describe("Вертикальный сценарий Итерации 7 (e2e): т
     for (const name of createdCompanyNames) {
       const [company] = await db.select().from(companies).where(eq(companies.name, name));
       if (company) {
+        const companySpecs = await db.select().from(specifications).where(eq(specifications.companyId, company.id));
+        for (const spec of companySpecs) {
+          await db.delete(specificationItems).where(eq(specificationItems.specificationId, spec.id));
+        }
+        await db.delete(specifications).where(eq(specifications.companyId, company.id));
         const companyOrders = await db.select().from(productionOrders).where(eq(productionOrders.companyId, company.id));
         for (const order of companyOrders) {
           await db.delete(productionOrderVariants).where(eq(productionOrderVariants.productionOrderId, order.id));
@@ -236,7 +244,12 @@ describe("Вертикальный сценарий Итерации 7 (e2e): т
       .expect(201);
     expect((confirmResponse.body as ProductionOrderResponseDto).status).toBe("placed");
 
-    // Шаг 4: генерация PDF-спецификации по шаблону + привязка к заказу.
+    // Шаг 4: генерация PDF-спецификации по шаблону — canonical data flow
+    // (ПРОМПТ №12.2): создаёт (при первом вызове) настоящую запись
+    // Specification из заказа и генерирует PDF через тот же
+    // SpecificationService, что и кнопка «Создать спецификацию» — документ
+    // привязан к entityType="specification", не "production_order" (единый
+    // источник истины, не два параллельных).
     const specResponse = await request(httpServer)
       .post(`/v1/production-orders/${order.id}/generate-specification`)
       .set(...authHeader(accessToken))
@@ -245,22 +258,29 @@ describe("Вертикальный сценарий Итерации 7 (e2e): т
     expect(specDocument.docType).toBe("specification");
     expect(specDocument.fileUrl.length).toBeGreaterThan(0);
 
-    // Показ документов, привязанных к заказу (GET, минимум Итерации 7).
+    // Ровно одна Specification создана на этот заказ (1:1,
+    // specifications.production_order_id).
+    const [specRow] = await db.select().from(specifications).where(eq(specifications.productionOrderId, order.id));
+    expect(specRow).toBeDefined();
+    const specNumberAfterFirstGeneration = specRow?.specNumber;
+
+    // Показ документов, привязанных к этой Specification.
     const listDocsResponse = await request(httpServer)
       .get("/v1/documents")
-      .query({ entityType: "production_order", entityId: order.id })
+      .query({ entityType: "specification", entityId: specRow.id })
       .set(...authHeader(accessToken))
       .expect(200);
     const linkedDocuments = listDocsResponse.body as DocumentResponseDto[];
     expect(linkedDocuments).toHaveLength(1);
     expect(linkedDocuments[0]?.id).toBe(specDocument.id);
 
-    // Каждая генерация — новая, отличная спецификация: номер по договору
-    // цеха реально увеличивается, не переиспользуется (требование владельца
-    // проекта 2026-07-26: "на каждую модель спецификация была разная
-    // соответственно данные нумерация и даты").
+    // Повторная генерация («Сформировать заново») — canonical invariant
+    // (ПРОМПТ №12.2, DATA INTEGRITY): один заказ = одна Specification,
+    // поэтому номер по договору цеха НЕ увеличивается повторно (это и было
+    // расхождение с архитектурой, устранённое рефакторингом) — перегенерируется
+    // PDF ТОЙ ЖЕ Specification, новая версия документа через supersedesDocumentId.
     const [workshopAfterFirstSpec] = await db.select().from(workshops).where(eq(workshops.id, workshop.id));
-    expect(workshopAfterFirstSpec?.nextSpecificationNumber).toBe(2);
+    expect(workshopAfterFirstSpec?.nextSpecificationNumber).toBe(specNumberAfterFirstGeneration! + 1);
 
     const secondSpecResponse = await request(httpServer)
       .post(`/v1/production-orders/${order.id}/generate-specification`)
@@ -269,8 +289,12 @@ describe("Вертикальный сценарий Итерации 7 (e2e): т
     const secondSpecDocument = secondSpecResponse.body as DocumentResponseDto;
     expect(secondSpecDocument.id).not.toBe(specDocument.id);
 
+    const [specRowAfterRegeneration] = await db.select().from(specifications).where(eq(specifications.productionOrderId, order.id));
+    expect(specRowAfterRegeneration?.id).toBe(specRow?.id);
+    expect(specRowAfterRegeneration?.specNumber).toBe(specNumberAfterFirstGeneration);
+
     const [workshopAfterSecondSpec] = await db.select().from(workshops).where(eq(workshops.id, workshop.id));
-    expect(workshopAfterSecondSpec?.nextSpecificationNumber).toBe(3);
+    expect(workshopAfterSecondSpec?.nextSpecificationNumber).toBe(specNumberAfterFirstGeneration! + 1);
 
     // Шаг 5: привязка цеха к Telegram (инвайт-код → /start) + простой
     // текстовый ответ цеха → автоматическое обновление статуса заказа.
@@ -507,5 +531,229 @@ describe("Вертикальный сценарий Итерации 7 (e2e): т
       // CONTENT_TYPES (packages/domain/document/src/application/upload-document.ts).
       .attach("file", Buffer.from("не документ", "utf8"), "note.exe")
       .expect(400);
+  });
+
+  // Regression (ПРОМПТ №12.1 → №12.2, forensic-аудит 2026-09-21): при
+  // эталонной калибровке PDF (566d029) три поля —
+  // specDate/legalAddress/totalSumNoDecimals — были пропущены в отдельном
+  // legacy-генераторе DTO внутри generateAndSendSpecification, из-за чего в
+  // PDF рендерились пустые строки. ПРОМПТ №12.2 устранил саму возможность
+  // расхождения: generateAndSendSpecification (эндпоинт
+  // POST /production-orders/:id/generate-specification, кнопка «Сформировать
+  // спецификацию») теперь не строит собственный DTO, а резолвит/создаёт
+  // каноническую запись Specification и вызывает
+  // SpecificationService.generateDocument — ТОТ ЖЕ код, что и у кнопки
+  // «Создать спецификацию» (POST /production-orders/:id/specification →
+  // GET/POST /specifications/:id/document). Тест проверяет:
+  // 1) поля больше не пустые; 2) специфичные для Specification-сущности поля
+  // (specNumber/specDate/количества) СТАБИЛЬНЫ между повторными генерациями —
+  // это и есть "заморожено", ровно так, как для legacy-потока (snapshotJson);
+  // 3) поля, произведённые от живого Workshop (legalAddress и т.п.),
+  // намеренно НЕ заморожены — таково уже утверждённое поведение NEW-flow
+  // (specification.service.ts: "PDF собирается из ТЕКУЩЕГО состояния
+  // Specification"), это НЕ было частью найденного расхождения и не
+  // переписывается здесь; 4) оба эндпоинта, вызванные для одной и той же
+  // Specification, дают идентичный DTO — прямое доказательство единого
+  // источника истины.
+  //
+  // Не проверяет байты PDF (второго PDF-парсера в репозитории нет) —
+  // перехватывает DocumentService.generateSpecificationForSpecification через
+  // spy на реальном экземпляре из DI-контейнера (spyOn без mockImplementation
+  // не подменяет поведение — PDF всё равно реально формируется и сохраняется).
+  //
+  // Контрольный кейс — "Стеганка", 3 цвета × 1514 шт. (185/381/381/381/186
+  // по 5 размерам) = 4542 шт. Количества заданы явно, без прогона алгоритма
+  // авто-распределения (он не в скоупе этого регрессионного теста).
+  it("Стеганка 4542 шт. (regression): canonical Specification/PDF flow — единый источник истины между Path B и Path C", async () => {
+    const companyName = `E2E Steganka PDF Fields Regression ${Date.now()}`;
+    createdCompanyNames.push(companyName);
+    const { accessToken } = await setupAuthenticatedCompany(db, httpServer, companyName, "owner");
+
+    const productResponse = await request(httpServer)
+      .post("/v1/products")
+      .set(...authHeader(accessToken))
+      .send({ name: "Стеганка", code: `STEGANKA-REG-${Date.now()}` })
+      .expect(201);
+    const product = productResponse.body as ProductResponseDto;
+
+    const STEGANKA_COLORS = ["Чёрный", "Хаки", "Бежевый"];
+    const STEGANKA_SIZES: Array<{ size: string; quantity: number }> = [
+      { size: "44", quantity: 185 },
+      { size: "46", quantity: 381 },
+      { size: "48", quantity: 381 },
+      { size: "50", quantity: 381 },
+      { size: "52", quantity: 186 },
+    ];
+    expect(STEGANKA_SIZES.reduce((sum, s) => sum + s.quantity, 0)).toBe(1514);
+
+    const variantsByColorAndSize = new Map<string, string>();
+    for (const color of STEGANKA_COLORS) {
+      for (const { size } of STEGANKA_SIZES) {
+        const variantResponse = await request(httpServer)
+          .post("/v1/product-variants")
+          .set(...authHeader(accessToken))
+          .send({ productId: product.id, size, color, skuCode: `STEGANKA-${size}-${color}-${product.id.slice(0, 4)}` })
+          .expect(201);
+        variantsByColorAndSize.set(`${color}:${size}`, (variantResponse.body as { id: string }).id);
+      }
+    }
+
+    const materialResponse = await request(httpServer)
+      .post("/v1/materials")
+      .set(...authHeader(accessToken))
+      .send({ name: "Плащёвка со стёжкой", type: "fabric", unit: "m" })
+      .expect(201);
+    const material = materialResponse.body as MaterialResponseDto;
+
+    const bomResponse = await request(httpServer)
+      .post("/v1/boms")
+      .set(...authHeader(accessToken))
+      .send({ productId: product.id, items: [{ materialId: material.id, quantityPerUnit: 1.6 }] })
+      .expect(201);
+    const bomDraft = bomResponse.body as BomResponseDto;
+    const approvedBomResponse = await request(httpServer)
+      .post(`/v1/boms/${bomDraft.id}/approve`)
+      .set(...authHeader(accessToken))
+      .expect(201);
+    const approvedBom = approvedBomResponse.body as BomResponseDto;
+
+    const workshopResponse = await request(httpServer)
+      .post("/v1/workshops")
+      .set(...authHeader(accessToken))
+      .send({
+        name: "Регрессионный Цех",
+        contractNumber: "П-Reg-01",
+        contractDate: "01.01.2026",
+        legalAddress: "г. Бишкек, ул. Тестовая, д. 1",
+        paymentTerms: "70% предоплата, 30% при отгрузке",
+        deliveryMethod: "Самовывоз",
+        signerRole: "Директор",
+        signerName: "Тестов Т.Т.",
+      })
+      .expect(201);
+    const workshop = workshopResponse.body as WorkshopResponseDto;
+
+    const variants = STEGANKA_COLORS.flatMap((color) =>
+      STEGANKA_SIZES.map(({ size, quantity }) => ({
+        productVariantId: variantsByColorAndSize.get(`${color}:${size}`),
+        quantity,
+      })),
+    );
+    const plannedQuantity = variants.reduce((sum, v) => sum + v.quantity, 0);
+    expect(plannedQuantity).toBe(4542);
+
+    const orderResponse = await request(httpServer)
+      .post("/v1/production-orders")
+      .set(...authHeader(accessToken))
+      .send({
+        productId: product.id,
+        bomId: approvedBom.id,
+        workshopId: workshop.id,
+        plannedQuantity,
+        agreedUnitPrice: 500,
+        variants,
+      })
+      .expect(201);
+    const order = orderResponse.body as ProductionOrderResponseDto;
+    expect(order.variants).toHaveLength(15);
+
+    await request(httpServer)
+      .post(`/v1/production-orders/${order.id}/confirm`)
+      .set(...authHeader(accessToken))
+      .expect(201);
+
+    const documentService = app.get(DocumentService);
+    const spy = vi.spyOn(documentService, "generateSpecificationForSpecification");
+
+    // --- Первая генерация через Path C (legacy-эндпоинт) ---
+    const specResponse = await request(httpServer)
+      .post(`/v1/production-orders/${order.id}/generate-specification`)
+      .set(...authHeader(accessToken))
+      .expect(201);
+    const specDocument = specResponse.body as DocumentResponseDto;
+    expect(specDocument.docType).toBe("specification");
+
+    expect(spy).toHaveBeenCalledTimes(1);
+    const [, firstSpecId, , firstData] = spy.mock.calls[0];
+
+    // Три поля, пропущенные при эталонной калибровке — до фикса были "" и
+    // рендерились в PDF как пустые подстановки.
+    expect(firstData.fields.specDate).toBeTruthy();
+    expect(firstData.fields.legalAddress).toBe("г. Бишкек, ул. Тестовая, д. 1");
+    expect(firstData.fields.totalSumNoDecimals).toBeTruthy();
+    // Сумма без копеек: 4542 шт. × 500 руб. = 2 271 000 руб.
+    expect(firstData.fields.totalSumNoDecimals).toContain("2 271 000");
+
+    // Количество/распределение по контрольному кейсу дошло до PDF-DTO
+    // неизменным — 15 строк (3 цвета × 5 размеров), сумма 4542.
+    expect(firstData.items).toHaveLength(15);
+    expect(firstData.totals.quantity.replace(/\s/g, "")).toBe("4542");
+
+    // Ровно одна каноническая Specification создана этим вызовом.
+    const [specRow] = await db.select().from(specifications).where(eq(specifications.productionOrderId, order.id));
+    expect(specRow).toBeDefined();
+    expect(specRow?.id).toBe(firstSpecId);
+    const [workshopAfterFirst] = await db.select().from(workshops).where(eq(workshops.id, workshop.id));
+
+    // --- Изменяем ЖИВЫЕ данные цеха ПОСЛЕ первой генерации ---
+    await request(httpServer)
+      .patch(`/v1/workshops/${workshop.id}`)
+      .set(...authHeader(accessToken))
+      .send({ legalAddress: "г. Ош, ул. Новая, д. 99" })
+      .expect(200);
+
+    // --- Повторная генерация через Path C ("Сформировать заново") ---
+    const secondSpecResponse = await request(httpServer)
+      .post(`/v1/production-orders/${order.id}/generate-specification`)
+      .set(...authHeader(accessToken))
+      .expect(201);
+    const secondSpecDocument = secondSpecResponse.body as DocumentResponseDto;
+    expect(secondSpecDocument.id).not.toBe(specDocument.id); // новая версия PDF
+
+    expect(spy).toHaveBeenCalledTimes(2);
+    const [, secondSpecId, , secondData] = spy.mock.calls[1];
+
+    // ЗАМОРОЖЕНО (canonical, не может разойтись между вызовами) — одна и та
+    // же Specification-запись, тот же номер, та же дата спецификации, тот же
+    // срок поставки, то же количество/распределение.
+    expect(secondSpecId).toBe(firstSpecId);
+    expect(secondData.fields.specNumber).toBe(firstData.fields.specNumber);
+    expect(secondData.fields.specDate).toBe(firstData.fields.specDate);
+    expect(secondData.fields.deliveryDeadline).toBe(firstData.fields.deliveryDeadline);
+    expect(secondData.totals.quantity).toBe(firstData.totals.quantity);
+    expect(secondData.items).toHaveLength(15);
+    const [workshopAfterSecond] = await db.select().from(workshops).where(eq(workshops.id, workshop.id));
+    expect(workshopAfterSecond?.nextSpecificationNumber).toBe(workshopAfterFirst?.nextSpecificationNumber);
+
+    // НЕ заморожено, и намеренно: NEW-flow (specification.service.ts,
+    // generateDocumentForNewFlow) уже до этого рефакторинга проектировался
+    // как "PDF собирается из ТЕКУЩЕГО состояния" — коммерческие поля цеха
+    // (включая legalAddress) читаются вживую при каждой генерации, тот же
+    // принцип, что paymentTerms/deliveryMethod/подписанты. Это не часть
+    // расхождения, найденного forensic-аудитом (тот касался ТОЛЬКО
+    // отсутствия полей в отдельном legacy-DTO) — заморозка этих полей была
+    // бы переписыванием уже утверждённой NEW-flow архитектуры, не входит в
+    // scope этого фикса.
+    expect(secondData.fields.legalAddress).toBe("г. Ош, ул. Новая, д. 99");
+    expect(secondData.fields.legalAddress).not.toBe(firstData.fields.legalAddress);
+
+    // --- Тот же результат через Path B (POST /specifications/:id/document) ---
+    // Прямое доказательство единого источника истины: для ТОЙ ЖЕ
+    // Specification оба входа (Path B и Path C) вызывают один и тот же
+    // SpecificationService.generateDocument → идентичный DTO в данный момент
+    // времени (кроме specDate/deliveryDeadline/quantity, которые уже
+    // проверены выше как замороженные и стабильные).
+    await request(httpServer)
+      .post(`/v1/specifications/${firstSpecId}/document`)
+      .set(...authHeader(accessToken))
+      .expect(201);
+    expect(spy).toHaveBeenCalledTimes(3);
+    const [, thirdSpecId, , thirdData] = spy.mock.calls[2];
+    expect(thirdSpecId).toBe(firstSpecId);
+    expect(thirdData.fields).toEqual(secondData.fields);
+    expect(thirdData.items).toEqual(secondData.items);
+    expect(thirdData.totals).toEqual(secondData.totals);
+
+    spy.mockRestore();
   });
 });

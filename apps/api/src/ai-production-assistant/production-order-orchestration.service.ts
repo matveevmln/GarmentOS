@@ -2,28 +2,21 @@ import { Inject, Injectable } from "@nestjs/common";
 import type { BomItem } from "@garmentos/domain-bom";
 import type { ProductionOrder } from "@garmentos/domain-contract-manufacturing";
 import type { AuditSource } from "@garmentos/domain-audit";
-import type { DocumentEntity, SpecificationDocumentData, SpecificationLineItem } from "@garmentos/domain-document";
+import type { DocumentEntity } from "@garmentos/domain-document";
 import type { ProductionOrderCostSnapshot } from "@garmentos/shared-types";
 import { AuditService } from "../audit/audit.service";
 import { BomService } from "../bom/bom.service";
 import { CatalogService } from "../catalog/catalog.service";
 import { ContractManufacturingService } from "../contract-manufacturing/contract-manufacturing.service";
-import { DocumentService } from "../document/document.service";
 import { IdentityService } from "../identity/identity.service";
 import { ProcurementService } from "../procurement/procurement.service";
 import { CostingService } from "../reporting/costing.service";
+import { SpecificationService } from "../specification/specification.service";
 import type { TelegramClient } from "../telegram/telegram-client";
 import { TELEGRAM_CLIENT } from "../telegram/telegram.tokens";
 import { WarehouseService } from "../warehouse/warehouse.service";
 import { ProductionRequestService } from "./production-request.service";
-import {
-  formatDeliveryPeriodText,
-  formatRuAmount,
-  formatRuDate,
-  formatRuQuantity,
-  formatRuQuantityNoGrouping,
-} from "./ru-number-format";
-import { computeSpecificationLinePricing } from "./specification-pricing";
+import { formatRuAmount, formatRuQuantity } from "./ru-number-format";
 
 // Условие оплаты по умолчанию — тот же текст и та же правка, что в
 // specification.service.ts (ПРОМПТ №10.3, дословно по эталону): используется,
@@ -107,11 +100,11 @@ export class ProductionOrderOrchestrationService {
     private readonly catalogService: CatalogService,
     private readonly bomService: BomService,
     private readonly contractManufacturingService: ContractManufacturingService,
-    private readonly documentService: DocumentService,
     private readonly identityService: IdentityService,
     private readonly procurementService: ProcurementService,
     private readonly warehouseService: WarehouseService,
     private readonly costingService: CostingService,
+    private readonly specificationService: SpecificationService,
     private readonly auditService: AuditService,
     @Inject(TELEGRAM_CLIENT) private readonly telegramClient: TelegramClient,
   ) {}
@@ -475,6 +468,29 @@ export class ProductionOrderOrchestrationService {
     return confirmed;
   }
 
+  // Canonical data flow (ПРОМПТ №12.2, владелец проекта, 2026-09-21 —
+  // устранение параллельного источника истины, найденного forensic-аудитом):
+  // раньше этот метод сам строил SpecificationDocumentData из
+  // production_orders.cost_snapshot + живых Workshop/Company/Catalog, минуя
+  // сущность Specification целиком — из-за этого дублировал (и рассинхронизировал)
+  // логику полей specDate/legalAddress/deliveryDeadline с
+  // SpecificationService (566d029). Теперь этот метод — тонкая обёртка:
+  // резолвит существующую Specification для заказа (та же логика, что и у
+  // кнопки «Создать спецификацию»), при первом вызове создаёт её, если ещё
+  // нет, и генерирует PDF ЧЕРЕЗ SpecificationService.generateDocument — то
+  // есть буквально тот же код, что и NEW-flow. Единый источник истины:
+  // одна Specification на заказ (production_orders.id → specifications.production_order_id,
+  // 1:1, DB constraint specifications_production_order_idx), один генератор
+  // DTO (SpecificationService), один шаблон/рендерер (не изменены).
+  //
+  // Побочный эффект, ставший явным поведением, а не багом: повторный вызов
+  // этого эндпоинта («Сформировать заново») больше НЕ резервирует новый
+  // specNumber — он перегенерирует PDF той же Specification (новая версия
+  // документа через supersedesDocumentId, тот же specNumber). Прежнее
+  // поведение ("каждый вызов — новый номер") было именно тем расхождением
+  // с архитектурой 1:1, которое требовалось устранить (docs/DATABASE_SCHEMA.md,
+  // unique index на specifications.production_order_id уже предполагает
+  // ровно одну спецификацию на заказ).
   async generateAndSendSpecification(
     companyId: string,
     productionOrderId: string,
@@ -494,91 +510,24 @@ export class ProductionOrderOrchestrationService {
       );
     }
 
-    const [workshop, company, product] = await Promise.all([
-      this.contractManufacturingService.findWorkshopById(companyId, order.workshopId),
-      this.identityService.findCompanyById(companyId),
-      this.catalogService.findProductById(companyId, order.productId),
-    ]);
-    if (!workshop) {
-      throw new ProductionRequestOrchestrationError(`Цех ${order.workshopId} не найден`, "WORKSHOP_NOT_FOUND");
-    }
-    if (!company) {
-      throw new ProductionRequestOrchestrationError(`Компания ${companyId} не найдена`, "COMPANY_NOT_FOUND");
-    }
-    if (!product) {
-      throw new ProductionRequestOrchestrationError(`Модель ${order.productId} не найдена`, "PRODUCT_NOT_FOUND");
-    }
+    const existingSpec = await this.specificationService.resolveOrderSpecificationLink(companyId, order);
+    const spec = existingSpec ?? (await this.specificationService.createFromProductionOrder(companyId, productionOrderId, uploadedBy));
 
-    const items: SpecificationLineItem[] = [];
-    let totalQuantity = 0;
-    let totalSum = 0;
-    for (const variant of order.variants) {
-      const productVariant = await this.catalogService.findProductVariantById(companyId, variant.productVariantId);
-      if (!productVariant) continue;
-      const { quantity, unitPrice, sum } = computeSpecificationLinePricing(order, variant);
-      totalQuantity += quantity;
-      totalSum += sum;
-      items.push({
-        // Перенос строки вместо запятой перед цветом (ПРОМПТ №11.4, тот же
-        // фикс, что в specification.service.ts).
-        name: `${product.name}\n${productVariant.color}`,
-        unit: "шт",
-        size: productVariant.size,
-        quantity: formatRuQuantity(quantity),
-        unitPrice: formatRuAmount(unitPrice),
-        sum: formatRuAmount(sum),
-      });
-    }
-
-    // Номер спецификации — атомарно резервируется по договору цеха (каждая
-    // генерация получает следующий номер, не переиспользует прежний —
-    // "на каждую модель спецификация должна быть разная, соответственно
-    // нумерация и даты", требование владельца проекта 2026-07-26).
-    const specNumber = await this.contractManufacturingService.reserveNextSpecificationNumber(workshop.id);
-
-    // Условия оплаты/способ доставки/реквизиты договора/подписанты
-    // подставляются из Snapshot партии (owner, 2026-08-03 — «Паспорт
-    // партии»), зафиксированного при подтверждении заказа
-    // (confirmProductionOrder выше) — не из живой карточки цеха/компании.
-    // Это гарантирует, что спецификация №2, сгенерированная повторно через
-    // месяц для того же заказа, покажет ТЕ ЖЕ условия, что и спецификация
-    // №1, даже если цех успел сменить условия оплаты или реквизиты договора
-    // в своих настройках. order.costSnapshot === null только у заказов,
-    // подтверждённых до появления этого механизма — для них сохраняется
-    // прежнее поведение (живые данные), а не отказ в генерации.
-    const snapshot = order.costSnapshot as ProductionOrderCostSnapshot | null;
-    const data: SpecificationDocumentData = {
-      fields: {
-        contractNumber: snapshot?.contractNumber ?? workshop.contractNumber ?? "",
-        contractDate: formatRuDate(snapshot?.contractDate ?? workshop.contractDate),
-        customerName: snapshot?.customerName ?? company.legalName ?? company.name,
-        contractorName: snapshot?.contractorName ?? workshop.name,
-        specNumber: String(specNumber),
-        paymentTerms: snapshot?.paymentTerms ?? workshop.paymentTerms ?? formatDefaultPaymentTerms(totalSum),
-        deliveryDeadline: formatDeliveryPeriodText(order.dueDate, String(order.createdAt.getFullYear())),
-        deliveryMethod: snapshot?.deliveryMethod ?? workshop.deliveryMethod ?? "",
-        contractorSignerRole: snapshot?.contractorSignerRole ?? workshop.signerRole ?? "",
-        contractorSignerName: snapshot?.contractorSignerName ?? workshop.signerName ?? "",
-        customerSignerName: snapshot?.customerSignerName ?? company.signerName ?? "",
-      },
-      items,
-      totals: { quantity: formatRuQuantityNoGrouping(totalQuantity), sum: formatRuAmount(totalSum) },
-    };
-
-    const result = await this.documentService.generateSpecification(companyId, productionOrderId, uploadedBy, data);
+    const result = await this.specificationService.generateDocument(companyId, spec.id, uploadedBy);
 
     await this.auditService.record(companyId, uploadedBy, "http_api", {
       entityType: "production_order",
       entityId: productionOrderId,
       action: "document.specification_generated",
-      afterJson: { documentId: result.document.id, specNumber: data.fields.specNumber },
+      afterJson: { documentId: result.document.id, specNumber: spec.specNumber, specificationId: spec.id },
     });
 
-    if (workshop.telegramChatId) {
+    const workshop = await this.contractManufacturingService.findWorkshopById(companyId, order.workshopId);
+    if (workshop?.telegramChatId) {
       await this.telegramClient.sendDocument(
         workshop.telegramChatId,
         result.document.fileUrl,
-        `Спецификация №${data.fields.specNumber}`,
+        `Спецификация №${spec.specNumber ?? ""}`,
       );
     }
 

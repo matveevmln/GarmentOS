@@ -41,7 +41,7 @@ export class BatchPassportService {
       });
     }
 
-    const [product, workshop, variants, documents, productDocuments, invoiceRows, specificationRow] = await Promise.all([
+    const [product, workshop, variants, productionOrderDocuments, productDocuments, invoiceRows, specificationRow] = await Promise.all([
       this.catalogService.findProductById(companyId, order.productId),
       this.contractManufacturingService.findWorkshopById(companyId, order.workshopId),
       this.catalogService.listProductVariants(companyId, order.productId),
@@ -79,6 +79,20 @@ export class BatchPassportService {
     if (!workshop) {
       throw new NotFoundException({ statusCode: 404, code: "WORKSHOP_NOT_FOUND", message: `Цех ${order.workshopId} не найден` });
     }
+
+    // PDF-спецификация для заказа теперь всегда генерируется через
+    // Specification/Document Engine (canonical data flow, ПРОМПТ №12.2) —
+    // документ привязан к entityType="specification", не "production_order".
+    // Паспорт партии обязан видеть его в вкладке «Документы» независимо от
+    // того, какой из двух эндпоинтов запустил генерацию (оба теперь ведут к
+    // одной и той же Specification-записи) — иначе вкладка выглядела бы
+    // пустой, хотя документ существует.
+    const specificationDocuments = specificationRow[0]
+      ? await this.documentService.listForEntity(companyId, "specification", specificationRow[0].id)
+      : [];
+    const documents = [...productionOrderDocuments, ...specificationDocuments].sort(
+      (a, b) => a.createdAt.getTime() - b.createdAt.getTime(),
+    );
 
     const variantById = new Map(variants.map((variant) => [variant.id, variant]));
     const orderVariants = order.variants.flatMap((row) => {

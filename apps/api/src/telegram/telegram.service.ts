@@ -1,9 +1,10 @@
-import { Inject, Injectable, Logger } from "@nestjs/common";
+import { HttpException, Inject, Injectable, Logger } from "@nestjs/common";
 import { inboxChannels, inboxItems, type Database } from "@garmentos/db-schema";
 import { linkWorkshopTelegramChat, type WorkshopRepository } from "@garmentos/domain-contract-manufacturing";
 import { and, eq } from "drizzle-orm";
 import { DATABASE_CONNECTION } from "../database/database.module";
 import { CatalogService } from "../catalog/catalog.service";
+import { isDomainErrorLike } from "../common/domain-exception.filter";
 import { WORKSHOP_REPOSITORY } from "../contract-manufacturing/contract-manufacturing.tokens";
 import { ContractManufacturingService } from "../contract-manufacturing/contract-manufacturing.service";
 import {
@@ -16,6 +17,27 @@ import { TelegramInviteCodeRepository } from "./telegram-invite-code.repository"
 import { TELEGRAM_CLIENT } from "./telegram.tokens";
 import type { TelegramClient } from "./telegram-client";
 import type { TelegramUpdate } from "./telegram-update.schema";
+
+// Единая точка извлечения понятного пользователю текста из пойманного
+// исключения (ПРОМПТ №12.2) — три формы ошибок, с которыми реально
+// сталкивается confirmPendingRequest: собственный ProductionRequestOrchestrationError
+// (сообщение уже готово для чата), Nest HttpException (BadRequestException/
+// NotFoundException — тело {code, message}, тот же формат, что использует
+// DomainExceptionFilter для HTTP-ответов), и DomainError-подобные ошибки
+// доменных пакетов (Error + строковый code — тот же duck-typing, что и в
+// фильтре, apps/api/src/common/domain-exception.filter.ts). Любая другая,
+// действительно неожиданная ошибка — общий текст, без утечки деталей в чат.
+function extractUserFacingMessage(error: unknown): string {
+  if (error instanceof ProductionRequestOrchestrationError) return error.message;
+  if (error instanceof HttpException) {
+    const body = error.getResponse();
+    if (typeof body === "object" && body !== null && "message" in body && typeof body.message === "string") {
+      return body.message;
+    }
+  }
+  if (isDomainErrorLike(error)) return error.message;
+  return "Не удалось создать заказ — попробуйте ещё раз.";
+}
 
 // Ключевые слова простого текстового ответа цеха → статус заказа
 // (docs/TELEGRAM_INTEGRATION_ARCHITECTURE.md, раздел 4, Итерация 7) — не
@@ -213,8 +235,14 @@ export class TelegramService {
       );
       this.logger.log(`Создан заказ ${order.id}, документ спецификации ${document.id} (чат ${chatId})`);
     } catch (error) {
-      const message = error instanceof ProductionRequestOrchestrationError ? error.message : "Не удалось создать заказ — попробуйте ещё раз.";
-      await this.telegramClient.sendMessage(chatId, message);
+      // ПРОМПТ №12.2 — confirmPendingRequest теперь может дойти до
+      // SpecificationService (canonical flow), который бросает не только
+      // ProductionRequestOrchestrationError, но и обычные Nest HttpException
+      // (BadRequestException/NotFoundException, форма {code, message}) и
+      // DomainError-подобные ошибки доменных пакетов (тот же duck-typing, что
+      // и в DomainExceptionFilter) — раньше конкретный текст причины терялся,
+      // и в чат уходило только общее "попробуйте ещё раз".
+      await this.telegramClient.sendMessage(chatId, extractUserFacingMessage(error));
     }
   }
 

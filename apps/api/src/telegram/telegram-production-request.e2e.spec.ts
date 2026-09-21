@@ -26,6 +26,8 @@ import {
   purchaseOrderItems,
   purchaseOrders,
   refreshTokens,
+  specificationItems,
+  specifications,
   stockItems,
   stockMovements,
   suppliers,
@@ -116,6 +118,14 @@ describe("Telegram: текст → предпросмотр → подтверж
     for (const name of createdCompanyNames) {
       const [company] = await db.select().from(companies).where(eq(companies.name, name));
       if (company) {
+        // Canonical Specification/PDF flow (ПРОМПТ №12.2) — generate-specification
+        // теперь создаёт настоящую запись specifications, ссылающуюся на
+        // production_orders — удалить до самих заказов, иначе FK не даст.
+        const companySpecs = await db.select().from(specifications).where(eq(specifications.companyId, company.id));
+        for (const spec of companySpecs) {
+          await db.delete(specificationItems).where(eq(specificationItems.specificationId, spec.id));
+        }
+        await db.delete(specifications).where(eq(specifications.companyId, company.id));
         const companyOrders = await db.select().from(productionOrders).where(eq(productionOrders.companyId, company.id));
         for (const order of companyOrders) {
           await db.delete(productionOrderVariants).where(eq(productionOrderVariants.productionOrderId, order.id));
@@ -316,7 +326,12 @@ describe("Telegram: текст → предпросмотр → подтверж
     expect(Number(ordersAfterConfirm[0]?.plannedQuantity)).toBe(100);
 
     const orderId = ordersAfterConfirm[0]?.id;
-    const specLinks = await db.select().from(documentLinks).where(eq(documentLinks.entityId, orderId ?? ""));
+    // Canonical Specification/PDF flow (ПРОМПТ №12.2) — документ теперь
+    // привязан к entityType="specification" (создана настоящая запись
+    // specifications для заказа), не напрямую к production_order.
+    const [specRow] = await db.select().from(specifications).where(eq(specifications.productionOrderId, orderId ?? ""));
+    expect(specRow).toBeDefined();
+    const specLinks = await db.select().from(documentLinks).where(eq(documentLinks.entityId, specRow?.id ?? ""));
     expect(specLinks).toHaveLength(1);
 
     // Аудит (владелец проекта, 2026-08-04: "кто изменил партию, когда, что

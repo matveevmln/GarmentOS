@@ -16,7 +16,11 @@ interface DomainErrorLike extends Error {
   code: string;
 }
 
-function isDomainErrorLike(error: unknown): error is DomainErrorLike {
+// Экспортирован (не только для этого фильтра) — тот же duck-typing нужен
+// везде, где код ловит ошибку ДО того, как она доходит до глобального
+// фильтра (например, telegram.service.ts формирует пользовательский текст
+// сообщения из пойманного исключения, не просто отдаёт HTTP-ответ).
+export function isDomainErrorLike(error: unknown): error is DomainErrorLike {
   return error instanceof Error && typeof (error as { code?: unknown }).code === "string";
 }
 
