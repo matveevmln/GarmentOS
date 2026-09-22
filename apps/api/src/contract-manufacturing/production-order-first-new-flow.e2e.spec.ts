@@ -447,4 +447,125 @@ describe("Production Order → Specification — новая цепочка це�
     expect(specsForOrder).toHaveLength(1);
     expect(specsForOrder[0]?.id).toBe((winner.body as SpecificationResponseDto).id);
   });
+
+  // Точечная правка (владелец проекта, 2026-09-22) — заказ в статусе
+  // "received", у которого ни по одному варианту нет факта приёмки
+  // (productionOrderVariants.receivedQuantity === null) и ещё не заведён
+  // результат ОТК. Такое состояние сегодня НЕЛЬЗЯ получить через сам API:
+  // единственный путь в "received" — POST .../receive, а он (см.
+  // receiveProductionOrder use case) всегда проставляет receivedQuantity по
+  // КАЖДОМУ варианту заказа (явным фактом или планом по умолчанию) — то есть
+  // "полноценно принятый" заказ никогда не имеет receivedQuantity === null.
+  // Реальный источник этого состояния — заказы, переведённые в "received" до
+  // появления фактической приёмки (P0-1) более старым путём смены статуса, у
+  // которых факт физически неоткуда взять задним числом; ровно это нашёл
+  // владелец проекта на реальном заказе. Тест воспроизводит это напрямую
+  // через репозиторий (db.update), а не выдумывает новый API-путь для
+  // недостижимого через текущий API состояния.
+  it("rollback: заказ в 'received' без факта приёмки и без ОТК — откатывается в shipped_to_fulfillment, изменение переживает reload", async () => {
+    const companyName = `E2E NewFlow RollbackReceived ${Date.now()}`;
+    createdCompanyNames.push(companyName);
+    const { accessToken } = await setupAuthenticatedCompany(db, httpServer, companyName, "owner");
+    const suffix = `${Date.now()}`;
+
+    const product = (
+      await request(httpServer)
+        .post("/v1/products")
+        .set(...authHeader(accessToken))
+        .send({ name: `Отказ без факта ${suffix}`, code: `ROLLBACKRCV-${suffix}` })
+        .expect(201)
+    ).body as ProductResponseDto;
+    const variant = (
+      await request(httpServer)
+        .post("/v1/product-variants")
+        .set(...authHeader(accessToken))
+        .send({ productId: product.id, size: "ONE SIZE", color: "Синий", skuCode: `ROLLBACKRCV-${suffix}-BLUE` })
+        .expect(201)
+    ).body as ProductVariantResponseDto;
+    const workshop = (
+      await request(httpServer)
+        .post("/v1/workshops")
+        .set(...authHeader(accessToken))
+        .send({ name: `Цех без факта ${suffix}`, contractNumber: `Д-RR-${suffix}` })
+        .expect(201)
+    ).body as WorkshopResponseDto;
+    const order = (
+      await request(httpServer)
+        .post("/v1/production-orders")
+        .set(...authHeader(accessToken))
+        .send({
+          productId: product.id,
+          workshopId: workshop.id,
+          plannedQuantity: 10,
+          agreedUnitPrice: 500,
+          variants: [{ productVariantId: variant.id, quantity: 10 }],
+        })
+        .expect(201)
+    ).body as ProductionOrderResponseDto;
+    await request(httpServer)
+      .post(`/v1/production-orders/${order.id}/confirm`)
+      .set(...authHeader(accessToken))
+      .expect(201);
+    for (const status of ["in_progress", "sewing_completed", "ready_for_pickup", "shipped_to_fulfillment"] as const) {
+      await request(httpServer)
+        .post(`/v1/production-orders/${order.id}/status`)
+        .set(...authHeader(accessToken))
+        .send({ status })
+        .expect(201);
+    }
+
+    // Легаси-переход в "received" в обход /receive — единственный способ
+    // получить именно то состояние, которое разрешает откатывать backend
+    // (assertCanRollbackStatus): статус "received", но receivedQuantity
+    // остаётся null по всем строкам заказа, как и было до записи факта.
+    await db.update(productionOrders).set({ status: "received" }).where(eq(productionOrders.id, order.id));
+    const variantsBeforeRollback = await db
+      .select()
+      .from(productionOrderVariants)
+      .where(eq(productionOrderVariants.productionOrderId, order.id));
+    expect(variantsBeforeRollback.every((row) => row.receivedQuantity === null)).toBe(true);
+
+    const rollbackResponse = await request(httpServer)
+      .post(`/v1/production-orders/${order.id}/rollback-status`)
+      .set(...authHeader(accessToken))
+      .send({ reason: "Ошибочно отмечено как принято, факта приёмки ещё не было" })
+      .expect(201);
+    const rollbackBody = rollbackResponse.body as { fromStatus: string; toStatus: string; order: ProductionOrderResponseDto };
+    expect(rollbackBody.fromStatus).toBe("received");
+    expect(rollbackBody.toStatus).toBe("shipped_to_fulfillment");
+    expect(rollbackBody.order.status).toBe("shipped_to_fulfillment");
+
+    // Reload — изменение действительно сохранено, не только в ответе на сам вызов.
+    const reloaded = await request(httpServer)
+      .get(`/v1/production-orders/${order.id}`)
+      .set(...authHeader(accessToken))
+      .expect(200);
+    expect((reloaded.body as ProductionOrderResponseDto).status).toBe("shipped_to_fulfillment");
+
+    // Регресс на уже работающую часть: как только факт приёмки РЕАЛЬНО есть
+    // хотя бы по одному варианту (обычная приёмка через /receive, без ручного
+    // обхода), backend по-прежнему отказывает — откат из этого сценария не
+    // должен внезапно стать разрешён из-за правки видимости кнопки на фронте.
+    // Заказ после отката уже снова в "shipped_to_fulfillment" (проверено
+    // reload-запросом выше), поэтому /receive вызывается прямо из него.
+    const warehouse = (
+      await request(httpServer)
+        .post("/v1/warehouses")
+        .set(...authHeader(accessToken))
+        .send({ name: `Склад без факта ${suffix}` })
+        .expect(201)
+    ).body as { id: string };
+    await request(httpServer)
+      .post(`/v1/production-orders/${order.id}/receive`)
+      .set(...authHeader(accessToken))
+      .send({ warehouseId: warehouse.id })
+      .expect(201);
+
+    const forbiddenRollback = await request(httpServer)
+      .post(`/v1/production-orders/${order.id}/rollback-status`)
+      .set(...authHeader(accessToken))
+      .send({ reason: "тест" })
+      .expect(409);
+    expect((forbiddenRollback.body as { code: string }).code).toBe("PRODUCTION_ORDER_ROLLBACK_RECEIVED_FACTS_EXIST");
+  });
 });

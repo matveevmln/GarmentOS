@@ -868,6 +868,19 @@ export function BatchPassportPage() {
   // ни зафиксированных данных партии, ни основания для номера документа.
   const canGenerate = passport.status !== "draft" && passport.status !== "cancelled";
 
+  // Зеркалит assertCanRollbackStatus (packages/domain/contract-manufacturing/
+  // src/domain/production-order.ts) на уже загруженных данных страницы —
+  // см. комментарий у самой кнопки ниже про происхождение и границы этого
+  // условия (почему "placed" остаётся исключением).
+  const hasReceivedFacts = passport.variants.some((variant) => variant.receivedQuantity !== null);
+  const canRollbackStatus =
+    passport.status !== "draft" &&
+    passport.status !== "placed" &&
+    passport.status !== "completed" &&
+    passport.status !== "cancelled" &&
+    !qcResult &&
+    !(passport.status === "received" && hasReceivedFacts);
+
   // Матрица размер×цвет — союз всех размеров/цветов в порядке первого
   // появления (не предполагаем, что у каждого цвета один и тот же набор
   // размеров — реальные данные могут быть неравномерными).
@@ -1863,11 +1876,35 @@ export function BatchPassportPage() {
                   Принять партию
                 </Button>
               ) : null}
-              {passport.status !== "placed" ? (
-                <Button type="button" size="sm" variant="ghost" onClick={() => setShowRollbackDialog(true)}>
-                  Откатить на шаг назад
-                </Button>
-              ) : null}
+            </div>
+          ) : null}
+
+          {/* Откат статуса на шаг назад — вынесено в отдельный, независимый
+              от "Цех сообщил" блок (найдено владельцем проекта, 2026-09-22):
+              кнопка раньше рендерилась внутри блока, гейт которого
+              (NEXT_STATUS[status] || ready_for_pickup || shipped_to_fulfillment)
+              не имеет отношения к допустимости отката — для status === "received"
+              он давал false, и кнопка пропадала целиком, хотя backend
+              (assertCanRollbackStatus, packages/domain/contract-manufacturing/
+              src/domain/production-order.ts) такой откат разрешает, когда по
+              заказу ещё нет ни результата ОТК, ни фактически принятого
+              количества. Условие ниже — то же самое правило, посчитанное на
+              уже загруженных данных страницы (qcResult, passport.variants),
+              а не изобретённое заново: backend не выставляет отдельный
+              эндпоинт "какие переходы сейчас допустимы", поэтому дублирование
+              предиката на фронте — единственный способ не завести новый
+              эндпоинт ради одной кнопки. `placed` намеренно остаётся
+              исключением, как и раньше: assertCanRollbackStatus технически
+              разрешает placed → draft, но confirmOrder не сбрасывает
+              costSnapshot заказа при повторном подтверждении черновика, и это
+              привело бы к отдельной, не связанной с этой правкой поломке
+              (COST_SNAPSHOT_ALREADY_SET) — вне рамок точечной правки, заведено
+              отдельным пунктом в отчёте. */}
+          {canRollbackStatus ? (
+            <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-border pt-4">
+              <Button type="button" size="sm" variant="ghost" onClick={() => setShowRollbackDialog(true)}>
+                Откатить на шаг назад
+              </Button>
             </div>
           ) : null}
 
