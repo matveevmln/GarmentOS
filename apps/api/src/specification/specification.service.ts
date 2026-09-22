@@ -170,18 +170,40 @@ export class SpecificationService {
       return { productVariantId: variant.productVariantId, quantity: pricing.quantity, unitPrice: pricing.unitPrice };
     });
 
-    const spec = await createSpecificationFromProductionOrder(
-      { specifications: this.specifications, workshops: this.workshopPort, products: this.productPort, productVariants: this.productVariantPort },
-      {
-        companyId,
-        productionOrderId: order.id,
-        workshopId: order.workshopId,
-        productId: order.productId,
-        deliveryDeadline: order.dueDate,
-        items,
-        createdBy,
-      },
-    );
+    // resolveOrderSpecificationLink выше — read-then-write, сама по себе не
+    // атомарна (idempotency-аудит 2026-09-22): при двух одновременных
+    // запросах на один заказ (двойной клик/повтор сети) оба могут пройти эту
+    // проверку до того, как любой из них вставит строку. Настоящую защиту от
+    // гонки даёт partial unique index specifications_production_order_idx
+    // (packages/db-schema/src/schema/specification.ts) — но без этого catch
+    // проигравший запрос получал бы голый unhandled unique_violation от
+    // Postgres и 500 вместо понятного отказа. Тот же код ошибки, что и у
+    // обычной (не гоночной) повторной попытки выше — с точки зрения
+    // вызывающего это неотличимо и не должно быть отличимо.
+    let spec: Specification;
+    try {
+      spec = await createSpecificationFromProductionOrder(
+        { specifications: this.specifications, workshops: this.workshopPort, products: this.productPort, productVariants: this.productVariantPort },
+        {
+          companyId,
+          productionOrderId: order.id,
+          workshopId: order.workshopId,
+          productId: order.productId,
+          deliveryDeadline: order.dueDate,
+          items,
+          createdBy,
+        },
+      );
+    } catch (error) {
+      if (isUniqueViolation(error, "specifications_production_order_idx")) {
+        throw new BadRequestException({
+          statusCode: HttpStatus.BAD_REQUEST,
+          code: "SPECIFICATION_ALREADY_EXISTS_FOR_ORDER",
+          message: "Для этого заказа уже создана спецификация",
+        });
+      }
+      throw error;
+    }
 
     await this.auditService.record(companyId, createdBy, "http_api", {
       entityType: "specification",
@@ -522,7 +544,7 @@ export class SpecificationService {
 
   async listByCompany(
     companyId: string,
-    filter?: { productId?: string; workshopId?: string; status?: SpecificationStatus },
+    filter?: { productId?: string; workshopId?: string; status?: SpecificationStatus; productionOrderId?: string },
   ): Promise<Specification[]> {
     return this.specifications.listByCompany(companyId, filter);
   }
@@ -777,4 +799,19 @@ export class SpecificationService {
 
     return this.documentService.generateAct(companyId, productionOrderId, uploadedBy, data);
   }
+}
+
+// Postgres-ошибка нарушения unique-индекса приходит от drizzle обёрнутой в
+// DrizzleQueryError с исходной PostgresError в .cause (code "23505",
+// constraint_name — имя конкретного индекса); duck-typing, а не импорт типа
+// драйвера — та же причина, что у isDomainErrorLike в domain-exception.filter.ts
+// (не тянуть типы драйвера туда, где их не было). constraintName обязателен,
+// чтобы случайно не проглотить нарушение другого unique-индекса под чужим
+// сообщением об ошибке.
+function isUniqueViolation(error: unknown, constraintName: string): boolean {
+  if (typeof error !== "object" || error === null || !("cause" in error)) return false;
+  const cause = (error as { cause?: unknown }).cause;
+  if (typeof cause !== "object" || cause === null) return false;
+  const { code, constraint_name: causeConstraintName } = cause as { code?: unknown; constraint_name?: unknown };
+  return code === "23505" && causeConstraintName === constraintName;
 }

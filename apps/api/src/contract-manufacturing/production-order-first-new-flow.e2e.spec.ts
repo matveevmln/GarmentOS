@@ -225,6 +225,46 @@ describe("Production Order → Specification — новая цепочка це�
       .set(...authHeader(accessToken))
       .expect(400);
 
+    // Постоянная версия ad-hoc Playwright-сценария (владелец проекта,
+    // 2026-09-22, DocumentsPage.tsx): в order-first потоке (этот тест)
+    // обратная ссылка production_orders.specification_id НЕ проставляется —
+    // связь идёт только в одну сторону, specifications.production_order_id.
+    // DocumentsPage раньше резолвил спецификацию заказа исключительно через
+    // order.specificationId и поэтому не видел её вообще для такого потока;
+    // фикс мирроит either/or из BatchPassportService.getPassport через
+    // ?productionOrderId= на уже существующем GET /specifications
+    // (аддитивный query-параметр, не новый эндпоинт). Явно фиксируем оба
+    // факта здесь, на backend, а не только эмпирически через UI-скриншот.
+    expect(order.specificationId).toBeNull();
+    const specByOrderIdResponse = await request(httpServer)
+      .get(`/v1/specifications?productionOrderId=${order.id}`)
+      .set(...authHeader(accessToken))
+      .expect(200);
+    const specsByOrderId = specByOrderIdResponse.body as SpecificationResponseDto[];
+    expect(specsByOrderId).toHaveLength(1);
+    expect(specsByOrderId[0]?.id).toBe(spec.id);
+
+    // Заказ без собственной спецификации — пустой массив, а не 404/ошибка
+    // (DocumentsPage полагается на пустой массив, чтобы просто не показывать
+    // вторую секцию документов, без обработки отдельного кода ошибки).
+    const anotherOrderResponse = await request(httpServer)
+      .post("/v1/production-orders")
+      .set(...authHeader(accessToken))
+      .send({
+        productId: product.id,
+        workshopId: workshop.id,
+        plannedQuantity: 5,
+        agreedUnitPrice: 500,
+        variants: [{ productVariantId: variant1.id, quantity: 5 }],
+      })
+      .expect(201);
+    const anotherOrder = anotherOrderResponse.body as ProductionOrderResponseDto;
+    const specByAnotherOrderIdResponse = await request(httpServer)
+      .get(`/v1/specifications?productionOrderId=${anotherOrder.id}`)
+      .set(...authHeader(accessToken))
+      .expect(200);
+    expect(specByAnotherOrderIdResponse.body as SpecificationResponseDto[]).toEqual([]);
+
     // 5. Редактирование спецификации — НЕ пишет обратно в заказ.
     const updateResponse = await request(httpServer)
       .patch(`/v1/specifications/${spec.id}`)
@@ -329,5 +369,82 @@ describe("Production Order → Specification — новая цепочка це�
       .from(auditLog)
       .where(and(eq(auditLog.entityId, order.id), eq(auditLog.action, "production_order.status_rolled_back")));
     expect(rollbackAuditEntries).toHaveLength(0); // rollback был отклонён, записи быть не должно
+  });
+
+  // Constraint-аудит (владелец проекта, 2026-09-22) — 1:1 заказ→спецификация
+  // в NEW-потоке защищён НЕ только явной app-level проверкой (тест выше в
+  // этом файле: "Повторное создание для того же заказа запрещено"), но и
+  // партиальным unique-индексом в БД (specifications_production_order_idx,
+  // packages/db-schema/src/schema/specification.ts) — обе защиты уже
+  // существовали, тест ниже фиксирует, что происходит, когда app-level
+  // проверка проигрывает настоящей гонке (две параллельные попытки создать
+  // спецификацию из ОДНОГО заказа) и решает вопрос только DB-constraint.
+  it("constraint: параллельное создание спецификации из одного заказа — ровно одна побеждает, вторая получает явный отказ (не 500)", async () => {
+    const companyName = `E2E NewFlow SpecRace ${Date.now()}`;
+    createdCompanyNames.push(companyName);
+    const { accessToken } = await setupAuthenticatedCompany(db, httpServer, companyName, "owner");
+    const suffix = `${Date.now()}`;
+
+    const product = (
+      await request(httpServer)
+        .post("/v1/products")
+        .set(...authHeader(accessToken))
+        .send({ name: `Спец Гонка ${suffix}`, code: `SPECRACE-${suffix}` })
+        .expect(201)
+    ).body as ProductResponseDto;
+    const variant = (
+      await request(httpServer)
+        .post("/v1/product-variants")
+        .set(...authHeader(accessToken))
+        .send({ productId: product.id, size: "ONE SIZE", color: "Красный", skuCode: `SPECRACE-${suffix}-RED` })
+        .expect(201)
+    ).body as ProductVariantResponseDto;
+    const workshop = (
+      await request(httpServer)
+        .post("/v1/workshops")
+        .set(...authHeader(accessToken))
+        .send({ name: `Цех Спец Гонка ${suffix}`, contractNumber: `Д-SR-${suffix}` })
+        .expect(201)
+    ).body as WorkshopResponseDto;
+    const order = (
+      await request(httpServer)
+        .post("/v1/production-orders")
+        .set(...authHeader(accessToken))
+        .send({
+          productId: product.id,
+          workshopId: workshop.id,
+          plannedQuantity: 4,
+          agreedUnitPrice: 500,
+          variants: [{ productVariantId: variant.id, quantity: 4 }],
+        })
+        .expect(201)
+    ).body as ProductionOrderResponseDto;
+    await request(httpServer)
+      .post(`/v1/production-orders/${order.id}/confirm`)
+      .set(...authHeader(accessToken))
+      .expect(201);
+
+    const [first, second] = await Promise.all([
+      request(httpServer).post(`/v1/production-orders/${order.id}/specification`).set(...authHeader(accessToken)),
+      request(httpServer).post(`/v1/production-orders/${order.id}/specification`).set(...authHeader(accessToken)),
+    ]);
+    const statuses = [first.status, second.status].sort((a, b) => a - b);
+    // Явный отказ — 400 (app-level проверка либо DB unique-violation,
+    // пойманный тем же путём), НИКОГДА не 500: гонка — ожидаемый сценарий
+    // (двойной клик/повтор сети), а не внутренняя ошибка сервера.
+    expect(statuses).toEqual([201, 400]);
+    const winner = first.status === 201 ? first : second;
+    const loser = first.status === 201 ? second : first;
+    expect((winner.body as SpecificationResponseDto).productionOrderId).toBe(order.id);
+    // Структурированная ошибка (code присутствует), не голая passthrough
+    // Postgres-ошибка — значит либо app-level проверка сработала первой,
+    // либо DB unique-violation тоже маппится в понятный код, а не в 500.
+    expect(typeof (loser.body as { code?: string }).code).toBe("string");
+
+    // Ровно одна спецификация в БД для этого заказа — DB constraint не дал
+    // создать вторую строку, даже если бы app-level проверка гонку проиграла.
+    const specsForOrder = await db.select().from(specifications).where(eq(specifications.productionOrderId, order.id));
+    expect(specsForOrder).toHaveLength(1);
+    expect(specsForOrder[0]?.id).toBe((winner.body as SpecificationResponseDto).id);
   });
 });

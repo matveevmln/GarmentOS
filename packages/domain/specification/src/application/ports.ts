@@ -37,7 +37,10 @@ export interface SpecificationUpdatePatch {
 export interface SpecificationRepository {
   create(input: NewSpecificationInput): Promise<Specification>;
   findById(companyId: string, id: string): Promise<Specification | null>;
-  listByCompany(companyId: string, filter?: { productId?: string; workshopId?: string; status?: SpecificationStatus }): Promise<Specification[]>;
+  listByCompany(
+    companyId: string,
+    filter?: { productId?: string; workshopId?: string; status?: SpecificationStatus; productionOrderId?: string },
+  ): Promise<Specification[]>;
   // Утверждение LEGACY-потока — одна атомарная операция (не update statusа
   // отдельно от остального): номер, snapshot и итоговая предоплата
   // фиксируются вместе с переходом в approved, чтобы не было промежуточного

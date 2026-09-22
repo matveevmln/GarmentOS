@@ -65,6 +65,11 @@ export const listSpecificationsQuerySchema = z.object({
   productId: z.string().uuid().optional(),
   workshopId: z.string().uuid().optional(),
   status: specificationStatusSchema.optional(),
+  // Спецификация, созданная ИЗ конкретного заказа пошива (NEW-поток,
+  // specifications.production_order_id) — нужен фронтенду там, где известен
+  // только id заказа, а не id спецификации (владелец проекта, 2026-09-22,
+  // тот же either/or, что уже реализован в BatchPassportService.getPassport).
+  productionOrderId: z.string().uuid().optional(),
 });
 export type ListSpecificationsQueryDto = z.infer<typeof listSpecificationsQuerySchema>;
 

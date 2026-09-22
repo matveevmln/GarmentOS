@@ -107,12 +107,13 @@ export class DrizzleSpecificationRepository implements SpecificationRepository {
 
   async listByCompany(
     companyId: string,
-    filter?: { productId?: string; workshopId?: string; status?: SpecificationStatus },
+    filter?: { productId?: string; workshopId?: string; status?: SpecificationStatus; productionOrderId?: string },
   ): Promise<Specification[]> {
     const conditions = [eq(specifications.companyId, companyId)];
     if (filter?.productId) conditions.push(eq(specifications.productId, filter.productId));
     if (filter?.workshopId) conditions.push(eq(specifications.workshopId, filter.workshopId));
     if (filter?.status) conditions.push(eq(specifications.status, filter.status));
+    if (filter?.productionOrderId) conditions.push(eq(specifications.productionOrderId, filter.productionOrderId));
 
     const specRows = await this.db
       .select()
