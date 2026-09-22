@@ -239,6 +239,13 @@
       "when": 1789646402681,
       "tag": "0033_seed_rollback_permission_and_presets",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1789732802681,
+      "tag": "0034_seed_cancel_permission",
+      "breakpoints": true
     }
   ]
 }

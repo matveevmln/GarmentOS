@@ -6,12 +6,14 @@ import {
   createProductionOrderDraft,
   createProductionOrderFromSpecification,
   createWorkshop,
+  cancelProductionOrder as cancelProductionOrderUseCase,
   receiveProductionOrder as receiveProductionOrderUseCase,
   rollbackProductionOrderStatus as rollbackProductionOrderStatusUseCase,
   updateProductionOrderStatus as updateProductionOrderStatusUseCase,
   updateProductionOrderStatusFromWorkshop,
   updateWorkshop,
   type BomApprovalPort,
+  type CancelProductionOrderResult,
   type CreateProductionOrderFromSpecificationInput,
   type ProductionOrder,
   type ProductionOrderRepository,
@@ -375,6 +377,37 @@ export class ContractManufacturingService {
       action: "production_order.status_rolled_back",
       beforeJson: { status: result.fromStatus },
       afterJson: { status: result.toStatus, reason },
+    });
+
+    return result;
+  }
+
+  // Отмена заказа пошива (владелец проекта, 2026-09-22) — та же дисциплина,
+  // что и у rollback: право contract_manufacturing.cancel проверяется на
+  // уровне контроллера, сервис отвечает только за вызов домена (guard —
+  // assertCanCancel) и журналирование. Каскадная отмена связанных сущностей
+  // (спецификация/раскройные задания) НЕ здесь — это забота вызывающей
+  // оркестрации (ProductionOrderOrchestrationService.cancelProductionOrder в
+  // ai-production-assistant), потому что доступ к SpecificationService и
+  // CuttingService отсюда создал бы цикл модулей (тот же принцип, что уже
+  // объясняет, почему ":id/confirm" не в этом контроллере — см. комментарий
+  // в production-orders.controller.ts).
+  async cancelProductionOrder(
+    currentUser: AuthenticatedRequestUser,
+    productionOrderId: string,
+    reason: string,
+  ): Promise<CancelProductionOrderResult> {
+    const result = await cancelProductionOrderUseCase(
+      { productionOrders: this.productionOrders, qcResults: this.qcResultLookup },
+      { companyId: currentUser.companyId, productionOrderId, reason },
+    );
+
+    await this.auditService.recordForUser(currentUser, {
+      entityType: "production_order",
+      entityId: result.order.id,
+      action: "production_order.cancelled",
+      beforeJson: { status: result.fromStatus },
+      afterJson: { status: "cancelled", reason },
     });
 
     return result;

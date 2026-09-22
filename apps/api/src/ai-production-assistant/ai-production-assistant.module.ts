@@ -2,6 +2,7 @@ import { Module } from "@nestjs/common";
 import { BomModule } from "../bom/bom.module";
 import { CatalogModule } from "../catalog/catalog.module";
 import { ContractManufacturingModule } from "../contract-manufacturing/contract-manufacturing.module";
+import { CuttingModule } from "../cutting/cutting.module";
 import { IdentityModule } from "../identity/identity.module";
 import { ProcurementModule } from "../procurement/procurement.module";
 import { ReportingModule } from "../reporting/reporting.module";
@@ -31,6 +32,13 @@ import { ProductionRequestService } from "./production-request.service";
 // Не создаёт цикл: SpecificationModule не импортирует AiProductionAssistantModule
 // ни прямо, ни транзитивно через свои импорты (ContractManufacturing/Catalog/
 // Identity/Document/Reporting/Bom).
+// CuttingModule (владелец проекта, 2026-09-22 — отмена заказа пошива)
+// добавлен по той же причине, что и SpecificationModule: отмена заказа
+// каскадно отменяет его раскройные задания (CuttingService.cancel), а
+// CuttingModule сам импортирует ContractManufacturingModule — импорт в
+// обратную сторону создал бы цикл. Не создаёт цикл здесь: CuttingModule не
+// импортирует AiProductionAssistantModule ни прямо, ни транзитивно
+// (ContractManufacturing/Catalog/Procurement/Warehouse/Audit/Document).
 // Импортирует только TelegramClientModule (не полный TelegramModule) —
 // TelegramModule сам импортирует этот модуль для сценария "текст →
 // подтверждение → заказ" (Telegram — тонкий интерфейс над этой
@@ -41,6 +49,7 @@ import { ProductionRequestService } from "./production-request.service";
     BomModule,
     ContractManufacturingModule,
     SpecificationModule,
+    CuttingModule,
     TelegramClientModule,
     IdentityModule,
     ProcurementModule,

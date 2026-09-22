@@ -424,3 +424,37 @@ export function assertCanRollbackStatus(
   }
   return PRODUCTION_ORDER_STATUS_ORDER[currentIndex - 1];
 }
+
+// Отмена заказа пошива (владелец проекта, 2026-09-22) — разрешена из любого
+// статуса, кроме "completed" и уже "cancelled" (бизнес-правило, зафиксировано
+// явно, не выводится из PRODUCTION_ORDER_STATUS_ORDER). Два дополнительных
+// ограничения — того же класса, что уже проверяет assertCanRollbackStatus, и
+// сознательно строже буквального правила "любой статус кроме completed":
+// однажды зафиксированный физический факт (ОТК или реально зачисленный на
+// склад остаток) не должен молча аннулироваться отменой заказа — иначе
+// понадобилось бы решать, что делать с уже посчитанным браком/остатком, а
+// это отдельная, не решённая здесь бизнес-логика (владелец проекта,
+// 2026-09-22, явное решение — не реверсировать склад и не резать ОТК).
+export function assertCanCancel(current: ProductionOrderStatus, hasReceivedFacts: boolean, hasQcResult: boolean): void {
+  if (current === "cancelled") {
+    throw new DomainError(`Заказ пошива уже отменён`, "PRODUCTION_ORDER_ALREADY_CANCELLED");
+  }
+  if (current === "completed") {
+    throw new DomainError(
+      `Нельзя отменить завершённую партию — она уже закрыта, отмена для этого не предназначена`,
+      "PRODUCTION_ORDER_CANCEL_FROM_COMPLETED",
+    );
+  }
+  if (hasQcResult) {
+    throw new DomainError(
+      `Нельзя отменить заказ — по нему уже зафиксирован результат ОТК`,
+      "PRODUCTION_ORDER_CANCEL_QC_EXISTS",
+    );
+  }
+  if (current === "received" && hasReceivedFacts) {
+    throw new DomainError(
+      `Нельзя отменить заказ — уже зачислен остаток на склад хотя бы по одному варианту`,
+      "PRODUCTION_ORDER_CANCEL_RECEIVED_FACTS_EXIST",
+    );
+  }
+}

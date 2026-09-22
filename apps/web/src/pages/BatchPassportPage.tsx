@@ -762,6 +762,32 @@ export function BatchPassportPage() {
     }
   };
 
+  // Отмена заказа пошива (владелец проекта, 2026-09-22) — разрешена из
+  // любого статуса кроме completed/cancelled, но не если по заказу уже есть
+  // необратимый физический факт (реально зачисленный остаток на приёмке или
+  // результат ОТК) — backend проверяет это (assertCanCancel), право
+  // contract_manufacturing.cancel, тот же класс, что и у rollback. Каскадно
+  // закрывает эксклюзивную спецификацию заказа и его нетерминальные
+  // раскройные задания — это делает backend, здесь только запрос и reload.
+  const [cancelReason, setCancelReason] = useState("");
+  const [showCancelDialog, setShowCancelDialog] = useState(false);
+  const [isCancellingOrder, setIsCancellingOrder] = useState(false);
+  const cancelOrder = async () => {
+    if (!id || !cancelReason.trim()) return;
+    setIsCancellingOrder(true);
+    try {
+      await apiRequest(`/production-orders/${id}/cancel`, { method: "POST", body: { reason: cancelReason.trim() } });
+      load();
+      toast.success("Заказ отменён");
+      setShowCancelDialog(false);
+      setCancelReason("");
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Не удалось отменить заказ");
+    } finally {
+      setIsCancellingOrder(false);
+    }
+  };
+
   // Завершение партии (ПРОМПТ №10.1/10.2, владелец проекта, 2026-09-15) —
   // отдельное явное действие после приёмки, не следствие ОТК. Если результата
   // ОТК ещё нет — предупреждаем (не блокируем): партия имеет право быть
@@ -876,6 +902,19 @@ export function BatchPassportPage() {
   const canRollbackStatus =
     passport.status !== "draft" &&
     passport.status !== "placed" &&
+    passport.status !== "completed" &&
+    passport.status !== "cancelled" &&
+    !qcResult &&
+    !(passport.status === "received" && hasReceivedFacts);
+
+  // Зеркалит assertCanCancel (тот же файл в домене) — то же "физический
+  // факт уже есть" ограничение, что и у canRollbackStatus выше, но без
+  // исключения "placed" (отмена, в отличие от отката, не подвержена
+  // проблеме с costSnapshot: cancelProductionOrder не подтверждает заказ
+  // повторно). Условие видимости, не сама проверка допустимости — backend
+  // проверяет её ещё раз (assertCanCancel), это только чтобы не показывать
+  // кнопку там, где нажатие гарантированно вернёт 409.
+  const canCancelOrder =
     passport.status !== "completed" &&
     passport.status !== "cancelled" &&
     !qcResult &&
@@ -1900,11 +1939,24 @@ export function BatchPassportPage() {
               привело бы к отдельной, не связанной с этой правкой поломке
               (COST_SNAPSHOT_ALREADY_SET) — вне рамок точечной правки, заведено
               отдельным пунктом в отчёте. */}
-          {canRollbackStatus ? (
+          {canRollbackStatus || canCancelOrder ? (
             <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-border pt-4">
-              <Button type="button" size="sm" variant="ghost" onClick={() => setShowRollbackDialog(true)}>
-                Откатить на шаг назад
-              </Button>
+              {canRollbackStatus ? (
+                <Button type="button" size="sm" variant="ghost" onClick={() => setShowRollbackDialog(true)}>
+                  Откатить на шаг назад
+                </Button>
+              ) : null}
+              {/* Отмена заказа (владелец проекта, 2026-09-22) — отдельная
+                  кнопка от отката: откат корректирует один шаг, отмена
+                  закрывает заказ целиком и каскадно отменяет спецификацию/
+                  раскрой. destructive — то же визуальное решение, что и у
+                  кнопки отмены раскройного задания ниже (необратимое
+                  действие с последствиями для связанных сущностей). */}
+              {canCancelOrder ? (
+                <Button type="button" size="sm" variant="destructive" onClick={() => setShowCancelDialog(true)}>
+                  Отменить заказ
+                </Button>
+              ) : null}
             </div>
           ) : null}
 
@@ -1999,6 +2051,43 @@ export function BatchPassportPage() {
             </Button>
             <Button size="sm" loading={isRollingBack} disabled={!rollbackReason.trim()} onClick={() => void rollbackStatus()}>
               Откатить
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Отмена заказа пошива (владелец проекта, 2026-09-22) — необратимое
+          действие: каскадно закрывает эксклюзивную спецификацию заказа и его
+          нетерминальные раскройные задания (backend, не здесь). Причина
+          обязательна — как и у отката. */}
+      <Dialog open={showCancelDialog} onOpenChange={setShowCancelDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Отменить заказ пошива?</DialogTitle>
+            <DialogDescription>
+              Заказ будет закрыт как отменённый. Если по нему уже есть спецификация или раскройное задание — они
+              тоже будут отменены. Отменить это действие нельзя. Действие логируется — укажите причину.
+            </DialogDescription>
+          </DialogHeader>
+          <Field label="Причина отмены (обязательно)">
+            <Input
+              value={cancelReason}
+              onChange={(e) => setCancelReason(e.target.value)}
+              placeholder="Например: цех отказался от заказа"
+            />
+          </Field>
+          <DialogFooter>
+            <Button variant="secondary" size="sm" onClick={() => setShowCancelDialog(false)}>
+              Не отменять
+            </Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              loading={isCancellingOrder}
+              disabled={!cancelReason.trim()}
+              onClick={() => void cancelOrder()}
+            >
+              Отменить заказ
             </Button>
           </DialogFooter>
         </DialogContent>

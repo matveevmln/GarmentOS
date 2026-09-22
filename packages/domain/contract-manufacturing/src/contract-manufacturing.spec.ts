@@ -27,12 +27,14 @@ import { updateProductionOrderStatus } from "./application/update-production-ord
 import { updateProductionOrderStatusFromWorkshop } from "./application/update-production-order-status-from-workshop";
 import { DomainError } from "./domain/errors";
 import {
+  assertCanCancel,
   assertCanReceive,
   assertCanRollbackStatus,
   assertCanUpdateStatusFromWorkshop,
   assertSourceOrderIsNotSelf,
 } from "./domain/production-order";
 import { rollbackProductionOrderStatus } from "./application/rollback-production-order-status";
+import { cancelProductionOrder } from "./application/cancel-production-order";
 import type { QcResultLookupPort } from "./application/ports";
 import {
   DrizzleProductionOrderRepository,
@@ -1020,6 +1022,183 @@ describe("domain/contract-manufacturing", () => {
 
         await expect(
           rollbackProductionOrderStatus(
+            { productionOrders, qcResults: fakeQcResults(false) },
+            { companyId: company.id, productionOrderId: "00000000-0000-0000-0000-000000000000", reason: "тест" },
+          ),
+        ).rejects.toMatchObject({ code: "PRODUCTION_ORDER_NOT_FOUND" });
+      });
+    });
+  });
+
+  describe("assertCanCancel (владелец проекта, 2026-09-22)", () => {
+    it("разрешает отмену из draft/placed/in_progress/received-без-фактов", () => {
+      expect(() => assertCanCancel("draft", false, false)).not.toThrow();
+      expect(() => assertCanCancel("placed", false, false)).not.toThrow();
+      expect(() => assertCanCancel("in_progress", false, false)).not.toThrow();
+      expect(() => assertCanCancel("shipped_to_fulfillment", false, false)).not.toThrow();
+      expect(() => assertCanCancel("received", false, false)).not.toThrow();
+    });
+    it("запрещает повторную отмену уже отменённого заказа", () => {
+      expect(() => assertCanCancel("cancelled", false, false)).toThrow(DomainError);
+    });
+    it("запрещает отмену завершённой партии", () => {
+      expect(() => assertCanCancel("completed", false, false)).toThrow(DomainError);
+    });
+    it("запрещает отмену, если уже зафиксирован результат ОТК — независимо от статуса", () => {
+      expect(() => assertCanCancel("received", false, true)).toThrow(DomainError);
+      expect(() => assertCanCancel("shipped_to_fulfillment", false, true)).toThrow(DomainError);
+    });
+    it("запрещает отмену received, если уже зачислен реальный остаток на склад", () => {
+      expect(() => assertCanCancel("received", true, false)).toThrow(DomainError);
+    });
+  });
+
+  describe("cancelProductionOrder — REST use case (владелец проекта, 2026-09-22)", () => {
+    function fakeQcResults(hasResult: boolean): QcResultLookupPort {
+      return { hasResultForOrder: () => Promise.resolve(hasResult) };
+    }
+
+    it("требует непустую причину", async () => {
+      await runInRolledBackTransaction(async (tx) => {
+        const { company, product, variant, boms, approvedBom, workshops, workshop } = await seedApprovedBomAndVariant(tx);
+        const productionOrders = new DrizzleProductionOrderRepository(tx);
+        const bomApproval = makeBomApprovalPort(boms);
+        const draft = await createProductionOrderDraft(
+          { productionOrders, workshops, bomApproval },
+          { companyId: company.id, productId: product.id, bomId: approvedBom.id, workshopId: workshop.id, plannedQuantity: 10, agreedUnitPrice: 450, variants: [{ productVariantId: variant.id, quantity: 10 }] },
+        );
+
+        await expect(
+          cancelProductionOrder(
+            { productionOrders, qcResults: fakeQcResults(false) },
+            { companyId: company.id, productionOrderId: draft.id, reason: "   " },
+          ),
+        ).rejects.toMatchObject({ code: "PRODUCTION_ORDER_CANCEL_REASON_REQUIRED" });
+      });
+    });
+
+    it("отменяет черновик и пишет причину/fromStatus в результат", async () => {
+      await runInRolledBackTransaction(async (tx) => {
+        const { company, product, variant, boms, approvedBom, workshops, workshop } = await seedApprovedBomAndVariant(tx);
+        const productionOrders = new DrizzleProductionOrderRepository(tx);
+        const bomApproval = makeBomApprovalPort(boms);
+        const draft = await createProductionOrderDraft(
+          { productionOrders, workshops, bomApproval },
+          { companyId: company.id, productId: product.id, bomId: approvedBom.id, workshopId: workshop.id, plannedQuantity: 10, agreedUnitPrice: 450, variants: [{ productVariantId: variant.id, quantity: 10 }] },
+        );
+
+        const result = await cancelProductionOrder(
+          { productionOrders, qcResults: fakeQcResults(false) },
+          { companyId: company.id, productionOrderId: draft.id, reason: "Заказ создан по ошибке" },
+        );
+
+        expect(result.fromStatus).toBe("draft");
+        expect(result.order.status).toBe("cancelled");
+      });
+    });
+
+    it("запрещает повторную отмену — заказ уже cancelled", async () => {
+      await runInRolledBackTransaction(async (tx) => {
+        const { company, product, variant, boms, approvedBom, workshops, workshop } = await seedApprovedBomAndVariant(tx);
+        const productionOrders = new DrizzleProductionOrderRepository(tx);
+        const bomApproval = makeBomApprovalPort(boms);
+        const draft = await createProductionOrderDraft(
+          { productionOrders, workshops, bomApproval },
+          { companyId: company.id, productId: product.id, bomId: approvedBom.id, workshopId: workshop.id, plannedQuantity: 10, agreedUnitPrice: 450, variants: [{ productVariantId: variant.id, quantity: 10 }] },
+        );
+        await cancelProductionOrder(
+          { productionOrders, qcResults: fakeQcResults(false) },
+          { companyId: company.id, productionOrderId: draft.id, reason: "Первая отмена" },
+        );
+
+        await expect(
+          cancelProductionOrder(
+            { productionOrders, qcResults: fakeQcResults(false) },
+            { companyId: company.id, productionOrderId: draft.id, reason: "Вторая попытка" },
+          ),
+        ).rejects.toMatchObject({ code: "PRODUCTION_ORDER_ALREADY_CANCELLED" });
+      });
+    });
+
+    it("запрещает отмену завершённой партии", async () => {
+      await runInRolledBackTransaction(async (tx) => {
+        const { company, product, variant, boms, approvedBom, workshops, workshop } = await seedApprovedBomAndVariant(tx);
+        const productionOrders = new DrizzleProductionOrderRepository(tx);
+        const bomApproval = makeBomApprovalPort(boms);
+        const draft = await createProductionOrderDraft(
+          { productionOrders, workshops, bomApproval },
+          { companyId: company.id, productId: product.id, bomId: approvedBom.id, workshopId: workshop.id, plannedQuantity: 10, agreedUnitPrice: 450, variants: [{ productVariantId: variant.id, quantity: 10 }] },
+        );
+        await confirmProductionOrder({ productionOrders }, { companyId: company.id, productionOrderId: draft.id });
+        for (const status of ["in_progress", "sewing_completed", "ready_for_pickup", "shipped_to_fulfillment"] as const) {
+          await updateProductionOrderStatus({ productionOrders }, { companyId: company.id, productionOrderId: draft.id, status });
+        }
+        await receiveProductionOrder({ productionOrders }, { companyId: company.id, productionOrderId: draft.id });
+        await completeProductionOrder({ productionOrders }, { companyId: company.id, productionOrderId: draft.id });
+
+        await expect(
+          cancelProductionOrder(
+            { productionOrders, qcResults: fakeQcResults(false) },
+            { companyId: company.id, productionOrderId: draft.id, reason: "тест" },
+          ),
+        ).rejects.toMatchObject({ code: "PRODUCTION_ORDER_CANCEL_FROM_COMPLETED" });
+      });
+    });
+
+    it("запрещает отмену received, если уже зачислен факт приёмки (реальный остаток)", async () => {
+      await runInRolledBackTransaction(async (tx) => {
+        const { company, product, variant, boms, approvedBom, workshops, workshop } = await seedApprovedBomAndVariant(tx);
+        const productionOrders = new DrizzleProductionOrderRepository(tx);
+        const bomApproval = makeBomApprovalPort(boms);
+        const draft = await createProductionOrderDraft(
+          { productionOrders, workshops, bomApproval },
+          { companyId: company.id, productId: product.id, bomId: approvedBom.id, workshopId: workshop.id, plannedQuantity: 10, agreedUnitPrice: 450, variants: [{ productVariantId: variant.id, quantity: 10 }] },
+        );
+        await confirmProductionOrder({ productionOrders }, { companyId: company.id, productionOrderId: draft.id });
+        for (const status of ["in_progress", "sewing_completed", "ready_for_pickup", "shipped_to_fulfillment"] as const) {
+          await updateProductionOrderStatus({ productionOrders }, { companyId: company.id, productionOrderId: draft.id, status });
+        }
+        await receiveProductionOrder({ productionOrders }, { companyId: company.id, productionOrderId: draft.id });
+
+        await expect(
+          cancelProductionOrder(
+            { productionOrders, qcResults: fakeQcResults(false) },
+            { companyId: company.id, productionOrderId: draft.id, reason: "тест" },
+          ),
+        ).rejects.toMatchObject({ code: "PRODUCTION_ORDER_CANCEL_RECEIVED_FACTS_EXIST" });
+      });
+    });
+
+    it("запрещает отмену, если уже зафиксирован результат ОТК", async () => {
+      await runInRolledBackTransaction(async (tx) => {
+        const { company, product, variant, boms, approvedBom, workshops, workshop } = await seedApprovedBomAndVariant(tx);
+        const productionOrders = new DrizzleProductionOrderRepository(tx);
+        const bomApproval = makeBomApprovalPort(boms);
+        const draft = await createProductionOrderDraft(
+          { productionOrders, workshops, bomApproval },
+          { companyId: company.id, productId: product.id, bomId: approvedBom.id, workshopId: workshop.id, plannedQuantity: 10, agreedUnitPrice: 450, variants: [{ productVariantId: variant.id, quantity: 10 }] },
+        );
+        await confirmProductionOrder({ productionOrders }, { companyId: company.id, productionOrderId: draft.id });
+        for (const status of ["in_progress", "sewing_completed", "ready_for_pickup", "shipped_to_fulfillment"] as const) {
+          await updateProductionOrderStatus({ productionOrders }, { companyId: company.id, productionOrderId: draft.id, status });
+        }
+
+        await expect(
+          cancelProductionOrder(
+            { productionOrders, qcResults: fakeQcResults(true) },
+            { companyId: company.id, productionOrderId: draft.id, reason: "тест" },
+          ),
+        ).rejects.toMatchObject({ code: "PRODUCTION_ORDER_CANCEL_QC_EXISTS" });
+      });
+    });
+
+    it("бросает PRODUCTION_ORDER_NOT_FOUND на неизвестный заказ", async () => {
+      await runInRolledBackTransaction(async (tx) => {
+        const company = await createCompany({ companies: new DrizzleCompanyRepository(tx) }, { name: "Бренд без заказа для cancel" });
+        const productionOrders = new DrizzleProductionOrderRepository(tx);
+
+        await expect(
+          cancelProductionOrder(
             { productionOrders, qcResults: fakeQcResults(false) },
             { companyId: company.id, productionOrderId: "00000000-0000-0000-0000-000000000000", reason: "тест" },
           ),

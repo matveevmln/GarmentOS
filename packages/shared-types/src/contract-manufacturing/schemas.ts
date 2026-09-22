@@ -231,6 +231,14 @@ export const rollbackProductionOrderStatusResponseSchema = z.object({
 });
 export type RollbackProductionOrderStatusResponseDto = z.infer<typeof rollbackProductionOrderStatusResponseSchema>;
 
+// Отмена заказа пошива (владелец проекта, 2026-09-22) — как и у rollback,
+// причина обязательна и не заменяется никаким автоматическим текстом.
+// Целевой статус не передаётся клиентом — он всегда "cancelled".
+export const cancelProductionOrderSchema = z.object({
+  reason: z.string().min(1, "Для отмены заказа обязательно нужно указать причину"),
+});
+export type CancelProductionOrderDto = z.infer<typeof cancelProductionOrderSchema>;
+
 export const productionOrderVariantTypeSchema = z.enum(["new", "rework"]);
 
 export const productionOrderVariantResponseSchema = z.object({

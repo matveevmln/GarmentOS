@@ -18,6 +18,7 @@ export {
   assertSourceOrderExists,
   assertCanComplete,
   assertCanRollbackStatus,
+  assertCanCancel,
 } from "./domain/production-order";
 export { DomainError } from "./domain/errors";
 
@@ -83,6 +84,12 @@ export {
   type RollbackProductionOrderStatusInput,
   type RollbackProductionOrderStatusResult,
 } from "./application/rollback-production-order-status";
+export {
+  cancelProductionOrder,
+  type CancelProductionOrderDeps,
+  type CancelProductionOrderInput,
+  type CancelProductionOrderResult,
+} from "./application/cancel-production-order";
 
 export {
   DrizzleProductionOrderRepository,

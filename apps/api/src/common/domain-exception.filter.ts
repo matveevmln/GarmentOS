@@ -56,7 +56,11 @@ function statusForCode(code: string): number {
     // (кроме отсутствия обязательной причины — та BAD_REQUEST) описывают
     // конфликт с текущим состоянием заказа, тот же класс ошибок, что и
     // остальные строки выше.
-    (code.startsWith("PRODUCTION_ORDER_ROLLBACK_") && code !== "PRODUCTION_ORDER_ROLLBACK_REASON_REQUIRED")
+    (code.startsWith("PRODUCTION_ORDER_ROLLBACK_") && code !== "PRODUCTION_ORDER_ROLLBACK_REASON_REQUIRED") ||
+    // Отмена заказа (владелец проекта, 2026-09-22) — тот же принцип, что и у
+    // rollback выше: причины отказа описывают конфликт с текущим состоянием
+    // заказа (409), кроме отсутствия обязательной причины (400).
+    (code.startsWith("PRODUCTION_ORDER_CANCEL_") && code !== "PRODUCTION_ORDER_CANCEL_REASON_REQUIRED")
   ) {
     return HttpStatus.CONFLICT;
   }

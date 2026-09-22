@@ -4,10 +4,12 @@ import type { ProductionOrder } from "@garmentos/domain-contract-manufacturing";
 import type { AuditSource } from "@garmentos/domain-audit";
 import type { DocumentEntity } from "@garmentos/domain-document";
 import type { ProductionOrderCostSnapshot } from "@garmentos/shared-types";
+import type { AuthenticatedRequestUser } from "../auth/current-user.decorator";
 import { AuditService } from "../audit/audit.service";
 import { BomService } from "../bom/bom.service";
 import { CatalogService } from "../catalog/catalog.service";
 import { ContractManufacturingService } from "../contract-manufacturing/contract-manufacturing.service";
+import { CuttingService } from "../cutting/cutting.service";
 import { IdentityService } from "../identity/identity.service";
 import { ProcurementService } from "../procurement/procurement.service";
 import { CostingService } from "../reporting/costing.service";
@@ -105,6 +107,7 @@ export class ProductionOrderOrchestrationService {
     private readonly warehouseService: WarehouseService,
     private readonly costingService: CostingService,
     private readonly specificationService: SpecificationService,
+    private readonly cuttingService: CuttingService,
     private readonly auditService: AuditService,
     @Inject(TELEGRAM_CLIENT) private readonly telegramClient: TelegramClient,
   ) {}
@@ -557,5 +560,54 @@ export class ProductionOrderOrchestrationService {
     }
 
     return result.document;
+  }
+
+  // Отмена заказа пошива (владелец проекта, 2026-09-22) — здесь, а не в
+  // contract-manufacturing/production-orders.controller.ts, по той же
+  // причине, что и confirm/generate-specification/generate-act выше: нужен
+  // доступ к SpecificationService и CuttingService, импорт которых в
+  // ContractManufacturingModule создал бы цикл (оба уже сами импортируют его).
+  //
+  // Сам статус заказа переводится и охраняется (assertCanCancel) в
+  // ContractManufacturingService.cancelProductionOrder — это остаётся
+  // домену contract-manufacturing. Здесь — только каскад, выполняемый
+  // ПОСЛЕ того, как основная отмена уже прошла guard:
+  //
+  // 1. Спецификация — отменяется, только если это ЭКСКЛЮЗИВНАЯ NEW-поток
+  //    спецификация этого заказа (specifications.productionOrderId === order.id,
+  //    связь 1:1). Legacy-спецификация (найденная через production_orders.
+  //    specification_id, связь 1:N — одна спецификация может породить
+  //    несколько партий) НЕ трогается: отмена одного заказа не должна молча
+  //    закрывать спецификацию, которой пользуются другие заказы.
+  // 2. Раскройные задания — отменяются только НЕ-терминальные (draft/issued);
+  //    уже completed (факт кроя записан, материал списан) — необратимый
+  //    физический факт, cancelCuttingOrder и так его не позволит отменить.
+  // 3. Документы (спецификация/акт PDF) — НЕ трогаются: у Document нет
+  //    статуса/lifecycle-поля (см. docs/DOCUMENT_ENGINE_ARCHITECTURE.md,
+  //    файл неизменяем), а заводить его ради одной этой фичи — лишняя правка
+  //    схемы. Отменённость заказа видна через сам заказ, документы остаются
+  //    как есть (не физическое удаление, просто уже не отражают "активный"
+  //    заказ — то же самое любой уже читает по статусу заказа, не по флагу
+  //    на документе).
+  async cancelProductionOrder(
+    currentUser: AuthenticatedRequestUser,
+    productionOrderId: string,
+    reason: string,
+  ): Promise<ProductionOrder> {
+    const result = await this.contractManufacturingService.cancelProductionOrder(currentUser, productionOrderId, reason);
+
+    const spec = await this.specificationService.resolveOrderSpecificationLink(currentUser.companyId, result.order);
+    if (spec && spec.productionOrderId === result.order.id && spec.status !== "cancelled") {
+      await this.specificationService.cancel(currentUser.companyId, spec.id, currentUser.id);
+    }
+
+    const cuttingOrders = await this.cuttingService.listByProductionOrder(currentUser.companyId, result.order.id);
+    for (const cuttingOrder of cuttingOrders) {
+      if (cuttingOrder.status === "draft" || cuttingOrder.status === "issued") {
+        await this.cuttingService.cancel(currentUser, cuttingOrder.id);
+      }
+    }
+
+    return result.order;
   }
 }
