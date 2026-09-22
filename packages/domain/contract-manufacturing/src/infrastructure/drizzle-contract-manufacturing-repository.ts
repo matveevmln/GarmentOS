@@ -4,7 +4,7 @@ import {
   workshops,
   type DbOrTx,
 } from "@garmentos/db-schema";
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import type { Workshop } from "../domain/workshop";
 import type {
   ProductionOrder,
@@ -234,13 +234,20 @@ export class DrizzleProductionOrderRepository implements ProductionOrderReposito
     return toProductionOrder(orderRow, variantRows);
   }
 
-  async updateCostSnapshot(id: string, costSnapshot: Record<string, unknown>): Promise<ProductionOrder> {
+  async updateCostSnapshot(id: string, costSnapshot: Record<string, unknown>): Promise<ProductionOrder | null> {
+    // Compare-and-swap (idempotency-аудит 2026-09-22) — WHERE cost_snapshot
+    // IS NULL делает "снимок ещё не зафиксирован" частью самого UPDATE, а не
+    // отдельной проверкой до него. Раньше запись была безусловной: два
+    // одновременных confirm на один черновик оба проходили application-level
+    // проверку (оба читали costSnapshot=null до того, как любой успевал
+    // записать), и оба писали — последний коммит молча побеждал. Теперь
+    // такой второй запрос находит 0 строк и возвращает null.
     const [orderRow] = await this.db
       .update(productionOrders)
       .set({ costSnapshot, updatedAt: new Date() })
-      .where(eq(productionOrders.id, id))
+      .where(and(eq(productionOrders.id, id), isNull(productionOrders.costSnapshot)))
       .returning();
-    if (!orderRow) throw new Error(`UPDATE production_orders не нашёл строку id=${id}`);
+    if (!orderRow) return null;
 
     const variantRows = await this.db
       .select()

@@ -261,4 +261,105 @@ describe("Production Order Cost Snapshot — историческая неизм
       .expect(409);
     expect((reconfirmResponse.body as ErrorResponseBody).code).toBe("PRODUCTION_ORDER_NOT_DRAFT");
   });
+
+  // Idempotency-аудит (владелец проекта, 2026-09-22): двойной клик/повтор при
+  // плохой сети на «Подтвердить» — два запроса confirm ОДНОВРЕМЕННО на один
+  // черновик. Раньше запись снимка была read-then-write без защиты от гонки —
+  // оба запроса могли прочитать costSnapshot=null до того, как любой из них
+  // запишет, и оба бы записали (второй молча поверх первого, без ошибки).
+  // Теперь `updateCostSnapshot` — compare-and-swap (UPDATE ... WHERE
+  // cost_snapshot IS NULL): ровно один запрос выигрывает гонку и получает
+  // 201 с populated costSnapshot, второй получает 409
+  // PRODUCTION_ORDER_COST_SNAPSHOT_ALREADY_SET, а не тихую перезапись и не 500.
+  it("два одновременных confirm одного черновика: ровно один выигрывает, снимок не переписывается гонкой", async () => {
+    const companyName = `E2E CostSnapshot Race ${Date.now()}`;
+    createdCompanyNames.push(companyName);
+    const { accessToken } = await setupAuthenticatedCompany(db, httpServer, companyName, "owner");
+    const suffix = `${Date.now()}`;
+
+    const product = (
+      await request(httpServer)
+        .post("/v1/products")
+        .set(...authHeader(accessToken))
+        .send({ name: `Стеганка Гонка ${suffix}`, code: `RACE-${suffix}` })
+        .expect(201)
+    ).body as ProductResponseDto;
+    const variant = (
+      await request(httpServer)
+        .post("/v1/product-variants")
+        .set(...authHeader(accessToken))
+        .send({ productId: product.id, size: "M", color: "Синий", skuCode: `RACE-${suffix}-M` })
+        .expect(201)
+    ).body as ProductVariantResponseDto;
+    const material = (
+      await request(httpServer)
+        .post("/v1/materials")
+        .set(...authHeader(accessToken))
+        .send({ name: `Материал гонки ${suffix}`, type: "fabric", unit: "m" })
+        .expect(201)
+    ).body as MaterialResponseDto;
+    const workshop = (
+      await request(httpServer)
+        .post("/v1/workshops")
+        .set(...authHeader(accessToken))
+        .send({ name: `Цех гонки ${suffix}`, contractNumber: `Д-ГОНКА-${suffix}` })
+        .expect(201)
+    ).body as WorkshopResponseDto;
+    const draftBom = (
+      await request(httpServer)
+        .post("/v1/boms")
+        .set(...authHeader(accessToken))
+        .send({ productId: product.id, items: [{ materialId: material.id, quantityPerUnit: 1, wastePercent: 0 }] })
+        .expect(201)
+    ).body as BomResponseDto;
+    const approvedBom = (
+      await request(httpServer)
+        .post(`/v1/boms/${draftBom.id}/approve`)
+        .set(...authHeader(accessToken))
+        .expect(201)
+    ).body as BomResponseDto;
+
+    const order = (
+      await request(httpServer)
+        .post("/v1/production-orders")
+        .set(...authHeader(accessToken))
+        .send({
+          productId: product.id,
+          bomId: approvedBom.id,
+          workshopId: workshop.id,
+          plannedQuantity: 10,
+          agreedUnitPrice: 500,
+          variants: [{ productVariantId: variant.id, quantity: 10 }],
+        })
+        .expect(201)
+    ).body as ProductionOrderResponseDto;
+
+    const [first, second] = await Promise.all([
+      request(httpServer).post(`/v1/production-orders/${order.id}/confirm`).set(...authHeader(accessToken)),
+      request(httpServer).post(`/v1/production-orders/${order.id}/confirm`).set(...authHeader(accessToken)),
+    ]);
+    const statuses = [first.status, second.status].sort();
+    expect(statuses).toEqual([201, 409]);
+    const winner = first.status === 201 ? first : second;
+    const loser = first.status === 201 ? second : first;
+    expect((winner.body as ProductionOrderResponseDto).status).toBe("placed");
+    expect((winner.body as ProductionOrderResponseDto).costSnapshot?.agreedUnitPrice).toBe(500);
+    // Какая именно из двух гонок (по статусу или по снимку) окажется видимой
+    // первой — зависит от точного чередования I/O двух параллельных запросов
+    // и не детерминировано между прогонами; важен сам факт конфликта 409, а
+    // не то, на каком именно шаге он был обнаружен.
+    expect(["PRODUCTION_ORDER_NOT_DRAFT", "PRODUCTION_ORDER_COST_SNAPSHOT_ALREADY_SET"]).toContain(
+      (loser.body as ErrorResponseBody).code,
+    );
+
+    // Заказ остался в согласованном состоянии — ровно один снимок, не
+    // "последний записавший тихо победил" двумя разными наборами данных.
+    const finalResponse = await request(httpServer)
+      .get(`/v1/production-orders/${order.id}`)
+      .set(...authHeader(accessToken))
+      .expect(200);
+    const final = finalResponse.body as ProductionOrderResponseDto;
+    expect(final.status).toBe("placed");
+    expect(final.costSnapshot?.agreedUnitPrice).toBe(500);
+  });
 });

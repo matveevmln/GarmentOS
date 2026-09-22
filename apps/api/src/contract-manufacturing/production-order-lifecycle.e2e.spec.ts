@@ -422,4 +422,132 @@ describe("Production order — полный цикл через REST без Tele
       .send({ warehouseId: warehouse.id, receivedVariants: [{ productVariantId: variant.id, quantity: -5 }] })
       .expect(400);
   });
+
+  // Постоянная версия ad-hoc Playwright-сценария (владелец проекта,
+  // 2026-09-22, паспорт партии — «Следующий заказ»): UI не даёт отправить
+  // строку с нулевым/отрицательным количеством (NumberInput проверяет
+  // !quantity ещё до запроса), поэтому единственный способ честно
+  // воспроизвести "backend отклонил создание" — послать невалидное тело
+  // напрямую, в обход клиента. Проверяем не только код ответа, но и то, что
+  // ни сам заказ, ни его строки не попали в БД — отказ должен быть
+  // атомарным, без частично созданной записи.
+  it("невалидное количество в строке заказа отклоняется на уровне схемы, заказ не создаётся в БД", async () => {
+    const companyName = `E2E Lifecycle InvalidQty ${Date.now()}`;
+    createdCompanyNames.push(companyName);
+    const { accessToken } = await setupAuthenticatedCompany(db, httpServer, companyName, "owner");
+    const suffix = `${Date.now()}`;
+
+    const productResponse = await request(httpServer)
+      .post("/v1/products")
+      .set(...authHeader(accessToken))
+      .send({ name: `Тест Невалид ${suffix}`, code: `INVALID-${suffix}` })
+      .expect(201);
+    const product = productResponse.body as ProductResponseDto;
+
+    const variantResponse = await request(httpServer)
+      .post("/v1/product-variants")
+      .set(...authHeader(accessToken))
+      .send({ productId: product.id, size: "ONE SIZE", color: "Чёрный", skuCode: `INVALID-${suffix}-BLACK` })
+      .expect(201);
+    const variant = variantResponse.body as ProductVariantResponseDto;
+
+    const workshopResponse = await request(httpServer)
+      .post("/v1/workshops")
+      .set(...authHeader(accessToken))
+      .send({ name: `Цех Невалид ${suffix}`, contractNumber: `Д-НВ-${suffix}` })
+      .expect(201);
+    const workshop = workshopResponse.body as WorkshopResponseDto;
+
+    const invalidPlannedQuantityResponse = await request(httpServer)
+      .post("/v1/production-orders")
+      .set(...authHeader(accessToken))
+      .send({
+        productId: product.id,
+        workshopId: workshop.id,
+        plannedQuantity: 0,
+        agreedUnitPrice: 450,
+        variants: [{ productVariantId: variant.id, quantity: 0 }],
+      })
+      .expect(400);
+    expect((invalidPlannedQuantityResponse.body as ErrorResponseBody).statusCode).toBe(400);
+
+    const ordersAfterFailedCreate = await db
+      .select()
+      .from(productionOrders)
+      .innerJoin(products, eq(productionOrders.productId, products.id))
+      .where(eq(products.id, product.id));
+    expect(ordersAfterFailedCreate).toHaveLength(0);
+  });
+
+  // Guard-тест недостижимости "cancelled" (владелец проекта, 2026-09-22) —
+  // ProductionOrderStatus включает "cancelled" как значение для чтения
+  // (домен явно документирует его как "недостижимую явным путём" ветку), но
+  // ни один REST-эндпоинт не должен позволять клиенту ЗАПИСАТЬ его. Это НЕ
+  // тест на добавление функции отмены — наоборот, тест обязан падать, если
+  // кто-то в будущем случайно добавит "cancelled" в допустимый набор значений
+  // updateProductionOrderStatusSchema или заведёт для него отдельный
+  // эндпоинт. Единственный клиентский путь смены статуса, где значение вообще
+  // приходит от вызывающего (а не вычисляется backend'ом или не жёстко
+  // прошито в самом эндпоинте) — POST /production-orders/:id/status; его Zod-
+  // схема (updateProductionOrderStatusSchema) ограничена четырьмя рабочими
+  // значениями и не включает "cancelled" — значит запрос отклоняется на
+  // уровне валидации тела запроса, до какой-либо доменной логики.
+  it("guard: 'cancelled' недостижим ни через один REST-эндпоинт — POST .../status отклоняет его на уровне схемы", async () => {
+    const companyName = `E2E Lifecycle CancelledGuard ${Date.now()}`;
+    createdCompanyNames.push(companyName);
+    const { accessToken } = await setupAuthenticatedCompany(db, httpServer, companyName, "owner");
+    const suffix = `${Date.now()}`;
+
+    const productResponse = await request(httpServer)
+      .post("/v1/products")
+      .set(...authHeader(accessToken))
+      .send({ name: `Тест Cancelled ${suffix}`, code: `CANCELLED-${suffix}` })
+      .expect(201);
+    const product = productResponse.body as ProductResponseDto;
+
+    const variantResponse = await request(httpServer)
+      .post("/v1/product-variants")
+      .set(...authHeader(accessToken))
+      .send({ productId: product.id, size: "ONE SIZE", color: "Белый", skuCode: `CANCELLED-${suffix}-WHITE` })
+      .expect(201);
+    const variant = variantResponse.body as ProductVariantResponseDto;
+
+    const workshopResponse = await request(httpServer)
+      .post("/v1/workshops")
+      .set(...authHeader(accessToken))
+      .send({ name: `Цех Cancelled ${suffix}`, contractNumber: `Д-CNCL-${suffix}` })
+      .expect(201);
+    const workshop = workshopResponse.body as WorkshopResponseDto;
+
+    const orderResponse = await request(httpServer)
+      .post("/v1/production-orders")
+      .set(...authHeader(accessToken))
+      .send({
+        productId: product.id,
+        workshopId: workshop.id,
+        plannedQuantity: 1,
+        agreedUnitPrice: 100,
+        variants: [{ productVariantId: variant.id, quantity: 1 }],
+      })
+      .expect(201);
+    const order = orderResponse.body as ProductionOrderResponseDto;
+    await request(httpServer)
+      .post(`/v1/production-orders/${order.id}/confirm`)
+      .set(...authHeader(accessToken))
+      .expect(201);
+
+    const cancelAttempt = await request(httpServer)
+      .post(`/v1/production-orders/${order.id}/status`)
+      .set(...authHeader(accessToken))
+      .send({ status: "cancelled" })
+      .expect(400);
+    expect((cancelAttempt.body as ErrorResponseBody).statusCode).toBe(400);
+
+    // Статус заказа не тронут отклонённой попыткой.
+    const rereadResponse = await request(httpServer)
+      .get(`/v1/production-orders/${order.id}`)
+      .set(...authHeader(accessToken))
+      .expect(200);
+    expect((rereadResponse.body as ProductionOrderResponseDto).status).toBe("placed");
+  });
 });

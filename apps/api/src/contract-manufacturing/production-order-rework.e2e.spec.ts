@@ -529,4 +529,71 @@ describe("Production order — REWORK + NEW следующий заказ (P5-2,
       })
       .expect(403);
   });
+
+  // RBAC-аудит (владелец проекта, 2026-09-22) — кнопка «Подтвердить» в
+  // паспорте партии (BatchPassportPage) была добавлена как отдельный вход,
+  // но вызывает ТОТ ЖЕ POST /production-orders/:id/confirm, что и список
+  // заказов пошива (ProductionOrdersPage) — второго механизма подтверждения
+  // не заводилось. Значит матрица доступа у обеих кнопок идентична по
+  // конструкции (один и тот же backend-guard на один и тот же эндпоинт), а
+  // не потому, что кто-то сверил два списка ролей вручную. Тест фиксирует
+  // это explicitly: viewer не может подтвердить чужой draft (403, то же
+  // право contract_manufacturing.write, что и создание заказа), владелец —
+  // может (201).
+  it("RBAC: подтверждение заказа (кнопка «Подтвердить» и на списке, и в паспорте партии) требует contract_manufacturing.write", async () => {
+    const companyName = `E2E Rework Confirm RBAC ${Date.now()}`;
+    createdCompanyNames.push(companyName);
+    const owner = await setupAuthenticatedCompany(db, httpServer, companyName, "owner");
+    const viewer = await addUserToCompany(db, httpServer, owner.companyId, "viewer");
+
+    const product = (
+      await request(httpServer)
+        .post("/v1/products")
+        .set(...authHeader(owner.accessToken))
+        .send({ name: `Худи Confirm RBAC ${Date.now()}`, code: `CONFIRM-RBAC-${Date.now()}` })
+        .expect(201)
+    ).body as ProductResponseDto;
+    // from-quantity распределяет заказ по уже существующим вариантам модели —
+    // сама заявка на подтверждение id варианта не использует, но без хотя бы
+    // одного варианта распределять было бы не по чему.
+    await request(httpServer)
+      .post("/v1/product-variants")
+      .set(...authHeader(owner.accessToken))
+      .send({ productId: product.id, size: "S", color: "Белый", skuCode: `CONFIRM-RBAC-${Date.now()}-S` })
+      .expect(201);
+    const workshop = (
+      await request(httpServer)
+        .post("/v1/workshops")
+        .set(...authHeader(owner.accessToken))
+        .send({ name: `Цех Confirm RBAC ${Date.now()}`, contractNumber: `Д-CRBAC-${Date.now()}` })
+        .expect(201)
+    ).body as WorkshopResponseDto;
+    const order = (
+      await request(httpServer)
+        .post("/v1/production-orders/from-quantity")
+        .set(...authHeader(owner.accessToken))
+        .send({
+          productId: product.id,
+          workshopId: workshop.id,
+          totalQuantity: 1,
+          agreedUnitPrice: 100,
+          distributionMode: "even",
+        })
+        .expect(201)
+    ).body as ProductionOrderResponseDto;
+
+    // Тот же эндпоинт, что и «Подтвердить» на паспорте партии — viewer
+    // отклоняется одинаково независимо от того, с какого экрана пришёл запрос.
+    await request(httpServer)
+      .post(`/v1/production-orders/${order.id}/confirm`)
+      .set(...authHeader(viewer.accessToken))
+      .expect(403);
+
+    // Владелец с правом contract_manufacturing.write — тот же вызов проходит.
+    const confirmed = await request(httpServer)
+      .post(`/v1/production-orders/${order.id}/confirm`)
+      .set(...authHeader(owner.accessToken))
+      .expect(201);
+    expect((confirmed.body as ProductionOrderResponseDto).status).toBe("placed");
+  });
 });

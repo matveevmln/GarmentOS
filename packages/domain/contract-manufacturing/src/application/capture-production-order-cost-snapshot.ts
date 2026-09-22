@@ -1,5 +1,5 @@
 import { DomainError } from "../domain/errors";
-import { assertCostSnapshotNotYetSet, type ProductionOrder } from "../domain/production-order";
+import { assertCostSnapshotNotYetSet, costSnapshotAlreadySetError, type ProductionOrder } from "../domain/production-order";
 import type { ProductionOrderRepository } from "./ports";
 
 export interface CaptureProductionOrderCostSnapshotInput {
@@ -28,5 +28,15 @@ export async function captureProductionOrderCostSnapshot(
   }
   assertCostSnapshotNotYetSet(order.costSnapshot);
 
-  return deps.productionOrders.updateCostSnapshot(order.id, input.costSnapshot);
+  // Идемпотентность/гонка (аудит 2026-09-22): проверка выше сама по себе не
+  // атомарна с записью — если ровно в этот момент параллельный confirm того
+  // же заказа уже прошёл ту же проверку и записал первым, репозиторий вернёт
+  // null (его compare-and-swap на cost_snapshot IS NULL не найдёт ни одной
+  // строки). С точки зрения вызывающего это неотличимо от обычной повторной
+  // попытки — та же ошибка.
+  const updated = await deps.productionOrders.updateCostSnapshot(order.id, input.costSnapshot);
+  if (!updated) {
+    throw costSnapshotAlreadySetError();
+  }
+  return updated;
 }

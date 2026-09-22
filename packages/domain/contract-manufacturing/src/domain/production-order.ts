@@ -316,16 +316,28 @@ export function assertReceivedVariantsValid(
 // Снимок партии неизменяем по определению (docs/PRODUCTION_BATCH_LIFECYCLE_ARCHITECTURE.md,
 // «Snapshot партии») — раньше это была только договорённость в комментарии
 // порта, ничего не мешало вызвать запись дважды. P1-1 (владелец проекта,
-// 2026-09-05): явный инвариант, а не только конвенция. DB-триггер здесь не
-// нужен — единственная точка записи (captureProductionOrderCostSnapshot)
-// теперь сама гарантирует одноразовость, второй прямой SQL-писатель в
-// систему не заводился и не планируется.
+// 2026-09-05): явный инвариант, а не только конвенция.
+//
+// Уточнено 2026-09-22 (idempotency-аудит confirm/next-order): проверка ниже
+// сама по себе не атомарна (read-then-write) — при двух одновременных вызовах
+// confirm на один и тот же черновик оба могли прочитать costSnapshot=null до
+// того, как любой из них запишет. Настоящую защиту от гонки даёт
+// compare-and-swap в репозитории (updateCostSnapshot — UPDATE ... WHERE
+// cost_snapshot IS NULL, см. drizzle-contract-manufacturing-repository.ts);
+// эта функция остаётся быстрой проверкой по уже прочитанным данным (даёт
+// понятную ошибку в обычном, не гоночном случае — вызов на заказе, у
+// которого снимок уже виден), а costSnapshotAlreadySetError используется
+// повторно, когда CAS в репозитории проигрывает гонку.
+export function costSnapshotAlreadySetError(): DomainError {
+  return new DomainError(
+    "Снимок партии уже зафиксирован — повторная запись запрещена (снимок неизменяем)",
+    "PRODUCTION_ORDER_COST_SNAPSHOT_ALREADY_SET",
+  );
+}
+
 export function assertCostSnapshotNotYetSet(costSnapshot: Record<string, unknown> | null): void {
   if (costSnapshot !== null) {
-    throw new DomainError(
-      "Снимок партии уже зафиксирован — повторная запись запрещена (снимок неизменяем)",
-      "PRODUCTION_ORDER_COST_SNAPSHOT_ALREADY_SET",
-    );
+    throw costSnapshotAlreadySetError();
   }
 }
 

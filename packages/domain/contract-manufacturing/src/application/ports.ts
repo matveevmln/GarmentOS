@@ -94,12 +94,17 @@ export interface ProductionOrderRepository {
   // плановому quantity (обратная совместимость: приёмка без указания факта
   // ведёт себя ровно как раньше).
   markReceived(id: string, received: ReceivedVariantInput[]): Promise<ProductionOrder>;
-  // Безусловная запись — сама по себе НЕ проверяет, есть ли уже снимок.
-  // Единственный корректный вызывающий — application/capture-production-order-cost-snapshot.ts
-  // (P1-1), которая сначала проверяет assertCostSnapshotNotYetSet. Прямой
-  // вызов этого метода в обход неё воспроизведёт старую дыру — перезапишет
-  // существующий снимок молча.
-  updateCostSnapshot(id: string, costSnapshot: Record<string, unknown>): Promise<ProductionOrder>;
+  // Compare-and-swap: пишет ТОЛЬКО если у заказа ещё нет снимка (SQL —
+  // UPDATE ... WHERE cost_snapshot IS NULL), возвращает null, если условие не
+  // выполнилось (снимок уже был — в обычном случае или потому что параллельный
+  // запрос записал его первым). Единственный корректный вызывающий —
+  // application/capture-production-order-cost-snapshot.ts (P1-1/idempotency-
+  // аудит 2026-09-22), которая сначала проверяет assertCostSnapshotNotYetSet
+  // по уже прочитанным данным, а null от этого метода трактует как проигрыш
+  // гонки той же самой проверке. Прямой вызов этого метода в обход нужного
+  // контекста воспроизведёт старую дыру — перезапишет существующий снимок
+  // молча, если не проверить результат на null.
+  updateCostSnapshot(id: string, costSnapshot: Record<string, unknown>): Promise<ProductionOrder | null>;
   // Нужен для обработки входящего статус-обновления от цеха через Telegram
   // (Итерация 7) — сообщение не ссылается на конкретный productionOrderId
   // (простой текстовый ответ, не структурированная команда), поэтому
