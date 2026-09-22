@@ -1,6 +1,11 @@
 import { useEffect, useState } from "react";
-import type { DocumentResponseDto, ProductResponseDto, ProductionOrderResponseDto } from "@garmentos/shared-types";
-import { apiDownload, apiRequest, ApiError } from "../api/client";
+import type {
+  DocumentResponseDto,
+  ProductResponseDto,
+  ProductionOrderResponseDto,
+  SpecificationResponseDto,
+} from "@garmentos/shared-types";
+import { apiRequest, ApiError } from "../api/client";
 import { Card, CardTitle } from "../design-system/Card/Card";
 import { Button } from "../design-system/Button/Button";
 import { PageHeader, Breadcrumbs } from "../design-system/PageHeader/PageHeader";
@@ -12,23 +17,43 @@ import { StatusBadge } from "../design-system/StatusBadge/StatusBadge";
 import { DocumentRow, MobileListItem } from "../design-system/Blocks";
 import { IconDocument } from "../design-system/Icons/icons";
 import { formatDate, formatQuantity } from "../lib/format";
+import { splitDocumentVersions } from "../lib/document-versions";
+import { openDocumentFile } from "../lib/open-document";
 import { cn } from "../design-system/utils";
-import { toast } from "../design-system/Toast/Toast";
 
 // Документы (docs/UI_MIGRATION_PLAN.md, этап 8).
 //
 // ВАЖНО про контракт API. `GET /documents` — это НЕ лента документов
 // компании: эндпоинт обязательно требует пару entityType+entityId и
 // возвращает документы одной сущности
-// (apps/api/src/document/documents.controller.ts, listForEntity). Единственная
-// связка, которую сегодня создаёт система, — `production_order`: к заказу
-// пошива привязывается сгенерированная спецификация.
+// (apps/api/src/document/documents.controller.ts, listForEntity).
 //
-// Поэтому экран построен по тому, что API реально умеет: слева список
-// заказов пошива, справа документы выбранного заказа. Искусственная
-// «лента документов компании» не собирается — для неё нет ни эндпоинта,
-// ни данных, а склейка на клиенте из N запросов была бы выдуманной
-// сущностью, а не переносом дизайна.
+// Заказ пошива привязан к документам ДВУХ типов сущности одновременно
+// (владелец проекта, 2026-09-22 — найдено аудитом): "act" и вручную
+// загруженные документы линкуются к entityType="production_order", а
+// PDF спецификации после унификации потоков (566d029) линкуется к
+// entityType="specification" (см. BatchPassportService.getPassport,
+// apps/api/src/reporting/batch-passport.service.ts, которая аггрегирует
+// оба списка). Раньше этот экран запрашивал только "production_order" —
+// для заказа, у которого спецификация уже сгенерирована, но акта ещё нет
+// или он загружен вручную под другим типом, спецификация была здесь
+// невидима вообще, не просто неверно помечена.
+//
+// Спецификация заказа резолвится тем же either/or, что и в
+// BatchPassportService.getPassport: order.specificationId (NEW-поток —
+// заказ создан ИЗ спецификации) ИЛИ поиск специфи­кации, созданной ИЗ
+// этого заказа (production-order-first — самый частый на пилоте путь
+// через кнопку "Создать спецификацию" на паспорте партии). Обе связи
+// взаимоисключающие по конструкции — пишет ровно один поток. Первая
+// версия этого фикса проверяла только specificationId и молча пропускала
+// спецификацию для order-first заказов — тот же класс бага, что и
+// исходный ("первый по дате"), только с другой причиной невидимости.
+//
+// Экран построен по тому, что API реально умеет: слева список заказов
+// пошива, справа документы выбранного заказа (обе привязки объединены).
+// Искусственная «лента документов компании» не собирается — для неё нет
+// ни эндпоинта, ни данных, а склейка на клиенте из N запросов была бы
+// выдуманной сущностью, а не переносом дизайна.
 //
 // Действия — только существующие: открыть файл через
 // `GET /documents/:id/file`. Загрузки, удаления и редактирования на
@@ -64,27 +89,42 @@ export function DocumentsPage() {
 
   useEffect(loadOrders, []);
 
-  const loadDocuments = (orderId: string) => {
+  // Документы заказа живут под ДВУМЯ entityType одновременно (см. комментарий
+  // в шапке файла). Спецификация резолвится тем же either/or, что и в
+  // BatchPassportService.getPassport — сначала пробуем order.specificationId,
+  // а если его нет, ищем спецификацию, созданную ИЗ этого заказа
+  // (?productionOrderId=). Найдя id спецификации (из любого источника),
+  // запрашиваем её документы тем же вторым запросом, что и раньше.
+  const loadDocuments = async (order: ProductionOrderResponseDto) => {
     setDocuments(null);
     setDocumentsError(false);
-    apiRequest<DocumentResponseDto[]>(`/documents?entityType=${ENTITY_TYPE}&entityId=${orderId}`)
-      .then(setDocuments)
-      .catch(() => setDocumentsError(true));
+    try {
+      const [orderDocs, specificationId] = await Promise.all([
+        apiRequest<DocumentResponseDto[]>(`/documents?entityType=${ENTITY_TYPE}&entityId=${order.id}`),
+        order.specificationId
+          ? Promise.resolve(order.specificationId)
+          : apiRequest<SpecificationResponseDto[]>(`/specifications?productionOrderId=${order.id}`).then(
+              (rows) => rows[0]?.id ?? null,
+            ),
+      ]);
+      const specDocs = specificationId
+        ? await apiRequest<DocumentResponseDto[]>(`/documents?entityType=specification&entityId=${specificationId}`)
+        : [];
+      setDocuments([...orderDocs, ...specDocs]);
+    } catch {
+      setDocumentsError(true);
+    }
   };
 
   useEffect(() => {
-    if (selectedId) loadDocuments(selectedId);
-  }, [selectedId]);
+    const selected = orders?.find((row) => row.id === selectedId);
+    if (selected) void loadDocuments(selected);
+  }, [selectedId, orders]);
 
   const openDocument = async (docId: string, title: string) => {
     setDownloadingId(docId);
     try {
-      const blob = await apiDownload(`/documents/${docId}/file`);
-      const url = URL.createObjectURL(blob);
-      window.open(url, "_blank", "noopener");
-      setTimeout(() => URL.revokeObjectURL(url), 30_000);
-    } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : `Не удалось открыть «${title}»`);
+      await openDocumentFile(docId, title);
     } finally {
       setDownloadingId(null);
     }
@@ -101,10 +141,17 @@ export function DocumentsPage() {
   const selectedOrder = orders.find((row) => row.id === selectedId) ?? null;
 
   // Оригинал документа неизменяем; новая редакция — новая строка
-  // (docs/PRINCIPLES.md, принцип 19). Самая свежая показывается первой.
+  // (docs/PRINCIPLES.md, принцип 19). Самая свежая показывается первой —
+  // порядок отображения не связан с тем, какой документ актуален (см. ниже).
   const sortedDocuments = documents
     ? [...documents].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
     : null;
+  // "Актуальная" — по isCurrentVersion, не по "первый по дате" (владелец
+  // проекта, 2026-09-22 — тот же баг, что уже исправлен в паспорте партии:
+  // при двух разных docType, оба текущих, "первый по дате" мог показать не
+  // тот документ актуальным). Set строится из documents, а не из
+  // sortedDocuments — порядок для проверки принадлежности не важен.
+  const currentDocumentIds = documents ? new Set(splitDocumentVersions(documents).current.map((doc) => doc.id)) : null;
 
   return (
     <div className="mx-auto max-w-[1400px]">
@@ -180,7 +227,7 @@ export function DocumentsPage() {
             ) : documentsError ? (
               <ErrorState
                 title="Не удалось загрузить документы"
-                onRetry={() => selectedId && loadDocuments(selectedId)}
+                onRetry={() => selectedOrder && void loadDocuments(selectedOrder)}
               />
             ) : !sortedDocuments ? (
               <SkeletonList rows={3} />
@@ -197,11 +244,11 @@ export function DocumentsPage() {
                     DocumentRow: у документа нет колонок, которые имело бы
                     смысл раскладывать таблицей. */}
                 <div className="hidden divide-y divide-border md:block">
-                  {sortedDocuments.map((doc, index) => (
+                  {sortedDocuments.map((doc) => (
                     <DocumentRow
                       key={doc.id}
                       title={doc.title ?? doc.docType}
-                      version={index === 0 ? "Актуальная" : null}
+                      version={currentDocumentIds?.has(doc.id) ? "Актуальная" : null}
                       format="PDF"
                       date={doc.createdAt}
                       onOpen={() => void openDocument(doc.id, doc.title ?? doc.docType)}
@@ -210,7 +257,7 @@ export function DocumentsPage() {
                 </div>
 
                 <div className="space-y-2 md:hidden">
-                  {sortedDocuments.map((doc, index) => (
+                  {sortedDocuments.map((doc) => (
                     <MobileListItem
                       key={doc.id}
                       onClick={() => void openDocument(doc.id, doc.title ?? doc.docType)}
@@ -235,7 +282,7 @@ export function DocumentsPage() {
                             PDF · {formatDate(doc.createdAt)}
                           </div>
                         </div>
-                        {index === 0 ? (
+                        {currentDocumentIds?.has(doc.id) ? (
                           <span className="inline-flex shrink-0 items-center rounded-[4px] border border-success/25 bg-success/[0.08] px-1.5 py-[2px] text-[11px] font-medium text-success">
                             Актуальная
                           </span>

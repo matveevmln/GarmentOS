@@ -28,4 +28,18 @@
 
 ## Журнал
 
-_(записи начинаются после деплоя)_
+### 2026-09-21 — Первый реальный production-деплой + ручное применение миграций
+
+**Сделали:**
+- Push ветки `claude/garmentos-foundation-architecture-ahvh6b` (коммит `fe043dd` — `feat(production): production order to specification flow`) автоматически задеплоил production API и web на Railway (проект `disciplined-perfection`, окружение `production`): `GarmentOS` (API, https://garmentos-production.up.railway.app), `web` (https://web-production-c6b5c.up.railway.app). Auto-deploy сработал как побочный эффект push, не был инициирован отдельной командой — на будущее учитывать, что push в эту ветку = деплой в production.
+- `preDeployCommand` у API-сервиса пуст — миграции не применяются автоматически при деплое.
+- Владелец проекта вручную (Windows, PowerShell + Railway CLI + локальный PostgreSQL client) через Railway TCP tunnel создал backup production БД: `garmentos-production-20260921-185121.dump` (~171 KB), проверен через `pg_restore --list`, архив читается корректно. Более ранняя попытка (`garmentos-production-20260921-184839.dump`, 0 байт) — невалидна, мусор.
+- После backup владелец вручную применил через тот же tunnel миграции `0030_sticky_jimmy_woo`, `0031_smooth_human_robot`, `0032_production_master_stage4_status_specification_link`, `0033_seed_rollback_permission_and_presets` — до этого production находился на `0029_production_master_stage3` (на 4 миграции позади HEAD, не только на 2, как предполагалось изначально; все 4 миграции аддитивные — новые enum-значения, новые таблицы, новые колонки/индексы/permission, ни одного DROP/DELETE/data loss).
+- Соответствие подтверждено сверкой SHA-256 локальных файлов миграций с production migration journal: `0030`→journal id 31, `0031`→32, `0032`→33, `0033`→34.
+- После миграций: `GET /v1/health` → `200`, production web открывается, авторизация/интерфейс доступны.
+
+**Проблема:** auto-deploy на push не был предусмотрен явно в процессе — код оказался в production раньше, чем схема БД была приведена в соответствие (окно рассинхрона: код `fe043dd` живой с ~07:00 UTC, миграции применены позже вручную). За это время новых production-эндпоинтов, зависящих от 0030–0033, никто не вызывал (подтверждено по deploy-логам — 0 HTTP-запросов за этот период), поэтому фактического сбоя не произошло.
+
+**Исправлено:** миграции применены, схема соответствует `fe043dd`, backup существует.
+**Осталось:** нет описанного в `docs/LAUNCH_DAY.md`/`docs/INFRASTRUCTURE.md` runbook-шага «применить миграции перед первым использованием после auto-deploy» — стоит добавить отдельно, чтобы не полагаться на ручную память. Preview-проект `garmentos-preview-09` (отдельная БД, отдельный volume, не задет) — трогать не будем до отдельного решения.
+**Что мешало / заняло слишком много времени:** отсутствие read-only доступа к production Postgres из агентской сессии (Railway MCP не отдаёт значения переменных, egress-прокси блокирует прямой сетевой доступ) — все проверки схемы и сами миграции пришлось выполнять владельцу вручную через браузерную SQL-консоль Railway и через Railway CLI/tunnel с личного компьютера.

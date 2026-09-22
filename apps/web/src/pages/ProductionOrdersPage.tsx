@@ -23,6 +23,7 @@ import { EmptyState } from "../design-system/Feedback/EmptyState";
 import { Accordion, BatchCard, usePhotoUrl } from "../design-system/Blocks";
 import { formatQuantity } from "../lib/format";
 import { buildBatchCardFromOrder } from "../lib/batch-card";
+import { NEXT_STATUS, ORDER_STATUS_LABELS, type ManualOrderStatus } from "../lib/production-order-status-labels";
 import { Combobox } from "../design-system/Select/Combobox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../design-system/Select/Select";
 import { NumberInput } from "../design-system/Input/NumberInput";
@@ -301,17 +302,11 @@ export function ProductionOrdersPage() {
   // P0-1 (владелец проекта, 2026-09-05) — переходы, которые сегодня приходят
   // только через Telegram-ответ цеха. Единственный способ провести партию
   // дальше «Размещён» из интерфейса, пока Telegram не настроен ни для
-  // одного цеха на пилоте.
-  const ORDER_STATUS_LABELS: Record<string, string> = {
-    in_progress: "Начали шить",
-    sewing_completed: "Пошив завершён",
-    ready_for_pickup: "Готово к отгрузке",
-    shipped_to_fulfillment: "Отправлено на фулфилмент",
-  };
-  const changeStatus = async (
-    orderId: string,
-    status: "in_progress" | "sewing_completed" | "ready_for_pickup" | "shipped_to_fulfillment",
-  ) => {
+  // одного цеха на пилоте. Метки и граф переходов — в общем месте
+  // (../lib/production-order-status-labels), тот же источник, что и у
+  // BatchPassportPage (владелец проекта, 2026-09-22 — раньше были
+  // задублированы дословно в обоих файлах).
+  const changeStatus = async (orderId: string, status: ManualOrderStatus) => {
     setPendingOrderAction(orderId);
     try {
       await apiRequest(`/production-orders/${orderId}/status`, { method: "POST", body: { status } });
@@ -818,45 +813,15 @@ export function ProductionOrdersPage() {
                     <Button type="button" size="sm" loading={pendingOrderAction === row.id} onClick={() => void confirmOrder(row.id)}>
                       Подтвердить
                     </Button>
-                  ) : row.status === "placed" ? (
+                  ) : NEXT_STATUS[row.status] ? (
                     <Button
                       type="button"
                       size="sm"
                       variant="secondary"
                       loading={pendingOrderAction === row.id}
-                      onClick={() => void changeStatus(row.id, "in_progress")}
+                      onClick={() => void changeStatus(row.id, NEXT_STATUS[row.status])}
                     >
-                      Начали шить
-                    </Button>
-                  ) : row.status === "in_progress" ? (
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="secondary"
-                      loading={pendingOrderAction === row.id}
-                      onClick={() => void changeStatus(row.id, "sewing_completed")}
-                    >
-                      Пошив завершён
-                    </Button>
-                  ) : row.status === "sewing_completed" ? (
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="secondary"
-                      loading={pendingOrderAction === row.id}
-                      onClick={() => void changeStatus(row.id, "ready_for_pickup")}
-                    >
-                      Готово к отгрузке
-                    </Button>
-                  ) : row.status === "ready_for_pickup" ? (
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="secondary"
-                      loading={pendingOrderAction === row.id}
-                      onClick={() => void changeStatus(row.id, "shipped_to_fulfillment")}
-                    >
-                      Отправлено на фулфилмент
+                      {ORDER_STATUS_LABELS[NEXT_STATUS[row.status]]}
                     </Button>
                   ) : undefined
                   // Отдельной кнопки «Принять партию» здесь больше нет:

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import type {
   BatchPassportResponseDto,
@@ -12,7 +12,7 @@ import type {
   QcResultResponseDto,
   WarehouseResponseDto,
 } from "@garmentos/shared-types";
-import { apiDownload, apiRequest, apiUpload, ApiError } from "../api/client";
+import { apiRequest, apiUpload, ApiError } from "../api/client";
 import { Card, CardTitle, SectionLabel } from "../design-system/Card/Card";
 import { StatusBadge } from "../design-system/StatusBadge/StatusBadge";
 import { Button } from "../design-system/Button/Button";
@@ -53,6 +53,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { statusMeta } from "../lib/status";
 import { formatBatchNumber, formatDate, formatMoney, formatQuantity, materialTypeLabel, unitLabel } from "../lib/format";
 import { computeProductionOrderBatchSum, computeTotalReceivedQuantity } from "../lib/production-order-pricing";
+import { NEXT_STATUS, ORDER_STATUS_LABELS, type ManualOrderStatus } from "../lib/production-order-status-labels";
+import { splitDocumentVersions } from "../lib/document-versions";
+import { openDocumentFile } from "../lib/open-document";
 import { cn } from "../design-system/utils";
 import { toast } from "../design-system/Toast/Toast";
 
@@ -136,6 +139,15 @@ export function BatchPassportPage() {
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isChangingStatus, setIsChangingStatus] = useState(false);
+  const [isConfirming, setIsConfirming] = useState(false);
+  // Синхронный guard от двойного клика/повтора (idempotency-аудит
+  // 2026-09-22) — одного только `disabled={loading}` на кнопке недостаточно:
+  // между быстрым вторым click-событием и тем, как React перерисует кнопку
+  // disabled, есть окно (setState асинхронен относительно колбэка события).
+  // useRef читается/пишется синхронно в момент вызова, а не через рендер, и
+  // поэтому закрывает это окно, не трогая контракт API.
+  const isConfirmingRef = useRef(false);
+  const isSubmittingNextOrderRef = useRef(false);
   const [isCompleting, setIsCompleting] = useState(false);
   const [confirmCompleteWithoutQc, setConfirmCompleteWithoutQc] = useState(false);
   const [confirmRegenerate, setConfirmRegenerate] = useState(false);
@@ -149,6 +161,9 @@ export function BatchPassportPage() {
   // меняет (владелец проекта, 2026-08-30).
   const [cuttingOrders, setCuttingOrders] = useState<CuttingOrderResponseDto[]>([]);
   const [cuttingBusy, setCuttingBusy] = useState(false);
+  // Хранит id задания, а не просто boolean — сам active недоступен там, где
+  // рендерится диалог (вне ветки renderTab("cutting")).
+  const [cancelCuttingOrderId, setCancelCuttingOrderId] = useState<string | null>(null);
   const [factWarehouse, setFactWarehouse] = useState("");
   const [warehouses, setWarehouses] = useState<WarehouseResponseDto[]>([]);
   // Приёмка партии прямо с паспорта (см. комментарий у кнопки «Принять
@@ -393,10 +408,24 @@ export function BatchPassportPage() {
   );
 
   const submitNextOrder = async () => {
-    if (!passport || !nextOrderBomId || nextOrderLines.length === 0 || nextOrderUnitPrice === undefined) return;
+    if (
+      !passport ||
+      !nextOrderBomId ||
+      nextOrderLines.length === 0 ||
+      nextOrderUnitPrice === undefined ||
+      isSubmittingNextOrderRef.current
+    )
+      return;
+    isSubmittingNextOrderRef.current = true;
     setIsSubmittingNextOrder(true);
     try {
-      await apiRequest("/production-orders", {
+      // Ответ POST /production-orders — это строка, реально записанная в
+      // транзакции (DrizzleProductionOrderRepository.create — insert +
+      // returning() внутри await'нутой транзакции, коммит завершается ДО
+      // того, как контроллер вернёт HTTP-ответ). Отдельный подтверждающий
+      // запрос перед переходом не нужен — id из этого ответа уже гарантированно
+      // существует в БД (владелец проекта, 2026-09-22).
+      const created = await apiRequest<ProductionOrderResponseDto>("/production-orders", {
         method: "POST",
         body: {
           productId: passport.product.id,
@@ -415,10 +444,12 @@ export function BatchPassportPage() {
         },
       });
       setNextOrderOpen(false);
-      toast.success("Черновик следующего заказа создан", { description: "Найдёте его в списке заказов пошива" });
+      toast.success("Черновик следующего заказа создан");
+      void navigate(`/production-orders/${created.id}`);
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "Не удалось создать заказ");
     } finally {
+      isSubmittingNextOrderRef.current = false;
       setIsSubmittingNextOrder(false);
     }
   };
@@ -449,6 +480,30 @@ export function BatchPassportPage() {
       toast.success("Раскройное задание создано");
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "Не удалось создать раскройное задание");
+    } finally {
+      setCuttingBusy(false);
+    }
+  };
+
+  // Отмена раскройного задания (владелец проекта, 2026-09-22) — эндпоинт
+  // POST /cutting-orders/:id/cancel уже существовал (cancelCuttingOrder,
+  // packages/domain/cutting/src/application/cancel-cutting-order.ts), но в
+  // интерфейсе не было ни одной кнопки, которая его вызывает: если цех
+  // ошибся с раскроем, исправить это через UI было невозможно. Backend сам
+  // разрешает отмену только из draft/issued (assertCanCancel бросает
+  // CUTTING_ORDER_ALREADY_COMPLETED/_CANCELLED иначе) — кнопка показывается
+  // на фронте по тому же условию, чтобы не полагаться только на серверный
+  // отказ. Новый backend-механизм не заводился.
+  const cancelActiveCuttingOrder = async () => {
+    if (!cancelCuttingOrderId) return;
+    setCuttingBusy(true);
+    try {
+      await apiRequest(`/cutting-orders/${cancelCuttingOrderId}/cancel`, { method: "POST" });
+      setCancelCuttingOrderId(null);
+      loadCutting();
+      toast.success("Раскройное задание отменено");
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Не удалось отменить раскройное задание");
     } finally {
       setCuttingBusy(false);
     }
@@ -603,21 +658,9 @@ export function BatchPassportPage() {
   // цеха на пилоте. Расширено ПРОМПТ №3 (раздел 8): sewing_completed и
   // shipped_to_fulfillment — отдельные явные стадии, каждая — собственное
   // нажатие пользователя, не выводятся автоматически из косвенных данных.
-  const ORDER_STATUS_LABELS: Record<string, string> = {
-    in_progress: "Начали шить",
-    sewing_completed: "Пошив завершён",
-    ready_for_pickup: "Готово к отгрузке",
-    shipped_to_fulfillment: "Отправлено на фулфилмент",
-  };
-  const NEXT_STATUS: Record<string, "in_progress" | "sewing_completed" | "ready_for_pickup" | "shipped_to_fulfillment"> = {
-    placed: "in_progress",
-    in_progress: "sewing_completed",
-    sewing_completed: "ready_for_pickup",
-    ready_for_pickup: "shipped_to_fulfillment",
-  };
-  const changeOrderStatus = async (
-    status: "in_progress" | "sewing_completed" | "ready_for_pickup" | "shipped_to_fulfillment",
-  ) => {
+  // Метки/граф переходов — в ../lib/production-order-status-labels, тот же
+  // источник, что и у ProductionOrdersPage (владелец проекта, 2026-09-22).
+  const changeOrderStatus = async (status: ManualOrderStatus) => {
     if (!id) return;
     setIsChangingStatus(true);
     try {
@@ -628,6 +671,28 @@ export function BatchPassportPage() {
       toast.error(err instanceof ApiError ? err.message : "Не удалось сменить статус заказа");
     } finally {
       setIsChangingStatus(false);
+    }
+  };
+
+  // Подтверждение черновика (draft → placed) прямо с паспорта партии
+  // (владелец проекта, 2026-09-22, аудит пользовательского пути: раньше
+  // единственное место было /production-orders — если открыть свежий
+  // черновик по прямой ссылке, подтвердить его было нельзя, не уходя со
+  // страницы). Тот же эндпоинт, что и ProductionOrdersPage.confirmOrder —
+  // не второй механизм подтверждения, тот же самый вызов с другого экрана.
+  const confirmOrder = async () => {
+    if (!id || isConfirmingRef.current) return;
+    isConfirmingRef.current = true;
+    setIsConfirming(true);
+    try {
+      await apiRequest(`/production-orders/${id}/confirm`, { method: "POST" });
+      load();
+      toast.success("Заказ подтверждён");
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Не удалось подтвердить заказ");
+    } finally {
+      isConfirmingRef.current = false;
+      setIsConfirming(false);
     }
   };
 
@@ -762,12 +827,7 @@ export function BatchPassportPage() {
   const openDocument = async (docId: string, title: string) => {
     setDownloadingId(docId);
     try {
-      const blob = await apiDownload(`/documents/${docId}/file`);
-      const url = URL.createObjectURL(blob);
-      window.open(url, "_blank", "noopener");
-      setTimeout(() => URL.revokeObjectURL(url), 30_000);
-    } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : `Не удалось открыть «${title}»`);
+      await openDocumentFile(docId, title);
     } finally {
       setDownloadingId(null);
     }
@@ -795,14 +855,10 @@ export function BatchPassportPage() {
   // вызовом) — поэтому у заказа может быть одновременно текущая
   // спецификация И текущий акт (владелец проекта, 2026-09-21, «Акт»), и оба
   // это законно "Актуальная", а не одна "Актуальная" и другая ошибочно
-  // "Предыдущая редакция". Раньше здесь брался только ОДИН currentDoc на
-  // весь список (самый свежий isCurrentVersion), что при появлении второго
-  // типа документа (акт) неверно утопило бы его в "Предыдущая редакция".
-  const sortedDocuments = [...passport.documents].sort(
-    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
-  );
-  const currentDocs = sortedDocuments.filter((doc) => doc.isCurrentVersion);
-  const previousDocs = sortedDocuments.filter((doc) => !doc.isCurrentVersion);
+  // "Предыдущая редакция". Логика — в общем месте (../lib/document-versions),
+  // тот же принцип теперь применяется и в DocumentsPage.tsx (владелец
+  // проекта, 2026-09-22 — там был тот же баг «первый по дате»).
+  const { current: currentDocs, previous: previousDocs } = splitDocumentVersions(passport.documents);
   // Кнопка «Скачать спецификацию» в шапке и диалог перегенерации — именно
   // про спецификацию, не про «какой угодно текущий документ» (с появлением
   // акта в currentDocs может быть больше одного элемента).
@@ -1228,6 +1284,11 @@ export function BatchPassportPage() {
               {cuttingOrders.length > 0 && isCompleted && (
                 <Button variant="secondary" size="sm" loading={cuttingBusy} onClick={() => void createCuttingOrder()}>
                   Добавить докрой
+                </Button>
+              )}
+              {(isDraft || isIssued) && (
+                <Button variant="ghost" size="sm" onClick={() => setCancelCuttingOrderId(active.id)}>
+                  Отменить задание
                 </Button>
               )}
             </span>
@@ -1760,6 +1821,19 @@ export function BatchPassportPage() {
             <p className="t-secondary">Заказ отменён — партия вышла из производственной шкалы.</p>
           )}
 
+          {/* Подтверждение черновика (владелец проекта, 2026-09-22) — тот же
+              эндпоинт, что и у ProductionOrdersPage.confirmOrder. Раньше
+              единственным местом подтвердить свежий черновик был список
+              заказов пошива — на паспорте черновика не было ни одного
+              действия вообще. */}
+          {passport.status === "draft" ? (
+            <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-border pt-4">
+              <Button type="button" size="sm" loading={isConfirming} onClick={() => void confirmOrder()}>
+                Подтвердить
+              </Button>
+            </div>
+          ) : null}
+
           {/* Текущее действие цеха — ровно одна кнопка на стадию (P0-1: переход
               без Telegram, канал не настроен ни для одного цеха на пилоте).
               ПРОМПТ №3, раздел 8 — sewing_completed/shipped_to_fulfillment
@@ -1888,6 +1962,29 @@ export function BatchPassportPage() {
             </Button>
             <Button size="sm" loading={isRollingBack} disabled={!rollbackReason.trim()} onClick={() => void rollbackStatus()}>
               Откатить
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Отмена раскройного задания — разрушительно для цеха (задание
+          физически прекращается), обязательное явное подтверждение. */}
+      <Dialog open={cancelCuttingOrderId !== null} onOpenChange={(open) => (!open ? setCancelCuttingOrderId(null) : undefined)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Отменить раскройное задание?</DialogTitle>
+            <DialogDescription>
+              Задание перестанет быть активным. Если материал уже выдан в крой (статус «Выдано»), убедитесь, что цех
+              предупреждён — крой по этому заданию прекращается. Отменить обратно нельзя, но можно создать новое
+              задание.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="secondary" size="sm" onClick={() => setCancelCuttingOrderId(null)}>
+              Не отменять
+            </Button>
+            <Button variant="destructive" size="sm" loading={cuttingBusy} onClick={() => void cancelActiveCuttingOrder()}>
+              Отменить задание
             </Button>
           </DialogFooter>
         </DialogContent>

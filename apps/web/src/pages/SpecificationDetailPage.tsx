@@ -9,7 +9,7 @@ import type {
   SpecificationResponseDto,
   WorkshopResponseDto,
 } from "@garmentos/shared-types";
-import { apiDownload, apiRequest, ApiError } from "../api/client";
+import { apiRequest, ApiError } from "../api/client";
 import { Card, CardContent, CardHeader, CardTitle, SectionLabel } from "../design-system/Card/Card";
 import { Field } from "../design-system/Form/Field";
 import { Input } from "../design-system/Input/Input";
@@ -28,6 +28,7 @@ import { DataTable, Td } from "../design-system/Blocks";
 import { toast } from "../design-system/Toast/Toast";
 import { currencyLabel, formatDate, formatMoney, formatQuantity } from "../lib/format";
 import { SIZE_PRESETS } from "../lib/size-presets";
+import { openDocumentFile } from "../lib/open-document";
 import { cn } from "../design-system/utils";
 
 // Единый мастер спецификации (Этап 2 — «Паспорт модели», владелец проекта,
@@ -645,14 +646,7 @@ function SpecificationView({ id }: { id: string }) {
   };
 
   const downloadDocument = async (docId: string, title: string | null) => {
-    try {
-      const blob = await apiDownload(`/documents/${docId}/file`);
-      const url = URL.createObjectURL(blob);
-      window.open(url, "_blank", "noopener");
-      setTimeout(() => URL.revokeObjectURL(url), 30_000);
-    } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : `Не удалось открыть «${title ?? "документ"}»`);
-    }
+    await openDocumentFile(docId, title ?? "документ");
   };
 
   if (error) return <ErrorState title="Не удалось загрузить спецификацию" onRetry={load} />;
