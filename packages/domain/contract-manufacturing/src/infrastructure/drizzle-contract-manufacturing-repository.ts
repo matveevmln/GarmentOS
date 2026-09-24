@@ -492,7 +492,7 @@ export class DrizzleSewingOrderRepository implements SewingOrderRepository {
     const [row] = await this.db
       .update(sewingOrders)
       .set({ ...values, version: sql`${sewingOrders.version} + 1`, updatedAt: new Date() })
-      .where(and(eq(sewingOrders.id, id), eq(sewingOrders.version, expectedVersion)))
+      .where(and(eq(sewingOrders.id, id), eq(sewingOrders.version, expectedVersion), eq(sewingOrders.status, "draft")))
       .returning();
     return row ? toSewingOrder(row) : null;
   }
