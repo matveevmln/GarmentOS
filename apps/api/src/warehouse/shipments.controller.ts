@@ -19,7 +19,7 @@ export class ShipmentsController {
     @Body() body: CreateShipmentDto,
     @CurrentUser() currentUser: AuthenticatedRequestUser,
   ): Promise<ShipmentResponseDto> {
-    const shipment = await this.warehouseService.createShipment(currentUser.companyId, body);
+    const shipment = await this.warehouseService.createShipment(currentUser, body);
     return shipmentResponseSchema.parse(shipment);
   }
 

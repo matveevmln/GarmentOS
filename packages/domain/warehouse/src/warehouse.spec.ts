@@ -9,6 +9,7 @@ import {
   DrizzleCollectionRepository,
   DrizzleProductRepository,
   DrizzleProductVariantRepository,
+  type ProductVariantRepository,
 } from "@garmentos/domain-catalog";
 import { createDb, type DbOrTx } from "@garmentos/db-schema";
 import { createWorkshop, DrizzleWorkshopRepository } from "@garmentos/domain-contract-manufacturing";
@@ -26,6 +27,7 @@ import { recordInventoryCountItem } from "./application/record-inventory-count-i
 import { releaseReservation, reserveStock } from "./application/reservation";
 import { transferStock } from "./application/transfer-stock";
 import { DomainError } from "./domain/errors";
+import type { ProductVariantOwnershipPort } from "./application/ports";
 import { DrizzleInventoryCountRepository } from "./infrastructure/drizzle-inventory-count-repository";
 import { DrizzleShipmentRepository } from "./infrastructure/drizzle-shipment-repository";
 import { DrizzleStockRepository, DrizzleWarehouseRepository } from "./infrastructure/drizzle-warehouse-repository";
@@ -47,6 +49,16 @@ async function runInRolledBackTransaction(fn: (tx: DbOrTx) => Promise<void>): Pr
     .catch((error: unknown) => {
       if (!(error instanceof RollbackTestTransaction)) throw error;
     });
+}
+
+// Реализация ACL-порта для тестов — то же самое, что apps/api делает через
+// CatalogService (SEC-P1, владелец проекта, 2026-09-24): domain-warehouse не
+// зависит от domain-catalog в рантайме, только в devDependency для тестов.
+function ownershipPort(productVariants: ProductVariantRepository): ProductVariantOwnershipPort {
+  return {
+    belongsToCompany: async (companyId, productVariantId) =>
+      (await productVariants.findById(companyId, productVariantId)) !== null,
+  };
 }
 
 async function seedVariant(tx: DbOrTx) {
@@ -85,41 +97,55 @@ describe("domain/warehouse", () => {
       );
 
       const stock = new DrizzleStockRepository(tx);
+      const productVariantRepo = new DrizzleProductVariantRepository(tx);
+      const productVariants = ownershipPort(productVariantRepo);
 
       // Цех передал 100 готовых худи на WIP-склад.
       const afterReceive = await receiveStock(
-        { stock },
-        { warehouseId: workshopWarehouse.id, productVariantId: variant.id, quantity: 100 },
+        { stock, warehouses, productVariants },
+        { companyId: company.id, warehouseId: workshopWarehouse.id, productVariantId: variant.id, quantity: 100 },
       );
       expect(afterReceive.quantityOnHand).toBe("100.000");
 
       // Зарезервировали 20 под уже согласованную оптовую заявку.
-      const afterReserve = await reserveStock({ stock }, { warehouseId: workshopWarehouse.id, productVariantId: variant.id, quantity: 20 });
+      const afterReserve = await reserveStock(
+        { stock, warehouses, productVariants },
+        { companyId: company.id, warehouseId: workshopWarehouse.id, productVariantId: variant.id, quantity: 20 },
+      );
       expect(afterReserve.quantityReserved).toBe("20.000");
 
       // Нельзя списать больше, чем доступно (100 - 20 = 80).
       await expect(
-        dispatchStock({ stock }, { warehouseId: workshopWarehouse.id, productVariantId: variant.id, quantity: 81 }),
+        dispatchStock(
+          { stock, warehouses, productVariants },
+          { companyId: company.id, warehouseId: workshopWarehouse.id, productVariantId: variant.id, quantity: 81 },
+        ),
       ).rejects.toThrow(/Недостаточно остатка/);
 
       // Списываем ровно доступное (продали часть напрямую с WIP-склада).
       const afterDispatch = await dispatchStock(
-        { stock },
-        { warehouseId: workshopWarehouse.id, productVariantId: variant.id, quantity: 80 },
+        { stock, warehouses, productVariants },
+        { companyId: company.id, warehouseId: workshopWarehouse.id, productVariantId: variant.id, quantity: 80 },
       );
       expect(afterDispatch.quantityOnHand).toBe("20.000");
 
       // Сняли резерв — оптовая заявка отменилась.
       const afterRelease = await releaseReservation(
-        { stock },
-        { warehouseId: workshopWarehouse.id, productVariantId: variant.id, quantity: 20 },
+        { stock, warehouses, productVariants },
+        { companyId: company.id, warehouseId: workshopWarehouse.id, productVariantId: variant.id, quantity: 20 },
       );
       expect(afterRelease.quantityReserved).toBe("0.000");
 
       // Прямой transferStock (например, ручное перемещение) — доступно 20.
       const direct = await transferStock(
-        { stock },
-        { originWarehouseId: workshopWarehouse.id, destinationWarehouseId: salesWarehouse.id, productVariantId: variant.id, quantity: 5 },
+        { stock, warehouses, productVariants },
+        {
+          companyId: company.id,
+          originWarehouseId: workshopWarehouse.id,
+          destinationWarehouseId: salesWarehouse.id,
+          productVariantId: variant.id,
+          quantity: 5,
+        },
       );
       expect(direct.origin.quantityOnHand).toBe("15.000");
       expect(direct.destination.quantityOnHand).toBe("5.000");
@@ -127,7 +153,7 @@ describe("domain/warehouse", () => {
       // Отгрузка (Shipment) оставшихся 15 единиц: planned → in_transit → delivered.
       const shipments = new DrizzleShipmentRepository(tx);
       const shipment = await createShipment(
-        { shipments },
+        { shipments, warehouses, productVariants },
         {
           companyId: company.id,
           originWarehouseId: workshopWarehouse.id,
@@ -137,10 +163,16 @@ describe("domain/warehouse", () => {
       );
       expect(shipment.status).toBe("planned");
 
-      const dispatched = await dispatchShipment({ shipments, stock }, { companyId: company.id, shipmentId: shipment.id });
+      const dispatched = await dispatchShipment(
+        { shipments, stock, warehouses, productVariants },
+        { companyId: company.id, shipmentId: shipment.id },
+      );
       expect(dispatched.status).toBe("in_transit");
 
-      const delivered = await markShipmentDelivered({ shipments }, { companyId: company.id, shipmentId: shipment.id });
+      const delivered = await markShipmentDelivered(
+        { shipments, warehouses },
+        { companyId: company.id, shipmentId: shipment.id },
+      );
       expect(delivered.status).toBe("delivered");
       expect(delivered.deliveredAt).not.toBeNull();
 
@@ -157,7 +189,7 @@ describe("domain/warehouse", () => {
         { companyId: company.id, warehouseId: salesWarehouse.id },
       );
       const afterCount = await recordInventoryCountItem(
-        { inventoryCounts, stock },
+        { inventoryCounts, stock, productVariants },
         {
           companyId: company.id,
           inventoryCountId: count.id,

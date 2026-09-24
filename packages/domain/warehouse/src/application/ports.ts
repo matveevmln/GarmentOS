@@ -77,6 +77,19 @@ export interface MaterialStockRepository {
   adjust(warehouseId: string, materialId: string, delta: number, meta: MaterialStockMovementMeta): Promise<MaterialStockItem>;
 }
 
+// SKU (product_variant) принадлежит чужому bounded context (catalog);
+// domain-warehouse сознательно не имеет рантайм-зависимости от domain-catalog
+// (см. package.json — только devDependency для тестов, тот же принцип
+// независимости доменных пакетов, что и в остальных модулях,
+// docs/ARCHITECTURE.md «Правило межмодульного взаимодействия»). Проверка
+// принадлежности SKU компании поэтому идёт через ACL-порт, который apps/api
+// реализует поверх настоящего ProductVariantRepository/CatalogService
+// (SEC-P1, владелец проекта, 2026-09-24 — до этого порта productVariantId
+// из тела запроса не проверялся на принадлежность компании нигде).
+export interface ProductVariantOwnershipPort {
+  belongsToCompany(companyId: string, productVariantId: string): Promise<boolean>;
+}
+
 export interface NewShipmentInput {
   companyId: string;
   originWarehouseId: string;

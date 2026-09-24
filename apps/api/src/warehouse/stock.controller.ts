@@ -55,17 +55,25 @@ export class StockController {
     return transferStockResponseSchema.parse(result);
   }
 
+  // SEC-P1 (владелец проекта, 2026-09-24): раньше эти два метода не получали
+  // @CurrentUser() вовсе — companyId неоткуда было проверить.
   @RequirePermissions("warehouse.write")
   @Post("reserve")
-  async reserve(@Body() body: StockReservationDto): Promise<StockItemResponseDto> {
-    const stockItem = await this.warehouseService.reserveStock(body);
+  async reserve(
+    @Body() body: StockReservationDto,
+    @CurrentUser() currentUser: AuthenticatedRequestUser,
+  ): Promise<StockItemResponseDto> {
+    const stockItem = await this.warehouseService.reserveStock(currentUser.companyId, body);
     return stockItemResponseSchema.parse(stockItem);
   }
 
   @RequirePermissions("warehouse.write")
   @Post("release")
-  async release(@Body() body: StockReservationDto): Promise<StockItemResponseDto> {
-    const stockItem = await this.warehouseService.releaseReservation(body);
+  async release(
+    @Body() body: StockReservationDto,
+    @CurrentUser() currentUser: AuthenticatedRequestUser,
+  ): Promise<StockItemResponseDto> {
+    const stockItem = await this.warehouseService.releaseReservation(currentUser.companyId, body);
     return stockItemResponseSchema.parse(stockItem);
   }
 }

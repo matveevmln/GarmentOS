@@ -8,6 +8,7 @@ import {
   DrizzleWarehouseRepository,
 } from "@garmentos/domain-warehouse";
 import { DATABASE_CONNECTION } from "../database/database.module";
+import { CatalogModule } from "../catalog/catalog.module";
 import { WarehousesController } from "./warehouses.controller";
 import { StockController } from "./stock.controller";
 import { ShipmentsController } from "./shipments.controller";
@@ -22,6 +23,12 @@ import {
 import { WarehouseService } from "./warehouse.service";
 
 @Module({
+  // CatalogModule — источник CatalogService.findProductVariantById, которым
+  // WarehouseService проверяет принадлежность SKU компании (SEC-P1, владелец
+  // проекта, 2026-09-24). Тот же паттерн межмодульной композиции, что и в
+  // ContractManufacturingModule/CuttingModule — через сервис другого модуля,
+  // не через прямой импорт репозитория domain-catalog в domain-warehouse.
+  imports: [CatalogModule],
   controllers: [WarehousesController, StockController, ShipmentsController, InventoryCountsController],
   providers: [
     WarehouseService,

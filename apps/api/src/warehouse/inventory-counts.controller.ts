@@ -38,7 +38,7 @@ export class InventoryCountsController {
     @Body() body: RecordInventoryCountItemDto,
     @CurrentUser() currentUser: AuthenticatedRequestUser,
   ): Promise<InventoryCountResponseDto> {
-    const inventoryCount = await this.warehouseService.recordInventoryCountItem(currentUser.companyId, id, body);
+    const inventoryCount = await this.warehouseService.recordInventoryCountItem(currentUser, id, body);
     return inventoryCountResponseSchema.parse(inventoryCount);
   }
 

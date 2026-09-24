@@ -13,6 +13,7 @@ export type {
   MaterialStockRepository,
   NewShipmentInput,
   NewWarehouseInput,
+  ProductVariantOwnershipPort,
   ShipmentRepository,
   StockMovementMeta,
   StockRepository,

@@ -1,6 +1,7 @@
 import { DomainError } from "../domain/errors";
 import type { InventoryCount } from "../domain/inventory-count";
-import type { InventoryCountRepository, StockRepository } from "./ports";
+import { assertProductVariantOwnership } from "./assert-ownership";
+import type { InventoryCountRepository, ProductVariantOwnershipPort, StockRepository } from "./ports";
 
 export interface RecordInventoryCountItemInput {
   companyId: string;
@@ -13,6 +14,7 @@ export interface RecordInventoryCountItemInput {
 export interface RecordInventoryCountItemDeps {
   inventoryCounts: InventoryCountRepository;
   stock: StockRepository;
+  productVariants: ProductVariantOwnershipPort;
 }
 
 // Записывает фактически подсчитанное количество по одному SKU. Расхождение
@@ -38,6 +40,14 @@ export async function recordInventoryCountItem(
       "INVENTORY_COUNT_NOT_IN_PROGRESS",
     );
   }
+
+  // productVariantId приходит из тела запроса: сам склад инвентаризации уже
+  // проверен на принадлежность компании при createInventoryCount, но SKU
+  // отдельно — нет (SEC-P1, владелец проекта, 2026-09-24). Без этой проверки
+  // на своём складе можно было завести строку остатка по чужому SKU, зная
+  // только его UUID (docs/tasks/SEC-P1.md, пункт 2 — «использовать чужой SKU
+  // на своём складе»).
+  await assertProductVariantOwnership(deps.productVariants, input.companyId, input.productVariantId);
 
   const { discrepancy } = await deps.stock.adjust(
     count.warehouseId,
