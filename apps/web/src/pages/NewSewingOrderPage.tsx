@@ -72,6 +72,10 @@ function sizesForColor(model: ModelBlockState, color: string): string[] {
 
 function equalPercentages(sizes: string[]): Record<string, number | undefined> {
   if (sizes.length === 0) return {};
+  const pairedSizes = ["48-50", "52-54", "56-58", "60-62", "64-66"];
+  if (sizes.length === pairedSizes.length && pairedSizes.every((size) => sizes.includes(size))) {
+    return { "48-50": 12.5, "52-54": 25, "56-58": 25, "60-62": 25, "64-66": 12.5 };
+  }
   const base = Math.floor((100 / sizes.length) * 10) / 10;
   const result: Record<string, number | undefined> = {};
   let sum = 0;
