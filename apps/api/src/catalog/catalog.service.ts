@@ -82,6 +82,10 @@ export class CatalogService {
     return this.productSizes.listByProduct(companyId, productId);
   }
 
+  async listCompanySizePresets(companyId: string): Promise<string[]> {
+    return this.productSizes.listCompanySizePresets(companyId);
+  }
+
   async replaceProductSizes(
     currentUser: AuthenticatedRequestUser,
     productId: string,
