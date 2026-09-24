@@ -277,6 +277,16 @@ function toProductSize(row: typeof productSizes.$inferSelect): ProductSize {
 export class DrizzleProductSizeRepository implements ProductSizeRepository {
   constructor(private readonly db: DbOrTx) {}
 
+  async listCompanySizePresets(companyId: string): Promise<string[]> {
+    const rows = await this.db
+      .selectDistinct({ size: productSizes.size })
+      .from(productSizes)
+      .innerJoin(products, eq(products.id, productSizes.productId))
+      .where(eq(products.companyId, companyId))
+      .orderBy(asc(productSizes.size));
+    return rows.map((row) => row.size);
+  }
+
   async listByProduct(companyId: string, productId: string): Promise<ProductSize[]> {
     const rows = await this.db
       .select({ size: productSizes })
