@@ -531,7 +531,7 @@ export function NewSewingOrderPage() {
       )}
 
       <div className="mt-6 flex justify-end">
-        <Button onClick={() => void handlePlace()} loading={placing} data-testid="place-order">
+        <Button onClick={() => void handlePlace()} loading={placing} disabled={saveState === "saving" || saveState === "error"} data-testid="place-order">
           Создать заказ
         </Button>
       </div>
