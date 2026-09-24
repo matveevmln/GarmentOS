@@ -82,6 +82,18 @@ export class DrizzleCompanyRepository implements CompanyRepository {
     if (!row) throw new Error(`UPDATE companies не нашёл строку id=${companyId}`);
     return row.nextProductionOrderNumber - 1;
   }
+
+  // Тот же паттерн, что reserveNextProductionOrderNumber выше — отдельный
+  // сквозной счётчик для номера заказа на пошив (шапки), ADR 0002.
+  async reserveNextSewingOrderNumber(companyId: string): Promise<number> {
+    const [row] = await this.db
+      .update(companies)
+      .set({ nextSewingOrderNumber: sql`${companies.nextSewingOrderNumber} + 1`, updatedAt: new Date() })
+      .where(eq(companies.id, companyId))
+      .returning({ nextSewingOrderNumber: companies.nextSewingOrderNumber });
+    if (!row) throw new Error(`UPDATE companies не нашёл строку id=${companyId}`);
+    return row.nextSewingOrderNumber - 1;
+  }
 }
 
 export class DrizzleUserRepository implements UserRepository {

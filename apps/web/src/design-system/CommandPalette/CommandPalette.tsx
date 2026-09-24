@@ -20,7 +20,7 @@ import { cn } from "../utils";
 const CREATE_ACTIONS = [
   { to: "/products", label: "+ Создать модель", icon: "box" },
   { to: "/specifications", label: "+ Создать спецификацию", icon: "file" },
-  { to: "/production-orders", label: "+ Создать производственную партию", icon: "scissors" },
+  { to: "/sewing-orders/new", label: "+ Заказ на пошив", icon: "scissors" },
 ];
 
 const ACTIONS = [
@@ -30,7 +30,7 @@ const ACTIONS = [
   { to: "/warehouses", label: "Склады", icon: "building" },
   { to: "/products", label: "Модели", icon: "box" },
   { to: "/purchase-orders", label: "Закупки", icon: "cash" },
-  { to: "/production-orders", label: "Заказы пошива", icon: "scissors" },
+  { to: "/sewing-orders", label: "Заказы на пошив", icon: "scissors" },
 ];
 
 // Открыть палитру снаружи — кнопкой «Быстрый переход» в верхней панели

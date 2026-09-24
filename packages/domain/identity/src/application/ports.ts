@@ -33,6 +33,10 @@ export interface CompanyRepository {
   // (тот — по цеху, для спецификаций). Возвращает номер ДО инкремента, тот
   // же паттерн, что и reserveNextSpecificationNumber.
   reserveNextProductionOrderNumber(companyId: string): Promise<number>;
+  // Атомарно резервирует следующий номер заказа на пошив (ADR 0002, «Штаб
+  // партии v1», владелец проекта, 2026-09-24) — независим от
+  // nextProductionOrderNumber выше (номер шапки, не отдельной партии/модели).
+  reserveNextSewingOrderNumber(companyId: string): Promise<number>;
 }
 
 export interface NewUserInput {

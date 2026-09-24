@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { distributeQuantityByRatio, distributeQuantityBySize, type SizeRatio } from "./distribute-size-quantities";
+import {
+  distributeQuantityByPercent,
+  distributeQuantityByRatio,
+  distributeQuantityBySize,
+  type SizePercent,
+  type SizeRatio,
+} from "./distribute-size-quantities";
 import { DomainError } from "../domain/errors";
 
 describe("distributeQuantityBySize", () => {
@@ -110,5 +116,91 @@ describe("distributeQuantityByRatio (раскладка из карточки м
     expect(() => distributeQuantityByRatio([{ size: "S", weight: 0 }], 100)).toThrow(DomainError);
     expect(() => distributeQuantityByRatio([{ size: "S", weight: -1 }], 100)).toThrow(DomainError);
     expect(() => distributeQuantityByRatio(STEGANKA, 10.5)).toThrow(DomainError);
+  });
+});
+
+describe("distributeQuantityByPercent (редактор долей заказа, ADR 0002)", () => {
+  // Пример владельца проекта (docs/GOS-PARTY-V1.md, раздел 5): пять парных
+  // размеров, доли 12,5/25/25/25/12,5%.
+  const TEMPLATE: SizePercent[] = [
+    { size: "48-50", percent: 12.5 },
+    { size: "52-54", percent: 25 },
+    { size: "56-58", percent: 25 },
+    { size: "60-62", percent: 25 },
+    { size: "64-66", percent: 12.5 },
+  ];
+
+  it("600 → 75/150/150/150/75, 400 → 50/100/100/100/50 (пример владельца)", () => {
+    expect(distributeQuantityByPercent(TEMPLATE, 600).map((row) => row.quantity)).toEqual([
+      75, 150, 150, 150, 75,
+    ]);
+    expect(distributeQuantityByPercent(TEMPLATE, 400).map((row) => row.quantity)).toEqual([
+      50, 100, 100, 100, 50,
+    ]);
+  });
+
+  it("округление методом наибольших остатков не теряет и не добавляет единиц на 1/7/1001", () => {
+    for (const total of [1, 7, 1001]) {
+      const result = distributeQuantityByPercent(TEMPLATE, total);
+      expect(result.reduce((sum, row) => sum + row.quantity, 0), `объём ${total}`).toBe(total);
+    }
+    // Детерминированный тай-брейк на конкретных краевых значениях —
+    // зафиксировано явно, не только через проверку суммы.
+    expect(distributeQuantityByPercent(TEMPLATE, 1).map((row) => row.quantity)).toEqual([0, 1, 0, 0, 0]);
+    expect(distributeQuantityByPercent(TEMPLATE, 7).map((row) => row.quantity)).toEqual([1, 2, 2, 1, 1]);
+    expect(distributeQuantityByPercent(TEMPLATE, 1001).map((row) => row.quantity)).toEqual([
+      125, 251, 250, 250, 125,
+    ]);
+  });
+
+  it("детерминирована: один и тот же вход всегда даёт один и тот же выход", () => {
+    const first = distributeQuantityByPercent(TEMPLATE, 777);
+    for (let i = 0; i < 20; i += 1) {
+      expect(distributeQuantityByPercent(TEMPLATE, 777)).toEqual(first);
+    }
+  });
+
+  it("отклоняет доли, не дающие 100% в сумме", () => {
+    expect(() =>
+      distributeQuantityByPercent(
+        [
+          { size: "S", percent: 40 },
+          { size: "L", percent: 40 },
+        ],
+        100,
+      ),
+    ).toThrow(DomainError);
+    expect(() =>
+      distributeQuantityByPercent(
+        [
+          { size: "S", percent: 50 },
+          { size: "L", percent: 60 },
+        ],
+        100,
+      ),
+    ).toThrow(DomainError);
+  });
+
+  it("допускает долю 0% — размер получает 0 единиц, не ошибку", () => {
+    const result = distributeQuantityByPercent(
+      [
+        { size: "S", percent: 0 },
+        { size: "M", percent: 100 },
+      ],
+      50,
+    );
+    expect(result).toEqual([
+      { size: "S", quantity: 0 },
+      { size: "M", quantity: 50 },
+    ]);
+  });
+
+  it("отклоняет пустой ряд, отрицательный процент и нецелое/неположительное количество", () => {
+    expect(() => distributeQuantityByPercent([], 100)).toThrow(DomainError);
+    expect(() => distributeQuantityByPercent([{ size: "S", percent: -10 }, { size: "M", percent: 110 }], 100)).toThrow(
+      DomainError,
+    );
+    expect(() => distributeQuantityByPercent(TEMPLATE, 0)).toThrow(DomainError);
+    expect(() => distributeQuantityByPercent(TEMPLATE, 10.5)).toThrow(DomainError);
   });
 });

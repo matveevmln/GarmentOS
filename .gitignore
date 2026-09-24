@@ -147,3 +147,7 @@ vite.config.ts.timestamp-*
 
 # LocalFileStorageAdapter (apps/api/src/document) — dev/test fallback без S3/MinIO
 .local-storage/
+
+# Playwright (apps/web/e2e) — прогонные артефакты, не часть репозитория
+apps/web/test-results/
+apps/web/playwright-report/

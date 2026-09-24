@@ -161,4 +161,10 @@ export class IdentityService {
   async reserveNextProductionOrderNumber(companyId: string): Promise<number> {
     return this.companies.reserveNextProductionOrderNumber(companyId);
   }
+
+  // Номер заказа на пошив-шапки (ADR 0002, «Штаб партии v1») — независимый
+  // сквозной счётчик, резервируется атомарно в момент размещения заказа.
+  async reserveNextSewingOrderNumber(companyId: string): Promise<number> {
+    return this.companies.reserveNextSewingOrderNumber(companyId);
+  }
 }

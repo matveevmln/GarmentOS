@@ -58,11 +58,15 @@ interface NavItem {
 // «Новой партии» выше — маршрут /workshops и WorkshopsPage.tsx НЕ удалены,
 // доступны по прямой ссылке; создание цеха внутри мастера спецификации
 // (SpecificationDetailPage.tsx) по-прежнему работает, если цехов вообще нет.
+// «Заказы на пошив» ведёт в новую шапку заказа (ADR 0002, «Штаб партии v1»,
+// владелец проекта, 2026-09-24) — тот же приём, что уже применён выше к
+// «Новой партии»/«Цехам»: старый маршрут /production-orders (список партий
+// одной модели) НЕ удалён, доступен по прямой ссылке, только не в меню.
 const NAV_PRODUCTION: NavItem[] = [
   { to: "/dashboard", label: "Главная", icon: IconHome },
   { to: "/products", label: "Модели", icon: IconModel, match: "/products/*" },
   { to: "/specifications", label: "Спецификации", icon: IconDocument, match: "/specifications/*" },
-  { to: "/production-orders", label: "Заказы пошива", icon: IconBatch, match: "/production-orders/*" },
+  { to: "/sewing-orders", label: "Заказы на пошив", icon: IconBatch, match: "/sewing-orders/*" },
   { to: "/fulfillment", label: "Фулфилмент ОТК", icon: IconCheck },
 ];
 
@@ -89,7 +93,7 @@ const MOBILE_NAV: NavItem[] = [
   { to: "/dashboard", label: "Главная", icon: IconHome },
   { to: "/products", label: "Модели", icon: IconModel, match: "/products/*" },
   { to: "/specifications", label: "Спецификации", icon: IconDocument, match: "/specifications/*" },
-  { to: "/production-orders", label: "Заказы", icon: IconBatch, match: "/production-orders/*" },
+  { to: "/sewing-orders", label: "Заказы", icon: IconBatch, match: "/sewing-orders/*" },
 ];
 
 const ALL_NAV = [...NAV_PRODUCTION, ...NAV_SUPPLY, ...NAV_OFFICE, ...NAV_SERVICE];

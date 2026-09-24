@@ -1,6 +1,7 @@
 import {
   productionOrders,
   productionOrderVariants,
+  sewingOrders,
   workshops,
   type DbOrTx,
 } from "@garmentos/db-schema";
@@ -12,10 +13,15 @@ import type {
   ProductionOrderVariant,
   ReceivedVariantInput,
 } from "../domain/production-order";
+import type { SewingOrder, SewingOrderDraftPayload } from "../domain/sewing-order";
 import type {
   NewProductionOrderInput,
+  NewSewingOrderInput,
   NewWorkshopInput,
+  PlaceSewingOrderRepoInput,
   ProductionOrderRepository,
+  SewingOrderDraftPatch,
+  SewingOrderRepository,
   WorkshopPatch,
   WorkshopRepository,
 } from "../application/ports";
@@ -80,6 +86,7 @@ function toProductionOrder(row: ProductionOrderRow, variants: ProductionOrderVar
     specificationId: row.specificationId,
     orderNumber: row.orderNumber,
     costSnapshot: row.costSnapshot as Record<string, unknown> | null,
+    sewingOrderId: row.sewingOrderId,
     createdBy: row.createdBy,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
@@ -181,6 +188,7 @@ export class DrizzleProductionOrderRepository implements ProductionOrderReposito
           specificationId: input.specificationId ?? null,
           orderNumber: input.orderNumber ?? null,
           costSnapshot: input.costSnapshot ?? null,
+          sewingOrderId: input.sewingOrderId ?? null,
         })
         .returning();
       if (!orderRow) throw new Error("INSERT production_orders не вернул строку");
@@ -391,5 +399,126 @@ export class DrizzleProductionOrderRepository implements ProductionOrderReposito
         variantRows.filter((variant) => variant.productionOrderId === orderRow.id),
       ),
     );
+  }
+
+  async listBySewingOrder(companyId: string, sewingOrderId: string): Promise<ProductionOrder[]> {
+    const orderRows = await this.db
+      .select()
+      .from(productionOrders)
+      .where(and(eq(productionOrders.companyId, companyId), eq(productionOrders.sewingOrderId, sewingOrderId)))
+      .orderBy(desc(productionOrders.createdAt));
+    if (orderRows.length === 0) return [];
+
+    const variantRows = await this.db
+      .select()
+      .from(productionOrderVariants)
+      .where(
+        inArray(
+          productionOrderVariants.productionOrderId,
+          orderRows.map((row) => row.id),
+        ),
+      );
+
+    return orderRows.map((orderRow) =>
+      toProductionOrder(
+        orderRow,
+        variantRows.filter((variant) => variant.productionOrderId === orderRow.id),
+      ),
+    );
+  }
+}
+
+function toSewingOrder(row: typeof sewingOrders.$inferSelect): SewingOrder {
+  return {
+    id: row.id,
+    companyId: row.companyId,
+    workshopId: row.workshopId,
+    number: row.number,
+    status: row.status,
+    draftPayload: row.draftPayload as SewingOrderDraftPayload | null,
+    version: row.version,
+    clientRequestId: row.clientRequestId,
+    createdBy: row.createdBy,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  };
+}
+
+export class DrizzleSewingOrderRepository implements SewingOrderRepository {
+  constructor(private readonly db: DbOrTx) {}
+
+  async create(input: NewSewingOrderInput): Promise<SewingOrder> {
+    const [row] = await this.db
+      .insert(sewingOrders)
+      .values({
+        companyId: input.companyId,
+        workshopId: input.workshopId,
+        draftPayload: input.draftPayload,
+        createdBy: input.createdBy,
+      })
+      .returning();
+    if (!row) throw new Error("INSERT sewing_orders не вернул строку");
+    return toSewingOrder(row);
+  }
+
+  async findById(companyId: string, id: string): Promise<SewingOrder | null> {
+    const [row] = await this.db
+      .select()
+      .from(sewingOrders)
+      .where(and(eq(sewingOrders.companyId, companyId), eq(sewingOrders.id, id)))
+      .limit(1);
+    return row ? toSewingOrder(row) : null;
+  }
+
+  async findByIdForUpdate(companyId: string, id: string): Promise<SewingOrder | null> {
+    const [row] = await this.db
+      .select()
+      .from(sewingOrders)
+      .where(and(eq(sewingOrders.companyId, companyId), eq(sewingOrders.id, id)))
+      .for("update")
+      .limit(1);
+    return row ? toSewingOrder(row) : null;
+  }
+
+  async updateDraft(id: string, expectedVersion: number, patch: SewingOrderDraftPatch): Promise<SewingOrder | null> {
+    const values = Object.fromEntries(
+      Object.entries(patch).filter(([, value]) => value !== undefined),
+    ) as Record<string, unknown>;
+
+    // Compare-and-swap по version в самом WHERE — тот же принцип, что
+    // updateCostSnapshot: конфликт двух вкладок не читается заранее и потом
+    // проверяется в application-слое (гонка была бы возможна между чтением и
+    // записью), а делает саму запись условной.
+    const [row] = await this.db
+      .update(sewingOrders)
+      .set({ ...values, version: sql`${sewingOrders.version} + 1`, updatedAt: new Date() })
+      .where(and(eq(sewingOrders.id, id), eq(sewingOrders.version, expectedVersion)))
+      .returning();
+    return row ? toSewingOrder(row) : null;
+  }
+
+  async place(id: string, input: PlaceSewingOrderRepoInput): Promise<SewingOrder> {
+    const [row] = await this.db
+      .update(sewingOrders)
+      .set({
+        status: "placed",
+        workshopId: input.workshopId,
+        number: input.number,
+        clientRequestId: input.clientRequestId,
+        updatedAt: new Date(),
+      })
+      .where(eq(sewingOrders.id, id))
+      .returning();
+    if (!row) throw new Error(`UPDATE sewing_orders не нашёл строку id=${id}`);
+    return toSewingOrder(row);
+  }
+
+  async listByCompany(companyId: string): Promise<SewingOrder[]> {
+    const rows = await this.db
+      .select()
+      .from(sewingOrders)
+      .where(eq(sewingOrders.companyId, companyId))
+      .orderBy(desc(sewingOrders.createdAt));
+    return rows.map(toSewingOrder);
   }
 }

@@ -54,9 +54,11 @@ export {
   type UpdateProductAttributeInput,
 } from "./application/manage-product-attributes";
 export {
+  distributeQuantityByPercent,
   distributeQuantityByRatio,
   distributeQuantityBySize,
   distributeQuantityEvenly,
+  type SizePercent,
   type SizeQuantity,
   type SizeRatio,
 } from "./application/distribute-size-quantities";

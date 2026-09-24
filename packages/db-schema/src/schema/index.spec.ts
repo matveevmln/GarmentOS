@@ -23,6 +23,7 @@ const EXPECTED_TABLES = [
   "boms",
   "bom_items",
   "workshops",
+  "sewing_orders",
   "production_orders",
   "production_order_variants",
   "warehouses",

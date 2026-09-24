@@ -1,47 +1,71 @@
 import { Inject, Injectable } from "@nestjs/common";
+import type { Database } from "@garmentos/db-schema";
 import {
   captureProductionOrderCostSnapshot,
   completeProductionOrder as completeProductionOrderUseCase,
   confirmProductionOrder,
   createProductionOrderDraft,
   createProductionOrderFromSpecification,
+  createSewingOrderDraft as createSewingOrderDraftUseCase,
   createWorkshop,
   cancelProductionOrder as cancelProductionOrderUseCase,
+  DrizzleProductionOrderRepository,
+  DrizzleSewingOrderRepository,
+  DrizzleWorkshopRepository,
+  placeSewingOrder as placeSewingOrderUseCase,
   receiveProductionOrder as receiveProductionOrderUseCase,
   rollbackProductionOrderStatus as rollbackProductionOrderStatusUseCase,
   updateProductionOrderStatus as updateProductionOrderStatusUseCase,
   updateProductionOrderStatusFromWorkshop,
+  updateSewingOrderDraft as updateSewingOrderDraftUseCase,
   updateWorkshop,
   type BomApprovalPort,
   type CancelProductionOrderResult,
+  type CompanyNumberingPort,
   type CreateProductionOrderFromSpecificationInput,
+  type PlaceSewingOrderModelInput,
   type ProductionOrder,
   type ProductionOrderRepository,
   type QcResultLookupPort,
   type RollbackProductionOrderStatusResult,
+  type SewingOrder,
+  type SewingOrderRepository,
   type Workshop,
   type WorkshopRepository,
   type WorkshopReportableStatus,
 } from "@garmentos/domain-contract-manufacturing";
 import {
+  distributeQuantityByPercent,
   distributeQuantityByRatio,
   distributeQuantityEvenly,
   DomainError as CatalogDomainError,
 } from "@garmentos/domain-catalog";
 import type {
   CreateProductionOrderDto,
+  CreateSewingOrderDraftDto,
+  PlaceSewingOrderDto,
+  PlaceSewingOrderModelDto,
   PreviewProductionOrderVariantsDto,
   PreviewProductionOrderVariantsResponseDto,
   CreateProductionOrderFromQuantityDto,
   CreateWorkshopDto,
   SizeDistributionMode,
+  UpdateSewingOrderDraftDto,
   UpdateWorkshopDto,
 } from "@garmentos/shared-types";
 import type { AuthenticatedRequestUser } from "../auth/current-user.decorator";
 import { AuditService } from "../audit/audit.service";
 import { CatalogService } from "../catalog/catalog.service";
+import { DATABASE_CONNECTION } from "../database/database.module";
 import { WarehouseService } from "../warehouse/warehouse.service";
-import { BOM_APPROVAL_PORT, PRODUCTION_ORDER_REPOSITORY, QC_RESULT_LOOKUP_PORT, WORKSHOP_REPOSITORY } from "./contract-manufacturing.tokens";
+import {
+  BOM_APPROVAL_PORT,
+  COMPANY_NUMBERING_PORT,
+  PRODUCTION_ORDER_REPOSITORY,
+  QC_RESULT_LOOKUP_PORT,
+  SEWING_ORDER_REPOSITORY,
+  WORKSHOP_REPOSITORY,
+} from "./contract-manufacturing.tokens";
 
 // Срез карточки цеха для audit_log — только содержательные поля, без
 // служебных дат и идентификаторов: они не несут смысла в диффе «до/после»,
@@ -70,8 +94,11 @@ export class ContractManufacturingService {
   constructor(
     @Inject(WORKSHOP_REPOSITORY) private readonly workshops: WorkshopRepository,
     @Inject(PRODUCTION_ORDER_REPOSITORY) private readonly productionOrders: ProductionOrderRepository,
+    @Inject(SEWING_ORDER_REPOSITORY) private readonly sewingOrders: SewingOrderRepository,
     @Inject(BOM_APPROVAL_PORT) private readonly bomApproval: BomApprovalPort,
+    @Inject(COMPANY_NUMBERING_PORT) private readonly companyNumbering: CompanyNumberingPort,
     @Inject(QC_RESULT_LOOKUP_PORT) private readonly qcResultLookup: QcResultLookupPort,
+    @Inject(DATABASE_CONNECTION) private readonly db: Database,
     private readonly warehouseService: WarehouseService,
     private readonly catalogService: CatalogService,
     private readonly auditService: AuditService,
@@ -502,5 +529,195 @@ export class ContractManufacturingService {
 
   async listActiveWorkshops(companyId: string): Promise<Workshop[]> {
     return this.workshops.listActiveByCompany(companyId);
+  }
+
+  // ---- Заказ на пошив (ADR 0002, «Штаб партии v1») ----
+
+  async createSewingOrderDraft(currentUser: AuthenticatedRequestUser, input: CreateSewingOrderDraftDto): Promise<SewingOrder> {
+    return createSewingOrderDraftUseCase(
+      { sewingOrders: this.sewingOrders },
+      {
+        companyId: currentUser.companyId,
+        workshopId: input.workshopId,
+        draftPayload: input.draftPayload,
+        createdBy: currentUser.id,
+      },
+    );
+  }
+
+  async updateSewingOrderDraft(
+    currentUser: AuthenticatedRequestUser,
+    sewingOrderId: string,
+    input: UpdateSewingOrderDraftDto,
+  ): Promise<SewingOrder> {
+    return updateSewingOrderDraftUseCase(
+      { sewingOrders: this.sewingOrders },
+      {
+        companyId: currentUser.companyId,
+        sewingOrderId,
+        expectedVersion: input.version,
+        workshopId: input.workshopId,
+        draftPayload: input.draftPayload,
+      },
+    );
+  }
+
+  async findSewingOrderById(companyId: string, id: string): Promise<SewingOrder | null> {
+    return this.sewingOrders.findById(companyId, id);
+  }
+
+  // Штаб заказа (B01 basic) — шапка вместе с уже размещёнными партиями.
+  // null, если заказ не найден в этой компании — контроллер сам решает,
+  // как ответить (404), домен здесь не участвует.
+  async getSewingOrderWithProductionOrders(
+    companyId: string,
+    id: string,
+  ): Promise<{ sewingOrder: SewingOrder; productionOrders: ProductionOrder[] } | null> {
+    const sewingOrder = await this.sewingOrders.findById(companyId, id);
+    if (!sewingOrder) return null;
+    const productionOrders = await this.productionOrders.listBySewingOrder(companyId, id);
+    return { sewingOrder, productionOrders };
+  }
+
+  async listSewingOrders(companyId: string): Promise<SewingOrder[]> {
+    return this.sewingOrders.listByCompany(companyId);
+  }
+
+  // Резолвит одну модель заказа (цвета + проценты/ручные ячейки) в готовую
+  // разбивку по SKU — та же логика, что previewProductionOrderVariants/
+  // createProductionOrderDraftFromTotalQuantity выше, обобщённая на
+  // произвольный шаблон долей (не только раскладку из карточки модели) и на
+  // ручной режим. companyId уже ограничивает listProductVariants — чужой
+  // productId просто не даст вариантов (тот же принцип изоляции, что и в
+  // остальном API, SEC-P1).
+  private async resolveSewingOrderModelVariants(
+    companyId: string,
+    model: PlaceSewingOrderModelDto,
+  ): Promise<PlaceSewingOrderModelInput> {
+    const product = await this.catalogService.findProductById(companyId, model.productId);
+    if (!product) {
+      throw new CatalogDomainError(`Модель ${model.productId} не найдена в этой компании`, "PRODUCT_NOT_FOUND");
+    }
+    const allVariants = await this.catalogService.listProductVariants(companyId, model.productId);
+    if (allVariants.length === 0) {
+      throw new CatalogDomainError(`У модели ${model.productId} нет ни одного SKU`, "PRODUCT_HAS_NO_VARIANTS");
+    }
+
+    const variants: Array<{ productVariantId: string; quantity: number }> = [];
+    for (const colorRow of model.colors) {
+      const sizesForColor = allVariants.filter((variant) => variant.color === colorRow.color);
+      if (sizesForColor.length === 0) {
+        throw new CatalogDomainError(
+          `У модели ${model.productId} нет варианта цвета "${colorRow.color}"`,
+          "SEWING_ORDER_COLOR_NOT_FOUND",
+        );
+      }
+
+      let sizeQuantities: Array<{ size: string; quantity: number }>;
+      if (model.distributionMode === "manual") {
+        if (!colorRow.cells || colorRow.cells.length === 0) {
+          throw new CatalogDomainError(
+            `Цвет "${colorRow.color}" в ручном режиме должен содержать хотя бы одну заполненную ячейку`,
+            "SEWING_ORDER_CELLS_REQUIRED",
+          );
+        }
+        sizeQuantities = colorRow.cells;
+      } else {
+        if (colorRow.quantity === undefined) {
+          throw new CatalogDomainError(
+            `Цвет "${colorRow.color}" должен содержать общее количество в режиме "по шаблону"`,
+            "SEWING_ORDER_COLOR_QUANTITY_REQUIRED",
+          );
+        }
+        if (colorRow.percentages && colorRow.percentages.length > 0) {
+          // Проценты должны покрывать РОВНО набор размеров этого цвета —
+          // иначе сумма 100% относилась бы к другому набору строк, чем
+          // тот, что реально будет создан (R02: один источник числа).
+          const colorSizes = new Set(sizesForColor.map((variant) => variant.size));
+          const percentSizes = new Set(colorRow.percentages.map((row) => row.size));
+          const sameSizes = colorSizes.size === percentSizes.size && [...colorSizes].every((size) => percentSizes.has(size));
+          if (!sameSizes) {
+            throw new CatalogDomainError(
+              `Проценты цвета "${colorRow.color}" должны быть заданы ровно для его размеров (${[...colorSizes].join(", ")})`,
+              "SEWING_ORDER_PERCENT_SIZES_MISMATCH",
+            );
+          }
+          sizeQuantities = distributeQuantityByPercent(colorRow.percentages, colorRow.quantity);
+        } else {
+          const ratios = await this.loadSizeRatios(companyId, model.productId);
+          sizeQuantities = this.distributeAcrossSizes(
+            sizesForColor.map((variant) => variant.size),
+            ratios,
+            colorRow.quantity,
+            undefined,
+          );
+        }
+      }
+
+      for (const { size, quantity } of sizeQuantities) {
+        if (quantity <= 0) continue;
+        const variant = sizesForColor.find((row) => row.size === size);
+        if (!variant) {
+          throw new CatalogDomainError(
+            `У модели ${model.productId} нет варианта ${colorRow.color}/${size}`,
+            "SEWING_ORDER_VARIANT_NOT_FOUND",
+          );
+        }
+        variants.push({ productVariantId: variant.id, quantity });
+      }
+    }
+
+    return {
+      productId: model.productId,
+      agreedUnitPrice: model.agreedUnitPrice,
+      materialsProvidedByUs: model.materialsProvidedByUs,
+      dueDate: model.dueDate,
+      variants,
+    };
+  }
+
+  // Атомарное размещение заказа на пошив (ADR 0002) — единственное
+  // пользовательское «Создать заказ» создаёт шапку в статусе placed и одну
+  // партию на каждую модель, сразу в placed, одной транзакцией. Матрица
+  // размер×цвет каждой модели пересчитывается здесь же на сервере — тело
+  // запроса содержит намерение пользователя (цвета/проценты/ручные ячейки),
+  // не готовые итоги (T01: «итоги вычисляются и валидируются на сервере»).
+  async placeSewingOrder(
+    currentUser: AuthenticatedRequestUser,
+    sewingOrderId: string,
+    input: PlaceSewingOrderDto,
+  ): Promise<{ sewingOrder: SewingOrder; productionOrders: ProductionOrder[]; reused: boolean }> {
+    const models = await Promise.all(
+      input.models.map((model) => this.resolveSewingOrderModelVariants(currentUser.companyId, model)),
+    );
+
+    return this.db.transaction(async (tx) => {
+      const sewingOrders = new DrizzleSewingOrderRepository(tx);
+      const productionOrders = new DrizzleProductionOrderRepository(tx);
+      const workshops = new DrizzleWorkshopRepository(tx);
+
+      // Блокировка строки шапки ДО проверки идемпотентности/статуса и
+      // записи партий (ADR 0002) — исключает две параллельные попытки
+      // размещения одного и того же черновика.
+      await sewingOrders.findByIdForUpdate(currentUser.companyId, sewingOrderId);
+
+      return placeSewingOrderUseCase(
+        {
+          sewingOrders,
+          productionOrders,
+          workshops,
+          bomApproval: this.bomApproval,
+          companyNumbering: this.companyNumbering,
+        },
+        {
+          companyId: currentUser.companyId,
+          sewingOrderId,
+          workshopId: input.workshopId,
+          models,
+          clientRequestId: input.clientRequestId,
+          createdBy: currentUser.id,
+        },
+      );
+    });
   }
 }

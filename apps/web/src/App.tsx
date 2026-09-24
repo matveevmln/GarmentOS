@@ -20,6 +20,9 @@ import { SpecificationDetailPage } from "./pages/SpecificationDetailPage";
 import { PurchaseOrdersPage } from "./pages/PurchaseOrdersPage";
 import { ProductionOrdersPage } from "./pages/ProductionOrdersPage";
 import { BatchPassportPage } from "./pages/BatchPassportPage";
+import { SewingOrdersListPage } from "./pages/SewingOrdersListPage";
+import { NewSewingOrderPage } from "./pages/NewSewingOrderPage";
+import { SewingOrderPage } from "./pages/SewingOrderPage";
 import { FulfillmentPage } from "./pages/FulfillmentPage";
 import { PilotDashboardPage } from "./pages/PilotDashboardPage";
 import { DocumentsPage } from "./pages/DocumentsPage";
@@ -52,6 +55,10 @@ export function App() {
               <Route path="/purchase-orders" element={<PurchaseOrdersPage />} />
               <Route path="/production-orders" element={<ProductionOrdersPage />} />
               <Route path="/production-orders/:id" element={<BatchPassportPage />} />
+              <Route path="/sewing-orders" element={<SewingOrdersListPage />} />
+              <Route path="/sewing-orders/new" element={<NewSewingOrderPage />} />
+              <Route path="/sewing-orders/:id/edit" element={<NewSewingOrderPage />} />
+              <Route path="/sewing-orders/:id" element={<SewingOrderPage />} />
               <Route path="/fulfillment" element={<FulfillmentPage />} />
               <Route path="/documents" element={<DocumentsPage />} />
               <Route path="/document-import" element={<DocumentIntelligencePage />} />

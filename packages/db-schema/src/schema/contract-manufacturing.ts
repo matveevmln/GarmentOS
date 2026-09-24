@@ -85,6 +85,57 @@ export const workshops = pgTable("workshops", {
   ...softDelete,
 });
 
+// Заказ на пошив — общая шапка над одной или несколькими партиями по
+// моделям у одного цеха (ADR 0002, «Штаб партии v1», владелец проекта,
+// 2026-09-24; docs/GOS-PARTY-V1-AUDIT.md, раздел 13). Партия (production_order)
+// остаётся отдельной сущностью «одна модель у одного цеха» — эта таблица
+// только группирует несколько партий, созданных одним пользовательским
+// действием «Создать заказ», и хранит черновик формы до размещения.
+export const sewingOrderStatusEnum = pgEnum("sewing_order_status", ["draft", "placed", "cancelled"]);
+
+export const sewingOrders = pgTable(
+  "sewing_orders",
+  {
+    id: id(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id),
+    // NULL допустим только в черновике — размещение (placeSewingOrder)
+    // требует цех и проверяет его принадлежность компании.
+    workshopId: uuid("workshop_id").references(() => workshops.id),
+    // Выдаётся атомарно (companies.next_sewing_order_number) в момент
+    // размещения, не при создании черновика — черновик может быть отменён
+    // или заброшен, не должен расходовать номера.
+    number: integer("number"),
+    status: sewingOrderStatusEnum("status").notNull().default("draft"),
+    // Снимок формы A02 целиком: цех, повторяемые блоки моделей (productId,
+    // режим распределения, введённые цвета/количества/проценты или ручные
+    // ячейки). Не localStorage — переживает смену устройства/вкладки
+    // (docs/tasks/T01.md, приёмка: «черновик → перезагрузка → продолжение»).
+    // Сохраняется и после размещения как исходный план (ADR 0002).
+    draftPayload: jsonb("draft_payload"),
+    // Оптимистичная блокировка автосохранения (TRANSITION-REVIEW, пункт 2):
+    // PATCH черновика проверяет version, несовпадение — 409, а не тихая
+    // перезапись параллельной вкладки.
+    version: integer("version").notNull().default(1),
+    // Идемпотентность размещения (TRANSITION-REVIEW, пункт 3): тот же ключ
+    // при уже размещённом заказе возвращает существующий результат, иной
+    // ключ — конфликт, а не вторая группа партий.
+    clientRequestId: text("client_request_id"),
+    createdBy: uuid("created_by").references(() => users.id),
+    ...auditColumns,
+  },
+  (table) => [
+    uniqueIndex("sewing_orders_company_number_idx")
+      .on(table.companyId, table.number)
+      .where(sql`${table.number} IS NOT NULL`),
+    uniqueIndex("sewing_orders_company_client_request_idx")
+      .on(table.companyId, table.clientRequestId)
+      .where(sql`${table.clientRequestId} IS NOT NULL`),
+    index("sewing_orders_company_status_idx").on(table.companyId, table.status),
+  ],
+);
+
 export const productionOrders = pgTable(
   "production_orders",
   {
@@ -152,6 +203,11 @@ export const productionOrders = pgTable(
     // этого механизма — для них спецификация продолжает считать вживую
     // (обратная совместимость, production-order-orchestration.service.ts).
     costSnapshot: jsonb("cost_snapshot"),
+    // Заказ на пошив-шапка (ADR 0002) — NULL у всех партий, созданных до
+    // этого поля и у партий, создаваемых старыми путями (ручной draft→confirm,
+    // spec-first) до их переключения на шапку (M3, отдельное решение).
+    // NULL означает «одиночная партия прежнего пути», не ошибку данных.
+    sewingOrderId: uuid("sewing_order_id").references((): AnyPgColumn => sewingOrders.id),
     createdBy: uuid("created_by").references(() => users.id),
     ...auditColumns,
   },
@@ -176,6 +232,14 @@ export const productionOrders = pgTable(
       .on(table.companyId, table.orderNumber)
       .where(sql`${table.orderNumber} IS NOT NULL`),
     index("production_orders_specification_idx").on(table.specificationId),
+    // Одна партия на модель в рамках одного заказа на пошив (ADR 0002) —
+    // заказ не может скрыто содержать одну и ту же модель дважды. NULL
+    // (партии без шапки) индексом не ограничивается — их может быть сколько
+    // угодно с одним product_id, как и раньше.
+    uniqueIndex("production_orders_sewing_order_product_idx")
+      .on(table.sewingOrderId, table.productId)
+      .where(sql`${table.sewingOrderId} IS NOT NULL`),
+    index("production_orders_sewing_order_idx").on(table.sewingOrderId),
   ],
 );
 

@@ -88,6 +88,9 @@ export interface ProductionOrder {
   // знать о ценах материалов/себестоимости — это чужая ответственность
   // (docs/PRINCIPLES.md, принцип 2).
   costSnapshot: Record<string, unknown> | null;
+  // Заказ на пошив-шапка (ADR 0002, «Штаб партии v1») — null у партий без
+  // шапки: созданных до этого поля или старыми путями до их переключения.
+  sewingOrderId: string | null;
   createdBy: string | null;
   createdAt: Date;
   updatedAt: Date;
