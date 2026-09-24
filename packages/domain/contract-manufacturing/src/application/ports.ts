@@ -199,6 +199,8 @@ export interface SewingOrderRepository {
   // ProductionOrderRepository.updateCostSnapshot (TRANSITION-REVIEW, пункт 2:
   // конфликт двух вкладок отклоняется явно, не тихой перезаписью).
   updateDraft(id: string, expectedVersion: number, patch: SewingOrderDraftPatch): Promise<SewingOrder | null>;
+  // Only a draft owned by this company can be removed; placed orders retain history.
+  deleteDraft(companyId: string, id: string): Promise<boolean>;
   // Переводит draft -> placed, резервирует номер и запоминает
   // client_request_id использованного размещения. Вызывающий
   // (placeSewingOrder) сам гарантирует, что предыдущие проверки (блокировка,
