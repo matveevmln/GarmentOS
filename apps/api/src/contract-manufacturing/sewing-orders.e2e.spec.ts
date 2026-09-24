@@ -321,6 +321,17 @@ describe("Sewing Orders API — заказ на пошив с нескольки
     expect(placed.status).toBe("placed");
     expect(placed.number).toBeGreaterThan(0);
     expect(placed.productionOrders).toHaveLength(2);
+    // A delayed autosave response must never mutate a placed order.
+    await request(httpServer)
+      .patch(`/v1/sewing-orders/${draft.id}`)
+      .set(...authHeader(companyA.accessToken))
+      .send({ version: draft.version, draftPayload: { note: "late autosave" } })
+      .expect(409);
+    const afterLateSave = (await request(httpServer)
+      .get(`/v1/sewing-orders/${draft.id}`)
+      .set(...authHeader(companyA.accessToken))
+      .expect(200)).body as SewingOrderWithProductionOrdersResponseDto;
+    expect(afterLateSave.draftPayload).not.toEqual({ note: "late autosave" });
     expect(placed.productionOrders.every((order) => order.status === "placed")).toBe(true);
     expect(placed.productionOrders.every((order) => order.sewingOrderId === draft.id)).toBe(true);
 
