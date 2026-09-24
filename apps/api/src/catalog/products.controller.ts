@@ -37,6 +37,12 @@ class ProductAttributeDraftDto extends createZodDto(productAttributeDraftSchema)
 export class ProductsController {
   constructor(private readonly catalogService: CatalogService) {}
 
+  @RequirePermissions("catalog.read")
+  @Get("size-presets")
+  async listSizePresets(@CurrentUser() currentUser: AuthenticatedRequestUser): Promise<string[]> {
+    return this.catalogService.listCompanySizePresets(currentUser.companyId);
+  }
+
   @RequirePermissions("catalog.write")
   @Post()
   async create(
