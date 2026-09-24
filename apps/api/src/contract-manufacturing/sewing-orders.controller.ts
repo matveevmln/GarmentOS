@@ -1,4 +1,4 @@
-import { Body, Controller, Get, NotFoundException, Param, Patch, Post } from "@nestjs/common";
+import { Body, Controller, Delete, Get, NotFoundException, Param, Patch, Post } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
 import { createZodDto } from "nestjs-zod";
 import {
@@ -52,6 +52,19 @@ export class SewingOrdersController {
   ): Promise<SewingOrderResponseDto> {
     const sewingOrder = await this.contractManufacturingService.updateSewingOrderDraft(currentUser, id, body);
     return sewingOrderResponseSchema.parse(sewingOrder);
+  }
+
+  @RequirePermissions("contract_manufacturing.write")
+  @Delete(":id")
+  async deleteDraft(
+    @Param("id") id: string,
+    @CurrentUser() currentUser: AuthenticatedRequestUser,
+  ): Promise<{ removed: true }> {
+    const removed = await this.contractManufacturingService.deleteSewingOrderDraft(currentUser.companyId, id);
+    if (!removed) {
+      throw new NotFoundException({ statusCode: 404, code: "SEWING_ORDER_DRAFT_NOT_FOUND", message: "Черновик не найден" });
+    }
+    return { removed: true };
   }
 
   // «Создать заказ» (A02) — одно действие: атомарно создаёт шапку в статусе
