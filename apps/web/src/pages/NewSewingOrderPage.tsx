@@ -93,7 +93,15 @@ function newColorPlan(sizes: string[]): ColorPlanState {
 export function NewSewingOrderPage() {
   const { id: routeId } = useParams<{ id?: string }>();
   const navigate = useNavigate();
-  const clientRequestIdRef = useRef<string>(crypto.randomUUID());
+  // The same placement request must survive a refresh after a lost response.
+  // sessionStorage is scoped to this tab; separate tabs still get separate keys.
+  const clientRequestIdRef = useRef<string | null>(null);
+  if (routeId && clientRequestIdRef.current === null) {
+    const key = `sewing-order-place:${routeId}`;
+    const existing = sessionStorage.getItem(key);
+    clientRequestIdRef.current = existing ?? crypto.randomUUID();
+    if (!existing) sessionStorage.setItem(key, clientRequestIdRef.current);
+  }
 
   const [sewingOrderId, setSewingOrderId] = useState<string | null>(routeId ?? null);
   const [version, setVersion] = useState(1);
@@ -154,6 +162,7 @@ export function NewSewingOrderPage() {
       .then(async (data) => {
         if (data.status !== "draft") {
           // Уже размещён — форма его больше не редактирует, открываем штаб.
+          sessionStorage.removeItem(`sewing-order-place:${routeId}`);
           void navigate(`/sewing-orders/${routeId}`, { replace: true });
           return;
         }
@@ -366,7 +375,7 @@ export function NewSewingOrderPage() {
     try {
       const body = {
         workshopId,
-        clientRequestId: clientRequestIdRef.current,
+        clientRequestId: clientRequestIdRef.current ?? crypto.randomUUID(),
         models: models.map((model) => ({
           productId: model.productId,
           agreedUnitPrice: model.agreedUnitPrice ?? 0,
@@ -389,8 +398,21 @@ export function NewSewingOrderPage() {
         body,
       });
       toast.success(`Заказ №${result.number ?? ""} создан`, { description: `Партий: ${result.productionOrders.length}` });
+      sessionStorage.removeItem(`sewing-order-place:${result.id}`);
       void navigate(`/sewing-orders/${result.id}`);
     } catch (err) {
+      // The server may have committed the transaction while the response was
+      // lost. Resolve the authoritative status before offering another try.
+      try {
+        const current = await apiRequest<SewingOrderWithProductionOrdersResponseDto>(`/sewing-orders/${sewingOrderId}`);
+        if (current.status !== "draft") {
+          sessionStorage.removeItem(`sewing-order-place:${current.id}`);
+          void navigate(`/sewing-orders/${current.id}`, { replace: true });
+          return;
+        }
+      } catch {
+        // Leave the same request key in sessionStorage for the next retry.
+      }
       setPlaceError(err instanceof ApiError ? err.message : "Не удалось создать заказ");
     } finally {
       setPlacing(false);
@@ -661,11 +683,24 @@ function ModelSizesAndColorsSetup({
     size: string;
     ratioWeight: number | undefined;
   }
-  const [sizeRows, setSizeRows] = useState<SizeRow[]>([{ size: "", ratioWeight: 1 }]);
+  const [sizeRows, setSizeRows] = useState<SizeRow[]>(
+    ["48-50", "52-54", "56-58", "60-62", "64-66"].map((size) => ({ size, ratioWeight: 1 })),
+  );
+  const [sizePresets, setSizePresets] = useState<string[]>([]);
+  const [colorPresets, setColorPresets] = useState<string[]>([]);
   const [colorName, setColorName] = useState("");
   const [colorCode, setColorCode] = useState("");
   const [sizesSaved, setSizesSaved] = useState(false);
   const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    void apiRequest<string[]>("/products/size-presets").then(setSizePresets).catch(() => {
+      // The editable default sizes remain available during a temporary outage.
+    });
+    void apiRequest<string[]>("/products/colors").then(setColorPresets).catch(() => {
+      // Creating a new color remains possible without presets.
+    });
+  }, []);
 
   const saveSizes = async () => {
     const rows = sizeRows.filter((r) => r.size.trim() && r.ratioWeight);
@@ -715,6 +750,7 @@ function ModelSizesAndColorsSetup({
             <div key={index} className="flex items-center gap-2">
               <Input
                 value={row.size}
+                list="sewing-order-size-presets"
                 onChange={(e) => setSizeRows((prev) => prev.map((r, i) => (i === index ? { ...r, size: e.target.value } : r)))}
                 placeholder="Размер, напр. M"
                 className="w-32"
@@ -734,6 +770,9 @@ function ModelSizesAndColorsSetup({
               )}
             </div>
           ))}
+          <datalist id="sewing-order-size-presets">
+            {sizePresets.map((size) => <option key={size} value={size} />)}
+          </datalist>
           <Button variant="secondary" size="sm" className="self-start" onClick={() => setSizeRows((prev) => [...prev, { size: "", ratioWeight: 1 }])}>
             + Добавить размер
           </Button>
@@ -746,7 +785,10 @@ function ModelSizesAndColorsSetup({
           <p className="text-[12.5px] font-medium">Цвет</p>
           <div className="grid gap-3 sm:grid-cols-2">
             <Field label="Название цвета">
-              <Input value={colorName} onChange={(e) => setColorName(e.target.value)} placeholder="Чёрный" data-testid="new-color-name" />
+              <Input value={colorName} onChange={(e) => setColorName(e.target.value)} list="sewing-order-color-presets" placeholder="Чёрный" data-testid="new-color-name" />
+              <datalist id="sewing-order-color-presets">
+                {colorPresets.map((color) => <option key={color} value={color} />)}
+              </datalist>
             </Field>
             <Field label="Код цвета">
               <Input value={colorCode} onChange={(e) => setColorCode(e.target.value)} placeholder="BLACK" data-testid="new-color-code" />
