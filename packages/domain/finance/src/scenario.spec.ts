@@ -46,6 +46,7 @@ import {
   DrizzleWarehouseRepository,
   markShipmentDelivered,
   receiveStock,
+  type ProductVariantOwnershipPort,
 } from "@garmentos/domain-warehouse";
 import { describe, expect, it } from "vitest";
 import { createInvoice } from "./application/create-invoice";
@@ -114,15 +115,28 @@ describe("сквозной сценарий: со склада цеха до п�
         { companyId: company.id, name: "Склад продаж (Москва)", type: "own", createdBy: owner.id },
       );
       const stock = new DrizzleStockRepository(tx);
-      await receiveStock({ stock }, { warehouseId: workshopWarehouse.id, productVariantId: variant.id, quantity: 30, meta: { referenceType: "production_order" } });
+      // ACL-порт SEC-P1 (владелец проекта, 2026-09-24) — тот же принцип, что
+      // apps/api реализует через CatalogService: domain-warehouse не зависит
+      // от domain-catalog в рантайме.
+      const productVariantsOwnership: ProductVariantOwnershipPort = {
+        belongsToCompany: async (companyId, productVariantId) =>
+          (await productVariants.findById(companyId, productVariantId)) !== null,
+      };
+      await receiveStock(
+        { stock, warehouses, productVariants: productVariantsOwnership },
+        { companyId: company.id, warehouseId: workshopWarehouse.id, productVariantId: variant.id, quantity: 30, meta: { referenceType: "production_order" } },
+      );
 
       const shipments = new DrizzleShipmentRepository(tx);
       const shipment = await createShipment(
-        { shipments },
+        { shipments, warehouses, productVariants: productVariantsOwnership },
         { companyId: company.id, originWarehouseId: workshopWarehouse.id, destinationWarehouseId: salesWarehouse.id, items: [{ productVariantId: variant.id, quantity: 30 }] },
       );
-      await dispatchShipment({ shipments, stock }, { companyId: company.id, shipmentId: shipment.id });
-      const delivered = await markShipmentDelivered({ shipments }, { companyId: company.id, shipmentId: shipment.id });
+      await dispatchShipment(
+        { shipments, stock, warehouses, productVariants: productVariantsOwnership },
+        { companyId: company.id, shipmentId: shipment.id },
+      );
+      const delivered = await markShipmentDelivered({ shipments, warehouses }, { companyId: company.id, shipmentId: shipment.id });
       expect(delivered.status).toBe("delivered");
 
       const salesWarehouseStock = await stock.findStockItem(salesWarehouse.id, variant.id);
@@ -158,8 +172,8 @@ describe("сквозной сценарий: со склада цеха до п�
 
       // Warehouse: окончательное списание проданных единиц со склада продаж.
       const afterDispatch = await dispatchStock(
-        { stock },
-        { warehouseId: salesWarehouse.id, productVariantId: variant.id, quantity: 2, meta: { referenceType: "order", referenceId: order.id } },
+        { stock, warehouses, productVariants: productVariantsOwnership },
+        { companyId: company.id, warehouseId: salesWarehouse.id, productVariantId: variant.id, quantity: 2, meta: { referenceType: "order", referenceId: order.id } },
       );
       expect(afterDispatch.quantityOnHand).toBe("28.000");
 

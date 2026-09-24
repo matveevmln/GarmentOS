@@ -6,9 +6,11 @@ import {
   parseQuantity,
   type StockItem,
 } from "../domain/stock";
-import type { StockRepository } from "./ports";
+import { assertProductVariantOwnership, assertWarehouseOwnership } from "./assert-ownership";
+import type { ProductVariantOwnershipPort, StockRepository, WarehouseRepository } from "./ports";
 
 export interface StockReservationInput {
+  companyId: string;
   warehouseId: string;
   productVariantId: string;
   quantity: number;
@@ -16,6 +18,8 @@ export interface StockReservationInput {
 
 export interface StockReservationDeps {
   stock: StockRepository;
+  warehouses: WarehouseRepository;
+  productVariants: ProductVariantOwnershipPort;
 }
 
 // Резерв остатка — готовит почву для будущей интеграции с Sales
@@ -23,8 +27,15 @@ export interface StockReservationDeps {
 // сама по себе НЕ реализуется в этой партии (см. ROADMAP.md, решение по
 // хореографии; ARCHITECTURE_SELF_REVIEW.md, раздел 11). Резерв не создаёт
 // stock_movement — это не физическое движение товара, а мягкая пометка.
+//
+// companyId проверяется до чтения остатка (SEC-P1, владелец проекта,
+// 2026-09-24) — до этого исправления endpoint /stock/reserve вызывался даже
+// без аутентифицированного пользователя в контроллере и без какой-либо
+// проверки владения складом.
 export async function reserveStock(deps: StockReservationDeps, input: StockReservationInput): Promise<StockItem> {
   assertPositiveQuantity(input.quantity, "Количество резерва");
+  await assertWarehouseOwnership(deps.warehouses, input.companyId, input.warehouseId);
+  await assertProductVariantOwnership(deps.productVariants, input.companyId, input.productVariantId);
 
   const current = await deps.stock.findStockItem(input.warehouseId, input.productVariantId);
   if (!current) {
@@ -40,6 +51,8 @@ export async function reserveStock(deps: StockReservationDeps, input: StockReser
 
 export async function releaseReservation(deps: StockReservationDeps, input: StockReservationInput): Promise<StockItem> {
   assertPositiveQuantity(input.quantity, "Количество снятия резерва");
+  await assertWarehouseOwnership(deps.warehouses, input.companyId, input.warehouseId);
+  await assertProductVariantOwnership(deps.productVariants, input.companyId, input.productVariantId);
 
   const current = await deps.stock.findStockItem(input.warehouseId, input.productVariantId);
   if (!current) {
