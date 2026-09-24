@@ -14,9 +14,15 @@ import { BOM_APPROVAL_PORT } from "./contract-manufacturing.tokens";
 // подключённый через DI apps/api вместо ручной сборки в тесте.
 export const bomApprovalProvider: Provider = {
   provide: BOM_APPROVAL_PORT,
-  useFactory: (db: Database): BomApprovalPort => {
-    const boms = new DrizzleBomRepository(db);
-    return {
+  useFactory: (db: Database): BomApprovalPort => createBomApprovalPort(db),
+  inject: [DATABASE_CONNECTION],
+};
+
+// Размещение многомодельного заказа передаёт сюда tx, чтобы созданный
+// автоматически BOM откатывался вместе с партиями и шапкой заказа.
+export function createBomApprovalPort(db: ConstructorParameters<typeof DrizzleBomRepository>[0]): BomApprovalPort {
+  const boms = new DrizzleBomRepository(db);
+  return {
       async isBomApproved(companyId, bomId, productId) {
         const approved = await getApprovedBom({ boms }, { companyId, productId });
         return approved?.id === bomId;
@@ -30,7 +36,5 @@ export const bomApprovalProvider: Provider = {
         const approved = await approveBom({ boms }, { companyId, bomId: draft.id });
         return approved.id;
       },
-    };
-  },
-  inject: [DATABASE_CONNECTION],
-};
+  };
+}
