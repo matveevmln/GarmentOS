@@ -57,6 +57,7 @@ import type { AuthenticatedRequestUser } from "../auth/current-user.decorator";
 import { AuditService } from "../audit/audit.service";
 import { CatalogService } from "../catalog/catalog.service";
 import { DATABASE_CONNECTION } from "../database/database.module";
+import { createBomApprovalPort } from "./bom-approval.provider";
 import { WarehouseService } from "../warehouse/warehouse.service";
 import {
   BOM_APPROVAL_PORT,
@@ -566,6 +567,10 @@ export class ContractManufacturingService {
     return this.sewingOrders.findById(companyId, id);
   }
 
+  async deleteSewingOrderDraft(companyId: string, id: string): Promise<boolean> {
+    return this.sewingOrders.deleteDraft(companyId, id);
+  }
+
   // Штаб заказа (B01 basic) — шапка вместе с уже размещёнными партиями.
   // null, если заказ не найден в этой компании — контроллер сам решает,
   // как ответить (404), домен здесь не участвует.
@@ -706,7 +711,7 @@ export class ContractManufacturingService {
           sewingOrders,
           productionOrders,
           workshops,
-          bomApproval: this.bomApproval,
+          bomApproval: createBomApprovalPort(tx),
           companyNumbering: this.companyNumbering,
         },
         {
