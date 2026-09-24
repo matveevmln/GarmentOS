@@ -497,6 +497,14 @@ export class DrizzleSewingOrderRepository implements SewingOrderRepository {
     return row ? toSewingOrder(row) : null;
   }
 
+  async deleteDraft(companyId: string, id: string): Promise<boolean> {
+    const rows = await this.db
+      .delete(sewingOrders)
+      .where(and(eq(sewingOrders.id, id), eq(sewingOrders.companyId, companyId), eq(sewingOrders.status, "draft")))
+      .returning({ id: sewingOrders.id });
+    return rows.length > 0;
+  }
+
   async place(id: string, input: PlaceSewingOrderRepoInput): Promise<SewingOrder> {
     const [row] = await this.db
       .update(sewingOrders)
