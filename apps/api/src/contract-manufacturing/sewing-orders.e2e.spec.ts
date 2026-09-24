@@ -522,6 +522,41 @@ describe("Sewing Orders API — заказ на пошив с нескольки
     expect(listB.every((row) => !idsA.has(row.id))).toBe(true);
   });
 
+  it("размеры другой компании не попадают в подсказки, новые размеры сохраняются", async () => {
+    await request(httpServer).put(`/v1/products/${productA2.id}/sizes`)
+      .set(...authHeader(companyA.accessToken))
+      .send({ sizes: [{ size: "48-50", ratioWeight: 1 }, { size: "52-54", ratioWeight: 2 }] })
+      .expect(200);
+    await request(httpServer).put(`/v1/products/${productB.id}/sizes`)
+      .set(...authHeader(companyB.accessToken))
+      .send({ sizes: [{ size: "СЕКРЕТНЫЙ-РАЗМЕР", ratioWeight: 1 }] })
+      .expect(200);
+    const presetsA = (await request(httpServer).get("/v1/products/size-presets")
+      .set(...authHeader(companyA.accessToken)).expect(200)).body as string[];
+    expect(presetsA).toContain("48-50");
+    expect(presetsA).toContain("52-54");
+    expect(presetsA).not.toContain("СЕКРЕТНЫЙ-РАЗМЕР");
+  });
+
+  it("удаляет только свой черновик; размещённый заказ и чужой черновик сохраняются", async () => {
+    const own = (await request(httpServer).post("/v1/sewing-orders")
+      .set(...authHeader(companyA.accessToken)).send({}).expect(201)).body as SewingOrderResponseDto;
+    await request(httpServer).delete(`/v1/sewing-orders/${own.id}`)
+      .set(...authHeader(companyB.accessToken)).expect(404);
+    await request(httpServer).get(`/v1/sewing-orders/${own.id}`)
+      .set(...authHeader(companyA.accessToken)).expect(200);
+    await request(httpServer).delete(`/v1/sewing-orders/${own.id}`)
+      .set(...authHeader(companyA.accessToken)).expect(200);
+    await request(httpServer).get(`/v1/sewing-orders/${own.id}`)
+      .set(...authHeader(companyA.accessToken)).expect(404);
+    const placed = (await request(httpServer).get("/v1/sewing-orders")
+      .set(...authHeader(companyA.accessToken)).expect(200)).body as SewingOrderResponseDto[];
+    const existingPlaced = placed.find((row) => row.status === "placed");
+    expect(existingPlaced).toBeDefined();
+    await request(httpServer).delete(`/v1/sewing-orders/${existingPlaced!.id}`)
+      .set(...authHeader(companyA.accessToken)).expect(404);
+  });
+
   it("положительный сценарий: accountant без contract_manufacturing.write не может разместить заказ (403)", async () => {
     const accountantName = `T01 Sewing Order Accountant ${Date.now()}`;
     createdCompanyNames.push(accountantName);
