@@ -1,5 +1,13 @@
 import { test, expect, type Page, type Locator } from "@playwright/test";
-import { loginForFixtures, seedAuthState, seedTwoColorProduct, OWNER_EXAMPLE_PERCENTAGES, FIVE_SIZES, type AuthSession } from "./fixtures";
+import {
+  API_BASE_URL,
+  loginForFixtures,
+  seedAuthState,
+  seedTwoColorProduct,
+  OWNER_EXAMPLE_PERCENTAGES,
+  FIVE_SIZES,
+  type AuthSession,
+} from "./fixtures";
 
 // T01 (docs/tasks/T01.md, ADR 0002) — сквозной проход A02/A03/B01 в реальном
 // браузере на тестовой БД. Учётные данные и адрес API/веб — из переменных
@@ -260,4 +268,177 @@ test.describe("мобильная ширина", () => {
 
     await expect(page.getByTestId("place-order")).toBeVisible();
   });
+});
+
+// T01-REVIEW-FIXES.md п.2 — сервер принял POST /place и сохранил результат,
+// но ответ на этот конкретный запрос клиент не получил (обрыв соединения).
+// Оригинальный POST реально отправляется на сервер (через прямой fetch
+// внутри перехватчика), после чего перехваченный запрос СТРАНИЦЫ обрывается
+// (route.abort) — так проверяется именно «сервер выполнил, ответ потерян»,
+// а не отказ сервера. GET-восстановление в самом catch у handlePlace тоже
+// намеренно обрывается один раз, чтобы отдельно проверить второй рубеж
+// защиты — обнаружение уже размещённого заказа при обычной перезагрузке.
+test("восстановление после потерянного ответа: сервер разместил заказ, ответ потерян, перезагрузка открывает тот же штаб", async ({ page }) => {
+  await authenticate(page);
+  const suffix = Date.now();
+
+  await page.goto("/sewing-orders");
+  await page.getByTestId("new-sewing-order").click();
+  await page.waitForURL(/\/sewing-orders\/[^/]+\/edit$/);
+
+  await page.getByRole("tab", { name: "+ Добавить цех" }).click();
+  const workshopName = `Playwright Потеря ${suffix}`;
+  await page.getByTestId("new-workshop-name").fill(workshopName);
+  await page.getByTestId("save-workshop").click();
+  await expect(page.getByRole("button", { name: workshopName })).toBeVisible();
+
+  await page.getByTestId("add-model-block").click();
+  const model0 = page.getByTestId("model-block-0");
+  await model0.getByRole("tab", { name: "+ Добавить модель" }).click();
+  const modelName = `Playwright Потеряшка ${suffix}`;
+  await model0.getByTestId("new-model-name").fill(modelName);
+  await model0.getByTestId("new-model-code").fill(`PW-LOST-${suffix}`);
+  await model0.getByTestId("save-model").click();
+  // Размерный ряд по умолчанию — уже пять парных размеров Стеганки.
+  await model0.getByRole("button", { name: "Сохранить размерный ряд" }).click();
+  await model0.getByTestId("new-color-name").fill("Графит");
+  await model0.getByTestId("new-color-code").fill(`GRAPHITE-${suffix}`);
+  await model0.getByRole("button", { name: "Сохранить цвет и продолжить" }).click();
+  await commitNumber(model0.getByTestId("unit-price"), "500");
+  await model0.getByTestId("add-color").click();
+  await commitNumber(model0.getByTestId("color-quantity"), "20");
+  await expect(page.getByTestId("save-status")).toContainText("Сохранено", { timeout: 8000 });
+
+  let placeRequestsSeen = 0;
+  let recoveryGetSeen = 0;
+  await page.route("**/v1/sewing-orders/*/place", async (route) => {
+    placeRequestsSeen += 1;
+    const req = route.request();
+    const originalHeaders = req.headers();
+    // Реальный запрос уходит на сервер напрямую — заказ действительно
+    // размещается, но перехваченный запрос страницы получит обрыв связи.
+    // Только нужные заголовки — пересылать content-length/connection от
+    // оригинального запроса неверно, тело формируется заново.
+    await fetch(req.url(), {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: originalHeaders.authorization },
+      body: req.postData() ?? undefined,
+    });
+    await route.abort("failed");
+  });
+  await page.route("**/v1/sewing-orders/*", async (route) => {
+    if (route.request().method() !== "GET") return route.fallback();
+    recoveryGetSeen += 1;
+    if (recoveryGetSeen === 1) {
+      // Первая попытка клиента проверить статус после потери ответа тоже
+      // обрывается — проверяем именно рубеж «перезагрузка», не только
+      // мгновенное восстановление внутри того же клика.
+      await route.abort("failed");
+      return;
+    }
+    await route.fallback();
+  });
+
+  await page.getByTestId("place-order").click();
+  await expect(page.getByTestId("place-error")).toBeVisible({ timeout: 8000 });
+  expect(placeRequestsSeen).toBe(1);
+
+  await page.unroute("**/v1/sewing-orders/*/place");
+  await page.unroute("**/v1/sewing-orders/*");
+
+  // Перезагрузка — форма запрашивает статус заново, без перехвата, и должна
+  // обнаружить, что заказ уже размещён на сервере, открыв штаб вместо формы.
+  await page.reload();
+  await page.waitForURL(/\/sewing-orders\/[^/]+$/, { timeout: 8000 });
+  await expect(page.getByText(/Заказ №\d+/).first()).toBeVisible();
+  await expect(page.getByText(modelName)).toBeVisible();
+  await expect(page.getByTestId("production-order-card")).toHaveCount(1);
+
+  // Повторный вызов «Создать заказ» с тем же ключом (если бы форма всё ещё
+  // была открыта) не создал бы вторую группу партий — проверено на уровне
+  // API отдельным e2e-тестом (sewing-orders.e2e.spec.ts, идемпотентность).
+  await page.goto("/sewing-orders");
+  await expect(page.getByText(workshopName)).toBeVisible();
+});
+
+// T01-REVIEW-FIXES.md п.3 — Стеганка: пользователь добавляет свой размер и
+// свой цвет вручную; запись должна попасть в общий справочник компании и
+// предлагаться при заполнении СЛЕДУЮЩЕЙ модели, в том числе после
+// перезагрузки страницы — не только в рамках уже открытой формы.
+test("сохранение пользовательских размеров и цветов: свой размер/цвет предлагается в следующей модели после перезагрузки", async ({ page }) => {
+  await authenticate(page);
+  const suffix = Date.now();
+  const customSize = `ОСОБЫЙ-${suffix}`;
+  const customColor = `Изумрудный ${suffix}`;
+
+  await page.goto("/sewing-orders");
+  await page.getByTestId("new-sewing-order").click();
+  await page.waitForURL(/\/sewing-orders\/[^/]+\/edit$/);
+
+  await page.getByRole("tab", { name: "+ Добавить цех" }).click();
+  await page.getByTestId("new-workshop-name").fill(`Playwright Размеры ${suffix}`);
+  await page.getByTestId("save-workshop").click();
+
+  // Первая модель — стандартные размеры Стеганки плюс один добавленный
+  // вручную нестандартный размер, и цвет, введённый вручную.
+  await page.getByTestId("add-model-block").click();
+  const model0 = page.getByTestId("model-block-0");
+  await model0.getByRole("tab", { name: "+ Добавить модель" }).click();
+  await model0.getByTestId("new-model-name").fill(`Playwright Размерная ${suffix}`);
+  await model0.getByTestId("new-model-code").fill(`PW-SIZE-${suffix}`);
+  await model0.getByTestId("save-model").click();
+  await model0.getByRole("button", { name: "+ Добавить размер" }).click();
+  await model0.getByTestId("size-row-5").fill(customSize);
+  await model0.getByRole("button", { name: "Сохранить размерный ряд" }).click();
+  await model0.getByTestId("new-color-name").fill(customColor);
+  await model0.getByTestId("new-color-code").fill(`EMERALD-${suffix}`);
+  await model0.getByRole("button", { name: "Сохранить цвет и продолжить" }).click();
+  await expect(page.getByTestId("save-status")).toContainText("Сохранено", { timeout: 8000 });
+
+  // Перезагрузка — подсказки размеров/цветов должны прийти заново с сервера,
+  // не только жить в памяти текущей вкладки.
+  await page.reload();
+  await expect(page.getByTestId("model-block-0")).toBeVisible();
+
+  // Вторая, независимая модель того же заказа — её собственная форма
+  // добавления размеров/цветов должна предложить то, что было введено в
+  // первой модели, через общий справочник компании.
+  await page.getByTestId("add-model-block").click();
+  const model1 = page.getByTestId("model-block-1");
+  await model1.getByRole("tab", { name: "+ Добавить модель" }).click();
+  await model1.getByTestId("new-model-name").fill(`Playwright Размерная-2 ${suffix}`);
+  await model1.getByTestId("new-model-code").fill(`PW-SIZE2-${suffix}`);
+  await model1.getByTestId("save-model").click();
+
+  await expect(page.locator(`#sewing-order-size-presets option[value="${customSize}"]`)).toHaveCount(1);
+  await model1.getByRole("button", { name: "Сохранить размерный ряд" }).click();
+  await expect(page.locator(`#sewing-order-color-presets option[value="${customColor}"]`)).toHaveCount(1);
+});
+
+// T01-REVIEW-FIXES.md п.4 — пустой черновик можно удалить из списка, после
+// чего пользователь остаётся на списке без него; размещённые заказы не
+// предлагают действие удаления (проверено отсутствием кнопки на карточке).
+test("удаление пустого черновика: карточка исчезает из списка, у размещённых заказов кнопки удаления нет", async ({ page }) => {
+  await authenticate(page);
+  await page.goto("/sewing-orders");
+  await page.getByTestId("new-sewing-order").click();
+  await page.waitForURL(/\/sewing-orders\/[^/]+\/edit$/);
+  const draftId = page.url().match(/\/sewing-orders\/([^/]+)\/edit$/)?.[1];
+  if (!draftId) throw new Error("Не удалось извлечь id черновика из URL");
+
+  page.once("dialog", (dialog) => void dialog.accept());
+  await page.goto("/sewing-orders");
+  await expect(page.getByTestId(`delete-draft-${draftId}`)).toBeVisible();
+  await page.getByTestId(`delete-draft-${draftId}`).click();
+  await expect(page.getByTestId(`delete-draft-${draftId}`)).toHaveCount(0);
+
+  // Размещённый заказ (из другого теста этого файла) не должен показывать
+  // кнопку «Удалить» вовсе — статус не draft.
+  const orders = await (await fetch(`${API_BASE_URL}/sewing-orders`, {
+    headers: { Authorization: `Bearer ${sharedAuth.accessToken}` },
+  })).json() as Array<{ id: string; status: string }>;
+  const placed = orders.find((order) => order.status === "placed");
+  if (!placed) throw new Error("Ожидался хотя бы один размещённый заказ от предыдущих тестов файла");
+  await expect(page.getByTestId(`sewing-order-card-${placed.id}`)).toBeVisible();
+  await expect(page.getByTestId(`sewing-order-card-${placed.id}`).getByRole("button", { name: "Удалить" })).toHaveCount(0);
 });

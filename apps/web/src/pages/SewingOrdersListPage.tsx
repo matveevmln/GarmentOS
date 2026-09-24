@@ -82,6 +82,7 @@ export function SewingOrdersListPage() {
               key={order.id}
               interactive
               className="cursor-pointer"
+              data-testid={`sewing-order-card-${order.id}`}
               onClick={() => void navigate(order.status === "draft" ? `/sewing-orders/${order.id}/edit` : `/sewing-orders/${order.id}`)}
             >
               <CardContent className="flex flex-wrap items-center justify-between gap-3 py-4">

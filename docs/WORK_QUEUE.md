@@ -15,7 +15,7 @@
 |---|---|---|---|
 | SEC-P1 | ACCEPTED (scope) | `docs/tasks/SEC-P1.md` — отдельное исправление изоляции компаний; Claude Sonnet | Ветка `fix/gos-sec-p1-tenant-isolation` от `gos-party-v1/review-security-handoff` (SHA `fe8df8acd76cf20201c0871c8ba54f6f30fb3131`); отчёт `docs/reports/SEC-P1.md`, PR см. описание ветки |
 | T00 | ACCEPTED (audit) | `docs/GOS-PARTY-V1-T00-CLAUDE.md` и проверка возможностей ниже | `docs/GOS-PARTY-V1-AUDIT.md` |
-| T01 | REVIEW | `docs/tasks/T01.md` — модель, заказ на пошив и штаб партии; Claude Sonnet | Ветка `gos-party-v1/t01-implementation-contract`; отчёт `docs/reports/T01.md`, PR см. описание ветки |
+| T01 | REVIEW | `docs/tasks/T01.md` + `docs/tasks/T01-REVIEW-FIXES.md` — модель, заказ на пошив, штаб партии и исправления после ревью; Claude Sonnet | Ветка `gos-party-v1/t01-implementation-contract`; отчёты `docs/reports/T01.md` и `docs/reports/T01-REVIEW-FIXES.md`, PR #8 |
 | T02–T05 | PLANNED | См. основной документ | Не начинать по одному названию |
 
 Документ `docs/GOS-PARTY-V1-EXECUTION.md` связывает V01–V04 с пакетами T01–T06, описывает судьбу старых данных и критерии настоящей первой партии. T01 реализован и находится в `REVIEW` (см. ниже); его запуск в Claude Code остаётся явным действием, автоматический агент не настроен.
@@ -30,7 +30,11 @@
 
 ## T01 выполнен, ждёт ревью владельца (2026-09-24)
 
-Реализация T01 (ADR → миграция → домен → API → веб-экраны → тесты → проход в браузере на тестовой БД) завершена в ветке `gos-party-v1/t01-implementation-contract`, целиком по заданию `docs/tasks/T01.md`. **Статус — `REVIEW`** (не `ACCEPTED` — это делает владелец). Полный отчёт: `docs/reports/T01.md` (ADR, миграция, изменённые файлы, доказательства записи в БД, чек-лист A02/A03/B01, команды и результаты typecheck/lint/build/test, описание прохода в браузере, непроверенное). ADR: `docs/adr/0002-sewing-order-header.md`. Постоянные тесты: `apps/api/src/contract-manufacturing/sewing-orders.e2e.spec.ts` (9), `packages/domain/catalog/src/application/distribute-size-quantities.spec.ts` (18, включая новый `distributeQuantityByPercent`), `apps/web/e2e/sewing-order.spec.ts` (5, Playwright в реальном браузере). Рабочая (production) БД не затронута, деплой не выполнялся, PR — draft, не слит.
+Реализация T01 (ADR → миграция → домен → API → веб-экраны → тесты → проход в браузере на тестовой БД) завершена в ветке `gos-party-v1/t01-implementation-contract`, целиком по заданию `docs/tasks/T01.md`. Полный отчёт: `docs/reports/T01.md`. ADR: `docs/adr/0002-sewing-order-header.md`.
+
+## T01-REVIEW-FIXES выполнен, ждёт повторного ревью владельца (2026-09-24)
+
+По итогам ревью PR #8 выдано отдельное задание `docs/tasks/T01-REVIEW-FIXES.md` (атомарность BOM внутри транзакции размещения, восстановление после потерянного ответа `POST /place`, сохранение пользовательских парных/произвольных размеров и цветов Стеганки, безопасное удаление черновика). Код от Codex уже был в PR #8, но не проверен e2e/браузером (не было тестовой PostgreSQL). Эта сессия (Claude Sonnet) проверила и доработала: нашла и закрыла реальный пробел в тестовом покрытии атомарности (ни один прежний тест не проверял откат BOM внутри транзакции — новый прямой тест это делает), нашла и исправила дефект очистки тестовой БД, добавила 3 новых Playwright-сценария (потерянный ответ, сохранение размеров/цветов, удаление черновика) и один API-тест атомарности. **Статус — по-прежнему `REVIEW`** (не `ACCEPTED` — решение владельца). Полный отчёт: `docs/reports/T01-REVIEW-FIXES.md` — точные команды, коды возврата, описание каждого browser-сценария, список непроверенного. Постоянные тесты: `apps/api/src/contract-manufacturing/sewing-orders.e2e.spec.ts` (12, было 9), `apps/web/e2e/sewing-order.spec.ts` (8, было 5, Playwright в реальном браузере, дважды подряд без флейков). Рабочая (production) БД не затронута, деплой не выполнялся, T02 не начинался, PR #8 — draft, не слит.
 
 ## Перед T00: проверка возможностей Claude (история задания)
 

@@ -8,7 +8,7 @@
 
 import type { Page } from "@playwright/test";
 
-const API_BASE_URL = process.env.PLAYWRIGHT_API_URL ?? "http://localhost:3000/v1";
+export const API_BASE_URL = process.env.PLAYWRIGHT_API_URL ?? "http://localhost:3000/v1";
 
 export interface AuthSession {
   accessToken: string;

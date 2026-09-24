@@ -15,6 +15,7 @@ import {
   productionOrders,
   productionOrderVariants,
   products,
+  productSizes,
   productVariants,
   refreshTokens,
   sewingOrders,
@@ -29,11 +30,19 @@ import type {
   SewingOrderWithProductionOrdersResponseDto,
   WorkshopResponseDto,
 } from "@garmentos/shared-types";
+import {
+  DrizzleProductionOrderRepository,
+  DrizzleSewingOrderRepository,
+  DrizzleWorkshopRepository,
+  placeSewingOrder as placeSewingOrderUseCase,
+  type ProductionOrderRepository,
+} from "@garmentos/domain-contract-manufacturing";
 import { eq } from "drizzle-orm";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { AppModule } from "../app.module";
 import { authHeader, setupAuthenticatedCompany } from "../test-support/auth-test-helper";
+import { createBomApprovalPort } from "./bom-approval.provider";
 
 // T01 (docs/tasks/T01.md, ADR 0002) — заказ на пошив: общая шапка над одной
 // или несколькими партиями по моделям. Постоянный regression-тест, не
@@ -65,6 +74,7 @@ async function cleanupCompany(name: string): Promise<void> {
 
   const companyProducts = await db.select().from(products).where(eq(products.companyId, company.id));
   for (const product of companyProducts) {
+    await db.delete(productSizes).where(eq(productSizes.productId, product.id));
     await db.delete(productVariants).where(eq(productVariants.productId, product.id));
     // ensureApprovedBomForProduct (BomApprovalPort) заводит пустой BOM
     // прозрачно при размещении — подчищаем его здесь же.
@@ -442,6 +452,92 @@ describe("Sewing Orders API — заказ на пошив с нескольки
     expect(rows).toHaveLength(0);
     const [headerRow] = await db.select().from(sewingOrders).where(eq(sewingOrders.id, draft.id));
     expect(headerRow?.status).toBe("draft");
+  });
+
+  // T01-REVIEW-FIXES п.1 — прежние сценарии отклоняются на этапе валидации
+  // (resolveSewingOrderModelVariants), ДО открытия транзакции, и поэтому не
+  // проверяют главное замечание ревью: если у ПЕРВОЙ модели заказа BOM ещё
+  // не существовал (ensureApprovedBomForProduct создаёт и утверждает его
+  // прямо во время размещения), а на ВТОРОЙ модели запись в БД сорвалась
+  // внутри самой транзакции — новый BOM первой модели должен откатиться
+  // вместе с партиями, а не остаться сиротой. Тест вызывает placeSewingOrder
+  // напрямую (в обход HTTP), оборачивает его в db.transaction точно так же,
+  // как ContractManufacturingService.placeSewingOrder, и подменяет только
+  // productionOrders.create — на второй модели он бросает исключение уже
+  // ПОСЛЕ реального создания partii первой модели и реального создания BOM
+  // через настоящий createBomApprovalPort(tx) (не через API-заглушку).
+  it("атомарность: BOM первой модели, автоматически созданный внутри транзакции, откатывается при сбое второй модели", async () => {
+    const suffix = Date.now();
+    const productAtomic = (
+      await request(httpServer)
+        .post("/v1/products")
+        .set(...authHeader(companyA.accessToken))
+        .send({ name: "Атомарность A3", code: `T01-A3-${suffix}` })
+        .expect(201)
+    ).body as ProductResponseDto;
+    const variantAtomic = (
+      await request(httpServer)
+        .post("/v1/product-variants")
+        .set(...authHeader(companyA.accessToken))
+        .send({ productId: productAtomic.id, size: "OneSize", color: "Красный", skuCode: `T01-A3-${suffix}-M` })
+        .expect(201)
+    ).body as ProductVariantResponseDto;
+
+    const bomsBefore = await db.select().from(boms).where(eq(boms.productId, productAtomic.id));
+    expect(bomsBefore).toHaveLength(0);
+
+    const draft = (
+      await request(httpServer)
+        .post("/v1/sewing-orders")
+        .set(...authHeader(companyA.accessToken))
+        .send({})
+        .expect(201)
+    ).body as SewingOrderResponseDto;
+
+    let creatCalls = 0;
+    await expect(
+      db.transaction(async (tx) => {
+        const sewingOrdersRepo = new DrizzleSewingOrderRepository(tx);
+        const realProductionOrders = new DrizzleProductionOrderRepository(tx);
+        // Частичный мок — placeSewingOrder вызывает у productionOrders только
+        // .create(), остальные методы интерфейса здесь намеренно не нужны.
+        const failingProductionOrders = {
+          create: async (input: Parameters<typeof realProductionOrders.create>[0]) => {
+            creatCalls += 1;
+            if (creatCalls === 2) throw new Error("Симулированный сбой записи второй партии внутри транзакции");
+            return realProductionOrders.create(input);
+          },
+        } as unknown as ProductionOrderRepository;
+        return placeSewingOrderUseCase(
+          {
+            sewingOrders: sewingOrdersRepo,
+            productionOrders: failingProductionOrders,
+            workshops: new DrizzleWorkshopRepository(tx),
+            bomApproval: createBomApprovalPort(tx),
+            companyNumbering: { reserveNextSewingOrderNumber: () => Promise.resolve(999_999) },
+          },
+          {
+            companyId: companyA.companyId,
+            sewingOrderId: draft.id,
+            workshopId: workshopA.id,
+            clientRequestId: `atomic-tx-${draft.id}`,
+            createdBy: companyA.userId,
+            models: [
+              { productId: productAtomic.id, agreedUnitPrice: 500, variants: [{ productVariantId: variantAtomic.id, quantity: 10 }] },
+              { productId: productA2.id, agreedUnitPrice: 300, variants: [{ productVariantId: variantsA1[0].id, quantity: 5 }] },
+            ],
+          },
+        );
+      }),
+    ).rejects.toThrow("Симулированный сбой");
+
+    expect(creatCalls).toBe(2);
+    const bomsAfter = await db.select().from(boms).where(eq(boms.productId, productAtomic.id));
+    expect(bomsAfter).toHaveLength(0);
+    const partiesAfter = await db.select().from(productionOrders).where(eq(productionOrders.sewingOrderId, draft.id));
+    expect(partiesAfter).toHaveLength(0);
+    const [headerAfter] = await db.select().from(sewingOrders).where(eq(sewingOrders.id, draft.id));
+    expect(headerAfter?.status).toBe("draft");
   });
 
   it("чужой цех — 404, ничего не создаётся", async () => {
