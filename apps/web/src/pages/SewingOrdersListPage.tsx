@@ -11,6 +11,7 @@ import { ErrorState } from "../design-system/Feedback/ErrorState";
 import { EmptyState } from "../design-system/Feedback/EmptyState";
 import { IconBatch } from "../design-system/Icons/icons";
 import { formatDate } from "../lib/format";
+import { toast } from "../design-system/Toast/Toast";
 
 // Список заказов на пошив (ADR 0002) — новая шапка над `production_orders`.
 // Существующий /production-orders (партии одной модели) не заменён и
@@ -39,6 +40,17 @@ export function SewingOrdersListPage() {
   useEffect(load, []);
 
   const workshopName = (id: string | null) => workshops.find((w) => w.id === id)?.name ?? "—";
+
+  const deleteDraft = async (id: string) => {
+    if (!window.confirm("Удалить этот черновик заказа на пошив?")) return;
+    try {
+      await apiRequest(`/sewing-orders/${id}`, { method: "DELETE" });
+      setOrders((previous) => previous.filter((order) => order.id !== id));
+      toast.success("Черновик удалён");
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Не удалось удалить черновик");
+    }
+  };
 
   if (loading) return <SkeletonList />;
   if (error) return <ErrorState title="Не удалось загрузить заказы" description={error} onRetry={load} />;
@@ -79,7 +91,17 @@ export function SewingOrdersListPage() {
                   </p>
                   <p className="mt-0.5 text-[12px] text-muted-foreground">Обновлён {formatDate(order.updatedAt)}</p>
                 </div>
-                <StatusBadge status={order.status} />
+                <div className="flex items-center gap-2">
+                  <StatusBadge status={order.status} />
+                  {order.status === "draft" && (
+                    <Button variant="ghost" size="sm" onClick={(event) => {
+                      event.stopPropagation();
+                      void deleteDraft(order.id);
+                    }} data-testid={`delete-draft-${order.id}`}>
+                      Удалить
+                    </Button>
+                  )}
+                </div>
               </CardContent>
             </Card>
           ))}
