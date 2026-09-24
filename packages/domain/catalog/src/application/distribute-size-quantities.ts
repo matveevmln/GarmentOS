@@ -121,6 +121,54 @@ export function distributeQuantityByRatio(ratios: SizeRatio[], totalQuantity: nu
   return ratios.map((ratio, index) => ({ size: ratio.size, quantity: quantities[index] ?? 0 }));
 }
 
+// Проценты редактора долей заказа (ADR 0002, «Штаб партии v1», владелец
+// проекта, 2026-09-24; docs/GOS-PARTY-V1.md, раздел 5) — НЕ то же самое, что
+// SizeRatio выше: веса раскладки модели произвольны и не обязаны давать 100,
+// а проценты шаблона заказа обязаны — пользователь редактирует именно доли
+// целого, и число, которое не сходится в 100%, означает ошибку ввода, а не
+// «просто другой масштаб». Пример владельца: 12,5/25/25/25/12,5% → на 600
+// даёт 75/150/150/150/75, на 400 — 50/100/100/100/50. Метод округления —
+// тот же largest remainder, тай-брейк по возрастанию индекса ряда.
+export interface SizePercent {
+  size: string;
+  percent: number;
+}
+
+const PERCENT_SUM_TOLERANCE = 0.01;
+
+export function distributeQuantityByPercent(percentages: SizePercent[], totalQuantity: number): SizeQuantity[] {
+  if (percentages.length === 0) {
+    throw new DomainError("Нет ни одного размера для распределения по процентам", "SIZE_DISTRIBUTION_EMPTY");
+  }
+  if (!Number.isInteger(totalQuantity) || totalQuantity <= 0) {
+    throw new DomainError(
+      `Общее количество должно быть положительным целым числом (получено ${totalQuantity})`,
+      "SIZE_DISTRIBUTION_QUANTITY_INVALID",
+    );
+  }
+  for (const row of percentages) {
+    if (row.percent < 0) {
+      throw new DomainError(
+        `Процент размера "${row.size}" не может быть отрицательным (получено ${row.percent})`,
+        "SIZE_PERCENT_INVALID",
+      );
+    }
+  }
+  const sum = percentages.reduce((total, row) => total + row.percent, 0);
+  if (Math.abs(sum - 100) > PERCENT_SUM_TOLERANCE) {
+    throw new DomainError(
+      `Проценты должны в сумме давать 100% (получено ${sum.toFixed(2)}%)`,
+      "SIZE_PERCENT_SUM_INVALID",
+    );
+  }
+
+  const quantities = distributeByWeights(
+    percentages.map((row) => row.percent / 100),
+    totalQuantity,
+  );
+  return percentages.map((row, index) => ({ size: row.size, quantity: quantities[index] ?? 0 }));
+}
+
 // Деление количества поровну между N группами (largest remainder) — для
 // величин, где нет смысла в тирах "хвост"/"ядро" размерного ряда (например,
 // цвета одной модели: владелец проекта, 2026-08-03 — общее количество сперва

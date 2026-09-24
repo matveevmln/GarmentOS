@@ -372,6 +372,10 @@ export const productionOrderResponseSchema = z.object({
   specificationId: z.string().uuid().nullable(),
   orderNumber: z.number().int().nullable(),
   costSnapshot: productionOrderCostSnapshotSchema.nullable(),
+  // Заказ на пошив-шапка (ADR 0002) — null у партий без шапки (созданных до
+  // этого поля или старыми путями до их переключения, см. ADR раздел
+  // «Backfill»).
+  sewingOrderId: z.string().uuid().nullable(),
   createdBy: z.string().uuid().nullable(),
   createdAt: z.date(),
   updatedAt: z.date(),
@@ -415,4 +419,94 @@ export const previewProductionOrderVariantsResponseSchema = z.object({
 });
 export type PreviewProductionOrderVariantsResponseDto = z.infer<
   typeof previewProductionOrderVariantsResponseSchema
+>;
+
+// Заказ на пошив — общая шапка над одной или несколькими партиями по
+// моделям (ADR 0002, «Штаб партии v1», владелец проекта, 2026-09-24).
+
+export const sewingOrderStatusSchema = z.enum(["draft", "placed", "cancelled"]);
+export type SewingOrderStatus = z.infer<typeof sewingOrderStatusSchema>;
+
+// Снимок формы A02 — сериализуемый JSON, сервер его не разбирает, только
+// хранит и возвращает как есть (opaque для контракт-мануфактуринга).
+export const sewingOrderDraftPayloadSchema = z.record(z.string(), z.unknown());
+export type SewingOrderDraftPayload = z.infer<typeof sewingOrderDraftPayloadSchema>;
+
+export const createSewingOrderDraftSchema = z.object({
+  workshopId: z.string().uuid().optional(),
+  draftPayload: sewingOrderDraftPayloadSchema.optional(),
+});
+export type CreateSewingOrderDraftDto = z.infer<typeof createSewingOrderDraftSchema>;
+
+export const updateSewingOrderDraftSchema = z.object({
+  version: z.number().int().min(1),
+  workshopId: z.string().uuid().nullable().optional(),
+  draftPayload: sewingOrderDraftPayloadSchema.nullable().optional(),
+});
+export type UpdateSewingOrderDraftDto = z.infer<typeof updateSewingOrderDraftSchema>;
+
+// Один размер шаблона распределения (R02: «доли должны в сумме давать
+// 100%») — отдельно от sizeRatioSchema модели (тот — произвольные веса).
+export const sewingOrderSizePercentSchema = z.object({
+  size: z.string().min(1),
+  percent: z.number().min(0).max(100),
+});
+
+export const sewingOrderSizeCellSchema = z.object({
+  size: z.string().min(1),
+  quantity: z.number().int().min(0),
+});
+
+// Один цвет модели в составе заказа. Ровно один из двух режимов заполняется
+// по факту (distributionMode на уровне модели решает, какой) — сервер не
+// угадывает по присутствию полей, а проверяет ровно то поле, которое
+// соответствует заявленному режиму (R02: «только один источник числа»).
+export const sewingOrderColorPlanSchema = z.object({
+  color: z.string().min(1),
+  quantity: z.number().int().positive().optional(),
+  percentages: z.array(sewingOrderSizePercentSchema).optional(),
+  cells: z.array(sewingOrderSizeCellSchema).optional(),
+});
+export type SewingOrderColorPlanDto = z.infer<typeof sewingOrderColorPlanSchema>;
+
+export const placeSewingOrderModelSchema = z.object({
+  productId: z.string().uuid(),
+  agreedUnitPrice: z.number().min(0),
+  materialsProvidedByUs: z.boolean().optional(),
+  dueDate: z.string().optional(),
+  distributionMode: z.enum(["template", "manual"]).default("template"),
+  colors: z.array(sewingOrderColorPlanSchema).min(1, "Укажите хотя бы один цвет с количеством"),
+});
+export type PlaceSewingOrderModelDto = z.infer<typeof placeSewingOrderModelSchema>;
+
+export const placeSewingOrderSchema = z.object({
+  workshopId: z.string().uuid(),
+  models: z.array(placeSewingOrderModelSchema).min(1, "Укажите хотя бы одну модель"),
+  // Идемпотентность (ADR 0002) — генерируется клиентом один раз на попытку
+  // размещения, переиспользуется при повторе того же клика/запроса.
+  clientRequestId: z.string().min(1),
+});
+export type PlaceSewingOrderDto = z.infer<typeof placeSewingOrderSchema>;
+
+export const sewingOrderResponseSchema = z.object({
+  id: z.string().uuid(),
+  companyId: z.string().uuid(),
+  workshopId: z.string().uuid().nullable(),
+  number: z.number().int().nullable(),
+  status: sewingOrderStatusSchema,
+  draftPayload: sewingOrderDraftPayloadSchema.nullable(),
+  version: z.number().int(),
+  clientRequestId: z.string().nullable(),
+  createdBy: z.string().uuid().nullable(),
+  createdAt: z.date(),
+  updatedAt: z.date(),
+});
+export type SewingOrderResponseDto = z.infer<typeof sewingOrderResponseSchema>;
+
+// Штаб заказа (B01 basic) — шапка вместе с уже размещёнными партиями.
+export const sewingOrderWithProductionOrdersResponseSchema = sewingOrderResponseSchema.extend({
+  productionOrders: z.array(productionOrderResponseSchema),
+});
+export type SewingOrderWithProductionOrdersResponseDto = z.infer<
+  typeof sewingOrderWithProductionOrdersResponseSchema
 >;

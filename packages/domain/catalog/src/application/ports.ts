@@ -85,6 +85,7 @@ export interface NewProductVariantInput {
 // products.findById(companyId, productId) до вызова.
 export interface ProductSizeRepository {
   listByProduct(companyId: string, productId: string): Promise<ProductSize[]>;
+  listCompanySizePresets(companyId: string): Promise<string[]>;
   replaceForProduct(productId: string, sizes: ProductSizeDraft[]): Promise<ProductSize[]>;
 }
 

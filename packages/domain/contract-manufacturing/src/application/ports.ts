@@ -5,6 +5,7 @@ import type {
   ProductionOrderVariantDraft,
   ReceivedVariantInput,
 } from "../domain/production-order";
+import type { SewingOrder, SewingOrderDraftPayload } from "../domain/sewing-order";
 
 export interface NewWorkshopInput {
   companyId: string;
@@ -80,6 +81,10 @@ export interface NewProductionOrderInput {
   specificationId?: string | null;
   orderNumber?: number | null;
   costSnapshot?: Record<string, unknown> | null;
+  // Заказ на пошив-шапка (ADR 0002) — опционален, существующие вызывающие
+  // (createProductionOrderDraft напрямую, createProductionOrderFromSpecification)
+  // его не передают, репозиторий пишет NULL, поведение не меняется.
+  sewingOrderId?: string | null;
 }
 
 export interface ProductionOrderRepository {
@@ -121,6 +126,9 @@ export interface ProductionOrderRepository {
   // вручную/до Этапа 3 (specificationId = null), все они ссылаются на
   // модель напрямую через productId, который существовал ещё до Этапа 3.
   listByProduct(companyId: string, productId: string): Promise<ProductionOrder[]>;
+  // Партии одного заказа на пошив (ADR 0002) — нужен штабу заказа (B01
+  // basic): показать все модели, размещённые одним «Создать заказ».
+  listBySewingOrder(companyId: string, sewingOrderId: string): Promise<ProductionOrder[]>;
 }
 
 // Порт в модуль BOM — узкий срез, структурно совместимый с
@@ -147,4 +155,56 @@ export interface BomApprovalPort {
 // импортирует @garmentos/domain-qc напрямую).
 export interface QcResultLookupPort {
   hasResultForOrder(companyId: string, productionOrderId: string): Promise<boolean>;
+}
+
+// ACL-порт в модуль Identity (ADR 0002) — тот же принцип, что BomApprovalPort
+// выше: domain-contract-manufacturing не зависит от domain-identity в
+// рантайме (только devDependency для тестов). companies.next_sewing_order_number
+// резервируется атомарно (UPDATE...RETURNING), тот же паттерн, что
+// reserveNextProductionOrderNumber/reserveNextSpecificationNumber.
+export interface CompanyNumberingPort {
+  reserveNextSewingOrderNumber(companyId: string): Promise<number>;
+}
+
+export interface NewSewingOrderInput {
+  companyId: string;
+  workshopId: string | null;
+  draftPayload: SewingOrderDraftPayload | null;
+  createdBy: string | null;
+}
+
+// undefined — «не трогать» (не передано в PATCH), null — «очистить»/пусто.
+// Тот же принцип, что WorkshopPatch выше.
+export interface SewingOrderDraftPatch {
+  workshopId?: string | null;
+  draftPayload?: SewingOrderDraftPayload | null;
+}
+
+export interface PlaceSewingOrderRepoInput {
+  workshopId: string;
+  number: number;
+  clientRequestId: string | null;
+}
+
+export interface SewingOrderRepository {
+  create(input: NewSewingOrderInput): Promise<SewingOrder>;
+  findById(companyId: string, id: string): Promise<SewingOrder | null>;
+  // Блокирует строку (SELECT ... FOR UPDATE) — вызывается только внутри
+  // db.transaction, исключительно из placeSewingOrder, перед проверкой
+  // идемпотентности и записью партий (ADR 0002, атомарное размещение).
+  findByIdForUpdate(companyId: string, id: string): Promise<SewingOrder | null>;
+  // Compare-and-swap по version: пишет только если текущая версия строки
+  // равна expectedVersion (SQL — UPDATE ... WHERE version = expectedVersion),
+  // возвращает null при несовпадении — тот же паттерн, что
+  // ProductionOrderRepository.updateCostSnapshot (TRANSITION-REVIEW, пункт 2:
+  // конфликт двух вкладок отклоняется явно, не тихой перезаписью).
+  updateDraft(id: string, expectedVersion: number, patch: SewingOrderDraftPatch): Promise<SewingOrder | null>;
+  // Only a draft owned by this company can be removed; placed orders retain history.
+  deleteDraft(companyId: string, id: string): Promise<boolean>;
+  // Переводит draft -> placed, резервирует номер и запоминает
+  // client_request_id использованного размещения. Вызывающий
+  // (placeSewingOrder) сам гарантирует, что предыдущие проверки (блокировка,
+  // идемпотентность, статус) уже пройдены — метод не проверяет их повторно.
+  place(id: string, input: PlaceSewingOrderRepoInput): Promise<SewingOrder>;
+  listByCompany(companyId: string): Promise<SewingOrder[]>;
 }

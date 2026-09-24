@@ -38,6 +38,12 @@ export const companies = pgTable(
     // с годом ("ПР-2026-0001") формируется в UI из этого integer + года
     // создания партии — год не хранится как часть счётчика.
     nextProductionOrderNumber: integer("next_production_order_number").notNull().default(1),
+    // Сквозной номер заказа на пошив внутри компании (ADR 0002,
+    // владелец проекта, 2026-09-24 — «Штаб партии v1») — шапка над одной или
+    // несколькими партиями по моделям. Независим от nextProductionOrderNumber
+    // выше (тот — номер отдельной партии/модели, этот — номер заказа
+    // целиком); тот же паттерн атомарной резервации через UPDATE...RETURNING.
+    nextSewingOrderNumber: integer("next_sewing_order_number").notNull().default(1),
     ...auditColumns,
   },
   (table) => [

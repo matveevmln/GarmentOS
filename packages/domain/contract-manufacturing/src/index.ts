@@ -20,14 +20,21 @@ export {
   assertCanRollbackStatus,
   assertCanCancel,
 } from "./domain/production-order";
+export type { SewingOrder, SewingOrderDraftPayload, SewingOrderStatus } from "./domain/sewing-order";
+export type { PlaceSewingOrderModelInput } from "./domain/sewing-order";
 export { DomainError } from "./domain/errors";
 
 export type {
   BomApprovalPort,
+  CompanyNumberingPort,
   NewProductionOrderInput,
+  NewSewingOrderInput,
   NewWorkshopInput,
+  PlaceSewingOrderRepoInput,
   ProductionOrderRepository,
   QcResultLookupPort,
+  SewingOrderDraftPatch,
+  SewingOrderRepository,
   WorkshopPatch,
   WorkshopRepository,
 } from "./application/ports";
@@ -90,8 +97,25 @@ export {
   type CancelProductionOrderInput,
   type CancelProductionOrderResult,
 } from "./application/cancel-production-order";
+export {
+  createSewingOrderDraft,
+  type CreateSewingOrderDraftDeps,
+  type CreateSewingOrderDraftInput,
+} from "./application/create-sewing-order-draft";
+export {
+  updateSewingOrderDraft,
+  type UpdateSewingOrderDraftDeps,
+  type UpdateSewingOrderDraftInput,
+} from "./application/update-sewing-order-draft";
+export {
+  placeSewingOrder,
+  type PlaceSewingOrderDeps,
+  type PlaceSewingOrderInput,
+  type PlaceSewingOrderResult,
+} from "./application/place-sewing-order";
 
 export {
   DrizzleProductionOrderRepository,
+  DrizzleSewingOrderRepository,
   DrizzleWorkshopRepository,
 } from "./infrastructure/drizzle-contract-manufacturing-repository";
