@@ -1,3 +1,4 @@
+import { DatabaseTransaction } from "../database/database-transaction";
 import { HttpStatus, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { recordQcResult, type ProductionOrderLookupPort, type QcResultRepository } from "@garmentos/domain-qc";
 import type { QcResultResponseDto, RecordQcResultDto } from "@garmentos/shared-types";
@@ -11,6 +12,7 @@ import { QC_PRODUCTION_ORDER_PORT, QC_RESULT_REPOSITORY } from "./qc.tokens";
 @Injectable()
 export class QcService {
   constructor(
+    private readonly transaction: DatabaseTransaction,
     @Inject(QC_RESULT_REPOSITORY) private readonly qcResults: QcResultRepository,
     @Inject(QC_PRODUCTION_ORDER_PORT) private readonly productionOrders: ProductionOrderLookupPort,
     private readonly auditService: AuditService,
@@ -36,69 +38,71 @@ export class QcService {
     productionOrderId: string,
     input: RecordQcResultDto,
   ): Promise<QcResultResponseDto> {
-    // Проверка разбивки брака ДО записи результата ОТК (владелец проекта,
-    // этап B): результат ОТК — ровно один финальный на заказ, поэтому
-    // невалидную разбивку нужно отклонить раньше, чем возникнет результат,
-    // который потом нельзя ни исправить, ни перезаписать.
-    if (input.defectQuantity > 0) {
-      await this.defectService.validateBreakdownForQc(
-        currentUser.companyId,
-        productionOrderId,
-        input.defectQuantity,
-        input.defectBreakdown?.map((row) => ({
-          productVariantId: row.productVariantId ?? null,
-          quantity: row.quantity,
-          reason: row.reason ?? null,
-        })),
+    return this.transaction.run(currentUser.companyId, "production_order", productionOrderId, async () => {
+      // Проверка разбивки брака ДО записи результата ОТК (владелец проекта,
+      // этап B): результат ОТК — ровно один финальный на заказ, поэтому
+      // невалидную разбивку нужно отклонить раньше, чем возникнет результат,
+      // который потом нельзя ни исправить, ни перезаписать.
+      if (input.defectQuantity > 0) {
+        await this.defectService.validateBreakdownForQc(
+          currentUser.companyId,
+          productionOrderId,
+          input.defectQuantity,
+          input.defectBreakdown?.map((row) => ({
+            productVariantId: row.productVariantId ?? null,
+            quantity: row.quantity,
+            reason: row.reason ?? null,
+          })),
+        );
+      }
+
+      const result = await recordQcResult(
+        { qcResults: this.qcResults, productionOrders: this.productionOrders },
+        {
+          companyId: currentUser.companyId,
+          productionOrderId,
+          receivedQuantity: input.receivedQuantity,
+          goodQuantity: input.goodQuantity,
+          defectQuantity: input.defectQuantity,
+          comment: input.comment ?? null,
+          createdBy: currentUser.id,
+        },
       );
-    }
 
-    const result = await recordQcResult(
-      { qcResults: this.qcResults, productionOrders: this.productionOrders },
-      {
-        companyId: currentUser.companyId,
-        productionOrderId,
-        receivedQuantity: input.receivedQuantity,
-        goodQuantity: input.goodQuantity,
-        defectQuantity: input.defectQuantity,
-        comment: input.comment ?? null,
-        createdBy: currentUser.id,
-      },
-    );
+      // ОТК — факт о партии, а не отдельный от неё объект (владелец проекта,
+      // 2026-09-06): пишем в тот же entityType, что confirm/receive, чтобы
+      // история заказа оставалась одной лентой, а не разъезжалась по сущностям.
+      await this.auditService.recordForUser(currentUser, {
+        entityType: "production_order",
+        entityId: productionOrderId,
+        action: "production_order.qc_recorded",
+        afterJson: {
+          receivedQuantity: input.receivedQuantity,
+          goodQuantity: input.goodQuantity,
+          defectQuantity: input.defectQuantity,
+        },
+      });
 
-    // ОТК — факт о партии, а не отдельный от неё объект (владелец проекта,
-    // 2026-09-06): пишем в тот же entityType, что confirm/receive, чтобы
-    // история заказа оставалась одной лентой, а не разъезжалась по сущностям.
-    await this.auditService.recordForUser(currentUser, {
-      entityType: "production_order",
-      entityId: productionOrderId,
-      action: "production_order.qc_recorded",
-      afterJson: {
-        receivedQuantity: input.receivedQuantity,
-        goodQuantity: input.goodQuantity,
-        defectQuantity: input.defectQuantity,
-      },
+      // Структурированный брак (этап B, владелец проекта, 2026-09-15) — заводится
+      // автоматически вместе с результатом ОТК, единственный раз на результат
+      // (assertNoExistingDefectsForQcResult внутри). defectQuantity === 0 — нечего
+      // фиксировать, дефекта не будет вовсе (не пустая строка "0 брака").
+      if (input.defectQuantity > 0) {
+        await this.defectService.recordDefectsForQcResult(
+          currentUser,
+          productionOrderId,
+          result.id,
+          input.defectQuantity,
+          input.defectBreakdown?.map((row) => ({
+            productVariantId: row.productVariantId ?? null,
+            quantity: row.quantity,
+            reason: row.reason ?? null,
+          })),
+        );
+      }
+
+      return this.toResponse(result);
     });
-
-    // Структурированный брак (этап B, владелец проекта, 2026-09-15) — заводится
-    // автоматически вместе с результатом ОТК, единственный раз на результат
-    // (assertNoExistingDefectsForQcResult внутри). defectQuantity === 0 — нечего
-    // фиксировать, дефекта не будет вовсе (не пустая строка "0 брака").
-    if (input.defectQuantity > 0) {
-      await this.defectService.recordDefectsForQcResult(
-        currentUser,
-        productionOrderId,
-        result.id,
-        input.defectQuantity,
-        input.defectBreakdown?.map((row) => ({
-          productVariantId: row.productVariantId ?? null,
-          quantity: row.quantity,
-          reason: row.reason ?? null,
-        })),
-      );
-    }
-
-    return this.toResponse(result);
   }
 
   async findByProductionOrder(companyId: string, productionOrderId: string): Promise<QcResultResponseDto> {

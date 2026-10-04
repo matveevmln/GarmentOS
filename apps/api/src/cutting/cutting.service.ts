@@ -1,3 +1,5 @@
+import { WarehouseService } from "../warehouse/warehouse.service";
+import { DatabaseTransaction } from "../database/database-transaction";
 import { HttpStatus, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import {
   cancelCuttingOrder,
@@ -47,6 +49,7 @@ export interface CuttingFactOutcome {
 @Injectable()
 export class CuttingService {
   constructor(
+    private readonly transaction: DatabaseTransaction,
     @Inject(CUTTING_ORDER_REPOSITORY) private readonly cuttingOrders: CuttingOrderRepository,
     @Inject(CUTTING_PRODUCTION_ORDER_PORT) private readonly productionOrders: ProductionOrderSnapshotPort,
     @Inject(CUTTING_MATERIAL_STOCK_PORT) private readonly materialStock: MaterialStockPort,
@@ -55,6 +58,7 @@ export class CuttingService {
     private readonly contractManufacturingService: ContractManufacturingService,
     private readonly auditService: AuditService,
     private readonly documentService: DocumentService,
+    private readonly warehouseService: WarehouseService,
   ) {}
 
   private async toResponse(companyId: string, order: CuttingOrder): Promise<CuttingOrderResponseDto> {
@@ -196,24 +200,26 @@ export class CuttingService {
     productionOrderId: string,
     input: CreateCuttingOrderDto,
   ): Promise<CuttingOrderResponseDto> {
-    const order = await createCuttingOrder(
-      { cuttingOrders: this.cuttingOrders, productionOrders: this.productionOrders },
-      {
-        companyId: currentUser.companyId,
-        productionOrderId,
-        executorType: input.executorType,
-        executorWorkshopId: input.executorWorkshopId ?? null,
-        comment: input.comment ?? null,
-        createdBy: currentUser.id,
-      },
-    );
-    await this.auditService.recordForUser(currentUser, {
-      entityType: "cutting_order",
-      entityId: order.id,
-      action: "cutting_order.created",
-      afterJson: { productionOrderId, number: order.number },
+    return this.transaction.run(currentUser.companyId, "production_order", productionOrderId, async () => {
+      const order = await createCuttingOrder(
+        { cuttingOrders: this.cuttingOrders, productionOrders: this.productionOrders },
+        {
+          companyId: currentUser.companyId,
+          productionOrderId,
+          executorType: input.executorType,
+          executorWorkshopId: input.executorWorkshopId ?? null,
+          comment: input.comment ?? null,
+          createdBy: currentUser.id,
+        },
+      );
+      await this.auditService.recordForUser(currentUser, {
+        entityType: "cutting_order",
+        entityId: order.id,
+        action: "cutting_order.created",
+        afterJson: { productionOrderId, number: order.number },
+      });
+      return this.toResponse(currentUser.companyId, order);
     });
-    return this.toResponse(currentUser.companyId, order);
   }
 
   async listByProductionOrder(companyId: string, productionOrderId: string): Promise<CuttingOrderResponseDto[]> {
@@ -231,30 +237,34 @@ export class CuttingService {
     cuttingOrderId: string,
     input: IssueCuttingOrderDto,
   ): Promise<CuttingOrderResponseDto> {
-    const order = await issueCuttingOrder(
-      { cuttingOrders: this.cuttingOrders },
-      { companyId: currentUser.companyId, cuttingOrderId, allocations: input.allocations },
-    );
-    await this.auditService.recordForUser(currentUser, {
-      entityType: "cutting_order",
-      entityId: order.id,
-      action: "cutting_order.issued",
-      afterJson: { allocations: input.allocations ?? [] },
+    return this.transaction.run(currentUser.companyId, "cutting_order", cuttingOrderId, async () => {
+      const order = await issueCuttingOrder(
+        { cuttingOrders: this.cuttingOrders },
+        { companyId: currentUser.companyId, cuttingOrderId, allocations: input.allocations },
+      );
+      await this.auditService.recordForUser(currentUser, {
+        entityType: "cutting_order",
+        entityId: order.id,
+        action: "cutting_order.issued",
+        afterJson: { allocations: input.allocations ?? [] },
+      });
+      return this.toResponse(currentUser.companyId, order);
     });
-    return this.toResponse(currentUser.companyId, order);
   }
 
   async cancel(currentUser: AuthenticatedRequestUser, cuttingOrderId: string): Promise<CuttingOrderResponseDto> {
-    const order = await cancelCuttingOrder(
-      { cuttingOrders: this.cuttingOrders },
-      { companyId: currentUser.companyId, cuttingOrderId },
-    );
-    await this.auditService.recordForUser(currentUser, {
-      entityType: "cutting_order",
-      entityId: order.id,
-      action: "cutting_order.cancelled",
+    return this.transaction.run(currentUser.companyId, "cutting_order", cuttingOrderId, async () => {
+      const order = await cancelCuttingOrder(
+        { cuttingOrders: this.cuttingOrders },
+        { companyId: currentUser.companyId, cuttingOrderId },
+      );
+      await this.auditService.recordForUser(currentUser, {
+        entityType: "cutting_order",
+        entityId: order.id,
+        action: "cutting_order.cancelled",
+      });
+      return this.toResponse(currentUser.companyId, order);
     });
-    return this.toResponse(currentUser.companyId, order);
   }
 
   private async namedShortages(
@@ -274,27 +284,30 @@ export class CuttingService {
     cuttingOrderId: string,
     input: CuttingFactDto,
   ): Promise<CuttingFactOutcome> {
-    const outcome = await recordCuttingFact(
-      { cuttingOrders: this.cuttingOrders, materialStock: this.materialStock },
-      {
-        companyId: currentUser.companyId,
-        cuttingOrderId,
-        warehouseId: input.warehouseId,
-        materials: input.materials,
-        results: input.results,
-        recordedBy: currentUser.id,
-      },
-    );
-    await this.auditService.recordForUser(currentUser, {
-      entityType: "cutting_order",
-      entityId: outcome.cuttingOrder.id,
-      action: "cutting_order.fact_recorded",
-      afterJson: { materials: input.materials, results: input.results, warehouseId: input.warehouseId },
+    return this.transaction.run(currentUser.companyId, "cutting_order", cuttingOrderId, async () => {
+      await this.warehouseService.assertWarehouseBelongsToCompany(currentUser.companyId, input.warehouseId);
+      const outcome = await recordCuttingFact(
+        { cuttingOrders: this.cuttingOrders, materialStock: this.materialStock },
+        {
+          companyId: currentUser.companyId,
+          cuttingOrderId,
+          warehouseId: input.warehouseId,
+          materials: input.materials,
+          results: input.results,
+          recordedBy: currentUser.id,
+        },
+      );
+      await this.auditService.recordForUser(currentUser, {
+        entityType: "cutting_order",
+        entityId: outcome.cuttingOrder.id,
+        action: "cutting_order.fact_recorded",
+        afterJson: { materials: input.materials, results: input.results, warehouseId: input.warehouseId },
+      });
+      return {
+        cuttingOrder: await this.toResponse(currentUser.companyId, outcome.cuttingOrder),
+        shortages: await this.namedShortages(currentUser.companyId, outcome.shortages),
+      };
     });
-    return {
-      cuttingOrder: await this.toResponse(currentUser.companyId, outcome.cuttingOrder),
-      shortages: await this.namedShortages(currentUser.companyId, outcome.shortages),
-    };
   }
 
   // Исправление факта: журнал изменений пишется всегда — «было → стало, кто,
@@ -305,37 +318,40 @@ export class CuttingService {
     cuttingOrderId: string,
     input: CuttingFactDto,
   ): Promise<CuttingFactOutcome> {
-    const before = await this.cuttingOrders.findById(currentUser.companyId, cuttingOrderId);
-    const outcome = await correctCuttingFact(
-      { cuttingOrders: this.cuttingOrders, materialStock: this.materialStock },
-      {
-        companyId: currentUser.companyId,
-        cuttingOrderId,
-        warehouseId: input.warehouseId,
-        materials: input.materials,
-        results: input.results,
-        recordedBy: currentUser.id,
-      },
-    );
-    await this.auditService.recordForUser(currentUser, {
-      entityType: "cutting_order",
-      entityId: outcome.cuttingOrder.id,
-      action: "cutting_order.fact_corrected",
-      beforeJson: {
-        materials: before?.materials.map((row) => ({
-          materialId: row.materialId,
-          consumedQuantity: row.consumedQuantity,
-        })),
-        results: before?.results.map((row) => ({
-          productVariantId: row.productVariantId,
-          actualQuantity: row.actualQuantity,
-        })),
-      },
-      afterJson: { corrections: outcome.corrections, materials: input.materials, results: input.results },
+    return this.transaction.run(currentUser.companyId, "cutting_order", cuttingOrderId, async () => {
+      await this.warehouseService.assertWarehouseBelongsToCompany(currentUser.companyId, input.warehouseId);
+      const before = await this.cuttingOrders.findById(currentUser.companyId, cuttingOrderId);
+      const outcome = await correctCuttingFact(
+        { cuttingOrders: this.cuttingOrders, materialStock: this.materialStock },
+        {
+          companyId: currentUser.companyId,
+          cuttingOrderId,
+          warehouseId: input.warehouseId,
+          materials: input.materials,
+          results: input.results,
+          recordedBy: currentUser.id,
+        },
+      );
+      await this.auditService.recordForUser(currentUser, {
+        entityType: "cutting_order",
+        entityId: outcome.cuttingOrder.id,
+        action: "cutting_order.fact_corrected",
+        beforeJson: {
+          materials: before?.materials.map((row) => ({
+            materialId: row.materialId,
+            consumedQuantity: row.consumedQuantity,
+          })),
+          results: before?.results.map((row) => ({
+            productVariantId: row.productVariantId,
+            actualQuantity: row.actualQuantity,
+          })),
+        },
+        afterJson: { corrections: outcome.corrections, materials: input.materials, results: input.results },
+      });
+      return {
+        cuttingOrder: await this.toResponse(currentUser.companyId, outcome.cuttingOrder),
+        shortages: await this.namedShortages(currentUser.companyId, outcome.shortages),
+      };
     });
-    return {
-      cuttingOrder: await this.toResponse(currentUser.companyId, outcome.cuttingOrder),
-      shortages: await this.namedShortages(currentUser.companyId, outcome.shortages),
-    };
   }
 }

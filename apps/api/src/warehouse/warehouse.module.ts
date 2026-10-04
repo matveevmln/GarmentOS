@@ -8,6 +8,7 @@ import {
   DrizzleWarehouseRepository,
 } from "@garmentos/domain-warehouse";
 import { DATABASE_CONNECTION } from "../database/database.module";
+import { CatalogModule } from "../catalog/catalog.module";
 import { WarehousesController } from "./warehouses.controller";
 import { StockController } from "./stock.controller";
 import { ShipmentsController } from "./shipments.controller";
@@ -22,6 +23,7 @@ import {
 import { WarehouseService } from "./warehouse.service";
 
 @Module({
+  imports: [CatalogModule],
   controllers: [WarehousesController, StockController, ShipmentsController, InventoryCountsController],
   providers: [
     WarehouseService,

@@ -57,15 +57,15 @@ export class StockController {
 
   @RequirePermissions("warehouse.write")
   @Post("reserve")
-  async reserve(@Body() body: StockReservationDto): Promise<StockItemResponseDto> {
-    const stockItem = await this.warehouseService.reserveStock(body);
+  async reserve(@Body() body: StockReservationDto, @CurrentUser() currentUser: AuthenticatedRequestUser): Promise<StockItemResponseDto> {
+    const stockItem = await this.warehouseService.reserveStock(currentUser.companyId, body);
     return stockItemResponseSchema.parse(stockItem);
   }
 
   @RequirePermissions("warehouse.write")
   @Post("release")
-  async release(@Body() body: StockReservationDto): Promise<StockItemResponseDto> {
-    const stockItem = await this.warehouseService.releaseReservation(body);
+  async release(@Body() body: StockReservationDto, @CurrentUser() currentUser: AuthenticatedRequestUser): Promise<StockItemResponseDto> {
+    const stockItem = await this.warehouseService.releaseReservation(currentUser.companyId, body);
     return stockItemResponseSchema.parse(stockItem);
   }
 }

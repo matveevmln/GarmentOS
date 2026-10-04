@@ -39,6 +39,7 @@ import type {
 } from "@garmentos/shared-types";
 import type { AuthenticatedRequestUser } from "../auth/current-user.decorator";
 import { AuditService } from "../audit/audit.service";
+import { CatalogService } from "../catalog/catalog.service";
 import {
   INVENTORY_COUNT_REPOSITORY,
   MATERIAL_STOCK_REPOSITORY,
@@ -74,6 +75,7 @@ export class WarehouseService {
     @Inject(SHIPMENT_REPOSITORY) private readonly shipments: ShipmentRepository,
     @Inject(INVENTORY_COUNT_REPOSITORY) private readonly inventoryCounts: InventoryCountRepository,
     private readonly auditService: AuditService,
+    private readonly catalogService: CatalogService,
   ) {}
 
   async createWarehouse(companyId: string, input: CreateWarehouseDto): Promise<Warehouse> {
@@ -84,6 +86,19 @@ export class WarehouseService {
   // 2026-08-02) — тот же принцип, что listActiveByCompany у цехов.
   async listWarehouses(companyId: string): Promise<Warehouse[]> {
     return this.warehouses.listByCompany(companyId);
+  }
+
+  async assertWarehouseBelongsToCompany(companyId: string, warehouseId: string): Promise<void> {
+    if (!await this.warehouses.findById(companyId, warehouseId)) {
+      throw new NotFoundException({ statusCode: 404, code: "WAREHOUSE_NOT_FOUND", message: "Склад не найден" });
+    }
+  }
+
+  private async assertStockReferences(companyId: string, warehouseId: string, productVariantId: string): Promise<void> {
+    await this.assertWarehouseBelongsToCompany(companyId, warehouseId);
+    if (!await this.catalogService.findProductVariantById(companyId, productVariantId)) {
+      throw new NotFoundException({ statusCode: 404, code: "PRODUCT_VARIANT_NOT_FOUND", message: "Размер/цвет не найден" });
+    }
   }
 
   async findMaterialStockItem(warehouseId: string, materialId: string): Promise<MaterialStockItem | null> {
@@ -110,6 +125,7 @@ export class WarehouseService {
     quantity: number,
     meta: MaterialStockMovementMeta = {},
   ): Promise<MaterialStockItem> {
+    await this.assertWarehouseBelongsToCompany(currentUser.companyId, warehouseId);
     const before = await this.materialStock.findMaterialStockItem(warehouseId, materialId);
     const item = await receiveMaterialStockUseCase(
       { materialStock: this.materialStock },
@@ -174,6 +190,7 @@ export class WarehouseService {
   }
 
   async receiveStock(currentUser: AuthenticatedRequestUser, input: ReceiveStockDto): Promise<StockItem> {
+    await this.assertStockReferences(currentUser.companyId, input.warehouseId, input.productVariantId);
     const before = await this.stock.findStockItem(input.warehouseId, input.productVariantId);
     const stockItem = await receiveStock(
       { stock: this.stock },
@@ -195,6 +212,7 @@ export class WarehouseService {
   }
 
   async dispatchStock(currentUser: AuthenticatedRequestUser, input: DispatchStockDto): Promise<StockItem> {
+    await this.assertStockReferences(currentUser.companyId, input.warehouseId, input.productVariantId);
     const before = await this.stock.findStockItem(input.warehouseId, input.productVariantId);
     const stockItem = await dispatchStock(
       { stock: this.stock },
@@ -219,6 +237,8 @@ export class WarehouseService {
     currentUser: AuthenticatedRequestUser,
     input: TransferStockDto,
   ): Promise<{ origin: StockItem; destination: StockItem }> {
+    await this.assertStockReferences(currentUser.companyId, input.originWarehouseId, input.productVariantId);
+    await this.assertWarehouseBelongsToCompany(currentUser.companyId, input.destinationWarehouseId);
     const beforeOrigin = await this.stock.findStockItem(input.originWarehouseId, input.productVariantId);
     const beforeDestination = await this.stock.findStockItem(input.destinationWarehouseId, input.productVariantId);
     const result = await transferStock(
@@ -248,11 +268,13 @@ export class WarehouseService {
     return result;
   }
 
-  async reserveStock(input: StockReservationDto): Promise<StockItem> {
+  async reserveStock(companyId: string, input: StockReservationDto): Promise<StockItem> {
+    await this.assertStockReferences(companyId, input.warehouseId, input.productVariantId);
     return reserveStock({ stock: this.stock }, input);
   }
 
-  async releaseReservation(input: StockReservationDto): Promise<StockItem> {
+  async releaseReservation(companyId: string, input: StockReservationDto): Promise<StockItem> {
+    await this.assertStockReferences(companyId, input.warehouseId, input.productVariantId);
     return releaseReservation({ stock: this.stock }, input);
   }
 
