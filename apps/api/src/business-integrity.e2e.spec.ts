@@ -674,6 +674,7 @@ describe("Целостность связей между бизнес-модул
       .get(ProductionOrderOrchestrationService)
       .placeProductionOrder(user, input);
     expect(order.status).toBe("placed");
+    expect(order.orderNumber).toBeGreaterThan(0);
     expect(order.costSnapshot).toBeTruthy();
     const result = await db.execute(
       sql`select id, total_quantity, total_sum from specifications where company_id=${user.companyId} and production_order_id=${order.id}`,
@@ -708,6 +709,7 @@ describe("Целостность связей между бизнес-модул
     const service = app.get(ProductionOrderOrchestrationService);
     const input = placementInput();
     const before = await production.listProductionOrders(user.companyId);
+    const counterBefore = await db.execute(sql`select next_production_order_number from companies where id=${user.companyId}`);
     const spy = vi
       .spyOn(app.get(SpecificationService), "createFromProductionOrder")
       .mockRejectedValueOnce(new Error("specification-save-failed"));
@@ -720,6 +722,7 @@ describe("Целостность связей между бизнес-модул
         .get(AuditService)
         .listForEntity(user.companyId, "production_order_request", input.requestId),
     ).toHaveLength(0);
+    expect(await db.execute(sql`select next_production_order_number from companies where id=${user.companyId}`)).toEqual(counterBefore);
     spy.mockRestore();
     expect((await service.placeProductionOrder(user, input)).status).toBe("placed");
   });

@@ -1759,6 +1759,26 @@ export function BatchPassportPage() {
         }
       />
 
+      <Card className="mb-4 p-4 md:p-5" aria-label="Следующий шаг партии">
+        <CardTitle className="mb-2">Следующий шаг</CardTitle>
+        {passport.status === "draft" ? <Button size="lg" loading={isConfirming} onClick={() => void confirmOrder()}>Подтвердить партию</Button>
+          : passport.status === "ready_for_pickup" || passport.status === "shipped_to_fulfillment" ? <>
+            <p className="mb-3 text-sm text-muted-foreground">Когда получите изделия, сверяйте фактические количества при приёмке.</p>
+            <Button size="lg" onClick={openReceiveDialog}>Принять партию</Button>
+            {passport.status === "ready_for_pickup" && <Button size="lg" variant="ghost" loading={isChangingStatus} onClick={() => void changeOrderStatus("shipped_to_fulfillment")}>Цех отправил изделия</Button>}
+          </> : NEXT_STATUS[passport.status] ? <>
+            <p className="mb-3 text-sm text-muted-foreground">Отметьте следующий этап, когда цех сообщит о нём.</p>
+            <Button size="lg" loading={isChangingStatus} onClick={() => void changeOrderStatus(NEXT_STATUS[passport.status])}>{ORDER_STATUS_LABELS[NEXT_STATUS[passport.status]]}</Button>
+          </> : passport.status === "received" ? <>
+            <p className="mb-3 text-sm text-muted-foreground">Изделия приняты. {qcResult ? "Результат проверки качества сохранён." : "Проверьте качество и укажите годные изделия и брак."}</p>
+            {qcResult ? <Button size="lg" loading={isCompleting} onClick={requestCompleteOrder}>Завершить партию</Button>
+              : <Button size="lg" onClick={() => document.getElementById("party-quality")?.scrollIntoView({ behavior: "smooth", block: "start" })}>Проверить качество</Button>}
+          </> : passport.status === "completed" ? <>
+            <p className="mb-3 text-sm text-muted-foreground">Партия закрыта. Размеры и цвета можно использовать снова.</p>
+            <Button size="lg" onClick={() => void navigate(`/new-batch?productId=${passport.product.id}`)}>+ Новая партия этой модели</Button>
+          </> : <p className="text-sm">Партия отменена. История сохранена.</p>}
+      </Card>
+
       {/* Повторное формирование расходует номер спецификации по договору
           цеха и делает прежнюю редакцию неактуальной — поэтому оно требует
           явного подтверждения, а не одного нажатия. */}
@@ -1878,61 +1898,17 @@ export function BatchPassportPage() {
         </div>
         <div className="p-4 md:p-5">
           {isProductionStage(passport.status) ? (
-            <ProductionStepper
-              current={passport.status}
-              cutting={cuttingStage}
-              hasSpecification={hasSpecificationStage}
-              materialsChecked={hasMaterialsStage}
-            />
+            <Accordion title="Подробные этапы производства">
+              <ProductionStepper
+                current={passport.status}
+                cutting={cuttingStage}
+                hasSpecification={hasSpecificationStage}
+                materialsChecked={hasMaterialsStage}
+              />
+            </Accordion>
           ) : (
             <p className="t-secondary">Заказ отменён — партия вышла из производственной шкалы.</p>
           )}
-
-          {/* Подтверждение черновика (владелец проекта, 2026-09-22) — тот же
-              эндпоинт, что и у ProductionOrdersPage.confirmOrder. Раньше
-              единственным местом подтвердить свежий черновик был список
-              заказов пошива — на паспорте черновика не было ни одного
-              действия вообще. */}
-          {passport.status === "draft" ? (
-            <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-border pt-4">
-              <Button type="button" size="sm" loading={isConfirming} onClick={() => void confirmOrder()}>
-                Подтвердить
-              </Button>
-            </div>
-          ) : null}
-
-          {/* Текущее действие цеха — ровно одна кнопка на стадию (P0-1: переход
-              без Telegram, канал не настроен ни для одного цеха на пилоте).
-              ПРОМПТ №3, раздел 8 — sewing_completed/shipped_to_fulfillment
-              такие же явные отдельные шаги, не пропускаются автоматически. */}
-          {NEXT_STATUS[passport.status] || passport.status === "ready_for_pickup" || passport.status === "shipped_to_fulfillment" ? (
-            <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-border pt-4">
-              <span className="t-secondary">Цех сообщил:</span>
-              {NEXT_STATUS[passport.status] ? (
-                <Button
-                  type="button"
-                  size="lg"
-                  variant="secondary"
-                  className="md:w-auto"
-                  loading={isChangingStatus}
-                  onClick={() => void changeOrderStatus(NEXT_STATUS[passport.status])}
-                >
-                  {ORDER_STATUS_LABELS[NEXT_STATUS[passport.status]]}
-                </Button>
-              ) : null}
-              {/* Приёмка партии (ПРОМПТ №3, раздел 8 допускает вход из
-                  "ready_for_pickup" и "shipped_to_fulfillment") — раньше была
-                  доступна только со списка заказов пошива; на паспорте партии
-                  "shipped_to_fulfillment" был тупиком: далее по шкале действий
-                  не было вообще ни одной кнопки (аудит пользовательского пути,
-                  owner, 2026-09-21). */}
-              {passport.status === "ready_for_pickup" || passport.status === "shipped_to_fulfillment" ? (
-                <Button type="button" size="lg" className="md:w-auto" onClick={() => openReceiveDialog()}>
-                  Принять партию
-                </Button>
-              ) : null}
-            </div>
-          ) : null}
 
           {/* Откат статуса на шаг назад — вынесено в отдельный, независимый
               от "Цех сообщил" блок (найдено владельцем проекта, 2026-09-22):
@@ -2216,7 +2192,7 @@ export function BatchPassportPage() {
           получено/годных/брак/произведено/компенсировано/осталось,
           деталировка дефектов, «Добавить компенсацию» и «Компенсировано
           полностью» показаны здесь ровно так же, как раньше. */}
-      <Card className="mt-4 overflow-hidden p-0">
+      <Card id="party-quality" className="mt-4 scroll-mt-20 overflow-hidden p-0">
         <div className="border-b border-border bg-muted/20 px-4 py-3 md:px-5">
           <CardTitle className="text-[16px]">ОТК и брак</CardTitle>
         </div>
@@ -2282,10 +2258,10 @@ export function BatchPassportPage() {
                 <NumberInput value={qcReceivedFact ?? undefined} onChange={() => undefined} disabled />
               </Field>
               <Field label="Годных, шт">
-                <NumberInput value={qcGood} onChange={setQcGood} min={0} />
+                <NumberInput className="min-h-11 text-base" aria-label="Годных, шт" value={qcGood} onChange={setQcGood} min={0} />
               </Field>
               <Field label="Брак, шт">
-                <NumberInput value={qcDefect} onChange={setQcDefect} min={0} />
+                <NumberInput className="min-h-11 text-base" aria-label="Брак, шт" value={qcDefect} onChange={setQcDefect} min={0} />
               </Field>
               {qcDefect !== undefined && qcDefect > 0 ? (
                 <Field label="Причина брака" className="sm:col-span-3">
@@ -2302,7 +2278,7 @@ export function BatchPassportPage() {
               <div className="sm:col-span-3">
                 <Button
                   type="button"
-                  size="sm"
+                  size="lg"
                   loading={isSubmittingQc}
                   disabled={qcGood === undefined || qcDefect === undefined}
                   onClick={() => void submitQc()}

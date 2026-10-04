@@ -166,10 +166,12 @@ export class ProductionOrderOrchestrationService {
             });
           return order;
         }
+        const orderNumber = await this.identityService.reserveNextProductionOrderNumber(currentUser.companyId);
         const draft = await this.contractManufacturingService.createProductionOrderDraft(
           currentUser.companyId,
           {
             ...draftInput,
+            orderNumber,
             createdBy: currentUser.id,
           },
         );

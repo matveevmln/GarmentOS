@@ -127,7 +127,7 @@ export class ContractManufacturingService {
 
   async createProductionOrderDraft(
     companyId: string,
-    input: CreateProductionOrderDto,
+    input: CreateProductionOrderDto & { orderNumber?: number },
   ): Promise<ProductionOrder> {
     return this.transaction.run(companyId, "product", input.productId, async () => {
       const product = await this.catalogService.findProductById(companyId, input.productId);
