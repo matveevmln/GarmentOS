@@ -1,4 +1,5 @@
-import { Inject, Injectable } from "@nestjs/common";
+import { DatabaseTransaction } from "../database/database-transaction";
+import { BadRequestException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import {
   captureProductionOrderCostSnapshot,
   completeProductionOrder as completeProductionOrderUseCase,
@@ -68,6 +69,7 @@ function toWorkshopAuditJson(workshop: Workshop): Record<string, unknown> {
 @Injectable()
 export class ContractManufacturingService {
   constructor(
+    private readonly transaction: DatabaseTransaction,
     @Inject(WORKSHOP_REPOSITORY) private readonly workshops: WorkshopRepository,
     @Inject(PRODUCTION_ORDER_REPOSITORY) private readonly productionOrders: ProductionOrderRepository,
     @Inject(BOM_APPROVAL_PORT) private readonly bomApproval: BomApprovalPort,
@@ -107,7 +109,24 @@ export class ContractManufacturingService {
     return workshop;
   }
 
+  private async assertVariantsBelongToProduct(
+    companyId: string,
+    productId: string,
+    variants: Array<{ productVariantId: string }>,
+  ): Promise<void> {
+    for (const row of variants) {
+      const variant = await this.catalogService.findProductVariantById(companyId, row.productVariantId);
+      if (!variant) {
+        throw new NotFoundException({ statusCode: 404, code: "PRODUCT_VARIANT_NOT_FOUND", message: "Размер/цвет не найден в этой компании" });
+      }
+      if (variant.productId !== productId) {
+        throw new BadRequestException({ statusCode: 400, code: "PRODUCTION_ORDER_VARIANT_PRODUCT_MISMATCH", message: "Размер/цвет относится к другой модели" });
+      }
+    }
+  }
+
   async createProductionOrderDraft(companyId: string, input: CreateProductionOrderDto): Promise<ProductionOrder> {
+    await this.assertVariantsBelongToProduct(companyId, input.productId, input.variants);
     // ПРОМПТ №3, раздел 8 — bomId необязателен: визард с матрицей размер×цвет
     // не заставляет выбирать BOM, backend сам находит/заводит approved BOM
     // модели прозрачно для пользователя (тот же путь, что и /from-quantity).
@@ -265,7 +284,9 @@ export class ContractManufacturingService {
   }
 
   async confirmProductionOrder(companyId: string, productionOrderId: string): Promise<ProductionOrder> {
-    return confirmProductionOrder({ productionOrders: this.productionOrders }, { companyId, productionOrderId });
+    return this.transaction.run(companyId, "production_order", productionOrderId, async () => {
+      return confirmProductionOrder({ productionOrders: this.productionOrders }, { companyId, productionOrderId });
+    });
   }
 
   async findProductionOrderById(companyId: string, id: string): Promise<ProductionOrder | null> {
@@ -350,10 +371,12 @@ export class ContractManufacturingService {
     productionOrderId: string,
     status: WorkshopReportableStatus,
   ): Promise<ProductionOrder> {
-    return updateProductionOrderStatusUseCase(
-      { productionOrders: this.productionOrders },
-      { companyId, productionOrderId, status },
-    );
+    return this.transaction.run(companyId, "production_order", productionOrderId, async () => {
+      return updateProductionOrderStatusUseCase(
+        { productionOrders: this.productionOrders },
+        { companyId, productionOrderId, status },
+      );
+    });
   }
 
   // Контролируемый rollback (ПРОМПТ №2.1, раздел C / ПРОМПТ №3, раздел 9) —
@@ -366,20 +389,22 @@ export class ContractManufacturingService {
     productionOrderId: string,
     reason: string,
   ): Promise<RollbackProductionOrderStatusResult> {
-    const result = await rollbackProductionOrderStatusUseCase(
-      { productionOrders: this.productionOrders, qcResults: this.qcResultLookup },
-      { companyId: currentUser.companyId, productionOrderId, reason },
-    );
+    return this.transaction.run(currentUser.companyId, "production_order", productionOrderId, async () => {
+      const result = await rollbackProductionOrderStatusUseCase(
+        { productionOrders: this.productionOrders, qcResults: this.qcResultLookup },
+        { companyId: currentUser.companyId, productionOrderId, reason },
+      );
 
-    await this.auditService.recordForUser(currentUser, {
-      entityType: "production_order",
-      entityId: result.order.id,
-      action: "production_order.status_rolled_back",
-      beforeJson: { status: result.fromStatus },
-      afterJson: { status: result.toStatus, reason },
+      await this.auditService.recordForUser(currentUser, {
+        entityType: "production_order",
+        entityId: result.order.id,
+        action: "production_order.status_rolled_back",
+        beforeJson: { status: result.fromStatus },
+        afterJson: { status: result.toStatus, reason },
+      });
+
+      return result;
     });
-
-    return result;
   }
 
   // Отмена заказа пошива (владелец проекта, 2026-09-22) — та же дисциплина,
@@ -397,20 +422,22 @@ export class ContractManufacturingService {
     productionOrderId: string,
     reason: string,
   ): Promise<CancelProductionOrderResult> {
-    const result = await cancelProductionOrderUseCase(
-      { productionOrders: this.productionOrders, qcResults: this.qcResultLookup },
-      { companyId: currentUser.companyId, productionOrderId, reason },
-    );
+    return this.transaction.run(currentUser.companyId, "production_order", productionOrderId, async () => {
+      const result = await cancelProductionOrderUseCase(
+        { productionOrders: this.productionOrders, qcResults: this.qcResultLookup },
+        { companyId: currentUser.companyId, productionOrderId, reason },
+      );
 
-    await this.auditService.recordForUser(currentUser, {
-      entityType: "production_order",
-      entityId: result.order.id,
-      action: "production_order.cancelled",
-      beforeJson: { status: result.fromStatus },
-      afterJson: { status: "cancelled", reason },
+      await this.auditService.recordForUser(currentUser, {
+        entityType: "production_order",
+        entityId: result.order.id,
+        action: "production_order.cancelled",
+        beforeJson: { status: result.fromStatus },
+        afterJson: { status: "cancelled", reason },
+      });
+
+      return result;
     });
-
-    return result;
   }
 
   // Приёмка партии от цеха на склад (Итерация 10, факт — P0-1, владелец
@@ -427,48 +454,51 @@ export class ContractManufacturingService {
     warehouseId: string,
     receivedVariants?: Array<{ productVariantId: string; quantity: number }>,
   ): Promise<ProductionOrder> {
-    const draftForAudit = await this.productionOrders.findById(currentUser.companyId, productionOrderId);
-    const order = await receiveProductionOrderUseCase(
-      { productionOrders: this.productionOrders },
-      { companyId: currentUser.companyId, productionOrderId, receivedVariants },
-    );
+    return this.transaction.run(currentUser.companyId, "production_order", productionOrderId, async () => {
+      await this.warehouseService.assertWarehouseBelongsToCompany(currentUser.companyId, warehouseId);
+      const draftForAudit = await this.productionOrders.findById(currentUser.companyId, productionOrderId);
+      const order = await receiveProductionOrderUseCase(
+        { productionOrders: this.productionOrders },
+        { companyId: currentUser.companyId, productionOrderId, receivedVariants },
+      );
 
-    for (const variant of order.variants) {
-      const quantity = variant.receivedQuantity !== null ? Number(variant.receivedQuantity) : Number(variant.quantity);
-      // Нечего зачислять на склад, если фактически ничего не пришло по этой
-      // строке (0 — легитимный факт, не ошибка, ReceiveStockDto не принимает
-      // ноль/отрицательное количество отдельным use case, поэтому строки без
-      // факта просто пропускаются, а не падают).
-      if (quantity <= 0) continue;
-      await this.warehouseService.receiveStock(currentUser, {
-        warehouseId,
-        productVariantId: variant.productVariantId,
-        quantity,
-        referenceType: "production_order",
-        referenceId: order.id,
-        createdBy: currentUser.id,
+      for (const variant of order.variants) {
+        const quantity = variant.receivedQuantity !== null ? Number(variant.receivedQuantity) : Number(variant.quantity);
+        // Нечего зачислять на склад, если фактически ничего не пришло по этой
+        // строке (0 — легитимный факт, не ошибка, ReceiveStockDto не принимает
+        // ноль/отрицательное количество отдельным use case, поэтому строки без
+        // факта просто пропускаются, а не падают).
+        if (quantity <= 0) continue;
+        await this.warehouseService.receiveStock(currentUser, {
+          warehouseId,
+          productVariantId: variant.productVariantId,
+          quantity,
+          referenceType: "production_order",
+          referenceId: order.id,
+          createdBy: currentUser.id,
+        });
+      }
+
+      await this.auditService.recordForUser(currentUser, {
+        entityType: "production_order",
+        entityId: order.id,
+        action: "production_order.received",
+        beforeJson: {
+          variants: draftForAudit?.variants.map((v) => ({ productVariantId: v.productVariantId, plannedQuantity: v.quantity })),
+        },
+        afterJson: {
+          status: order.status,
+          warehouseId,
+          variants: order.variants.map((v) => ({
+            productVariantId: v.productVariantId,
+            plannedQuantity: v.quantity,
+            receivedQuantity: v.receivedQuantity,
+          })),
+        },
       });
-    }
 
-    await this.auditService.recordForUser(currentUser, {
-      entityType: "production_order",
-      entityId: order.id,
-      action: "production_order.received",
-      beforeJson: {
-        variants: draftForAudit?.variants.map((v) => ({ productVariantId: v.productVariantId, plannedQuantity: v.quantity })),
-      },
-      afterJson: {
-        status: order.status,
-        warehouseId,
-        variants: order.variants.map((v) => ({
-          productVariantId: v.productVariantId,
-          plannedQuantity: v.quantity,
-          receivedQuantity: v.receivedQuantity,
-        })),
-      },
+      return order;
     });
-
-    return order;
   }
 
   // Завершение партии (ПРОМПТ №10.1/10.2, владелец проекта, 2026-09-15) —
@@ -480,20 +510,22 @@ export class ContractManufacturingService {
     currentUser: AuthenticatedRequestUser,
     productionOrderId: string,
   ): Promise<ProductionOrder> {
-    const order = await completeProductionOrderUseCase(
-      { productionOrders: this.productionOrders },
-      { companyId: currentUser.companyId, productionOrderId },
-    );
+    return this.transaction.run(currentUser.companyId, "production_order", productionOrderId, async () => {
+      const order = await completeProductionOrderUseCase(
+        { productionOrders: this.productionOrders },
+        { companyId: currentUser.companyId, productionOrderId },
+      );
 
-    await this.auditService.recordForUser(currentUser, {
-      entityType: "production_order",
-      entityId: order.id,
-      action: "production_order.completed",
-      beforeJson: { status: "received" },
-      afterJson: { status: order.status },
+      await this.auditService.recordForUser(currentUser, {
+        entityType: "production_order",
+        entityId: order.id,
+        action: "production_order.completed",
+        beforeJson: { status: "received" },
+        afterJson: { status: order.status },
+      });
+
+      return order;
     });
-
-    return order;
   }
 
   async reserveNextSpecificationNumber(workshopId: string): Promise<number> {

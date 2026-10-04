@@ -1,3 +1,4 @@
+import { DatabaseTransaction } from "../database/database-transaction";
 import { BadRequestException, HttpStatus, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import {
   approveSpecification,
@@ -84,6 +85,7 @@ function formatDefaultPaymentTerms(totalSum: number): string {
 @Injectable()
 export class SpecificationService {
   constructor(
+    private readonly transaction: DatabaseTransaction,
     @Inject(SPECIFICATION_REPOSITORY) private readonly specifications: SpecificationRepository,
     @Inject(SPECIFICATION_WORKSHOP_PORT) private readonly workshopPort: WorkshopLookupPort,
     @Inject(SPECIFICATION_PRODUCT_PORT) private readonly productPort: ProductLookupPort,
@@ -220,42 +222,46 @@ export class SpecificationService {
   // (гарантируется на уровне доменного use case — UpdateSpecificationDeps
   // физически не содержит доступа к production_orders).
   async update(companyId: string, specificationId: string, input: UpdateSpecificationDto, updatedBy: string | null): Promise<Specification> {
-    const before = await this.findById(companyId, specificationId);
-    const spec = await updateSpecification(
-      { specifications: this.specifications, workshops: this.workshopPort, productVariants: this.productVariantPort },
-      {
-        companyId,
-        specificationId,
-        workshopId: input.workshopId,
-        deliveryDeadline: input.deliveryDeadline,
-        items: input.items,
-      },
-    );
+    return this.transaction.run(companyId, "specification", specificationId, async () => {
+      const before = await this.findById(companyId, specificationId);
+      const spec = await updateSpecification(
+        { specifications: this.specifications, workshops: this.workshopPort, productVariants: this.productVariantPort },
+        {
+          companyId,
+          specificationId,
+          workshopId: input.workshopId,
+          deliveryDeadline: input.deliveryDeadline,
+          items: input.items,
+        },
+      );
 
-    await this.auditService.record(companyId, updatedBy, "http_api", {
-      entityType: "specification",
-      entityId: spec.id,
-      action: "specification.updated",
-      beforeJson: { workshopId: before.workshopId, totalSum: before.totalSum, totalQuantity: before.totalQuantity },
-      afterJson: { workshopId: spec.workshopId, totalSum: spec.totalSum, totalQuantity: spec.totalQuantity },
+      await this.auditService.record(companyId, updatedBy, "http_api", {
+        entityType: "specification",
+        entityId: spec.id,
+        action: "specification.updated",
+        beforeJson: { workshopId: before.workshopId, totalSum: before.totalSum, totalQuantity: before.totalQuantity },
+        afterJson: { workshopId: spec.workshopId, totalSum: spec.totalSum, totalQuantity: spec.totalQuantity },
+      });
+
+      return spec;
     });
-
-    return spec;
   }
 
   // Отмена — терминальное состояние. NEW-поток: пока не отменена. LEGACY-
   // поток: только пока черновик (см. cancelSpecification в домене).
   async cancel(companyId: string, specificationId: string, cancelledBy: string | null): Promise<Specification> {
-    const spec = await cancelSpecification({ specifications: this.specifications }, { companyId, specificationId });
+    return this.transaction.run(companyId, "specification", specificationId, async () => {
+      const spec = await cancelSpecification({ specifications: this.specifications }, { companyId, specificationId });
 
-    await this.auditService.record(companyId, cancelledBy, "http_api", {
-      entityType: "specification",
-      entityId: spec.id,
-      action: "specification.cancelled",
-      afterJson: { status: spec.status },
+      await this.auditService.record(companyId, cancelledBy, "http_api", {
+        entityType: "specification",
+        entityId: spec.id,
+        action: "specification.cancelled",
+        afterJson: { status: spec.status },
+      });
+
+      return spec;
     });
-
-    return spec;
   }
 
   // Утверждение (требование №9) — единственная точка, где спецификация
@@ -263,67 +269,69 @@ export class SpecificationService {
   // читаются здесь, непосредственно перед вызовом домена — ровно то
   // "мгновение", данные которого фиксируются навсегда (requirement №4).
   async approve(companyId: string, specificationId: string): Promise<Specification> {
-    const spec = await this.findById(companyId, specificationId);
+    return this.transaction.run(companyId, "specification", specificationId, async () => {
+      const spec = await this.findById(companyId, specificationId);
 
-    const [workshop, product, company] = await Promise.all([
-      this.contractManufacturingService.findWorkshopById(companyId, spec.workshopId),
-      this.catalogService.findProductById(companyId, spec.productId),
-      this.identityService.findCompanyById(companyId),
-    ]);
-    if (!workshop) {
-      throw new NotFoundException({ statusCode: HttpStatus.NOT_FOUND, code: "SPECIFICATION_WORKSHOP_NOT_FOUND", message: `Цех ${spec.workshopId} не найден` });
-    }
-    if (!product) {
-      throw new NotFoundException({ statusCode: HttpStatus.NOT_FOUND, code: "SPECIFICATION_PRODUCT_NOT_FOUND", message: `Модель ${spec.productId} не найдена` });
-    }
-    if (!company) {
-      throw new NotFoundException({ statusCode: HttpStatus.NOT_FOUND, code: "SPECIFICATION_COMPANY_NOT_FOUND", message: `Компания ${companyId} не найдена` });
-    }
+      const [workshop, product, company] = await Promise.all([
+        this.contractManufacturingService.findWorkshopById(companyId, spec.workshopId),
+        this.catalogService.findProductById(companyId, spec.productId),
+        this.identityService.findCompanyById(companyId),
+      ]);
+      if (!workshop) {
+        throw new NotFoundException({ statusCode: HttpStatus.NOT_FOUND, code: "SPECIFICATION_WORKSHOP_NOT_FOUND", message: `Цех ${spec.workshopId} не найден` });
+      }
+      if (!product) {
+        throw new NotFoundException({ statusCode: HttpStatus.NOT_FOUND, code: "SPECIFICATION_PRODUCT_NOT_FOUND", message: `Модель ${spec.productId} не найдена` });
+      }
+      if (!company) {
+        throw new NotFoundException({ statusCode: HttpStatus.NOT_FOUND, code: "SPECIFICATION_COMPANY_NOT_FOUND", message: `Компания ${companyId} не найдена` });
+      }
 
-    const itemLines = await Promise.all(
-      spec.items.map(async (item) => {
-        const variant = await this.catalogService.findProductVariantById(companyId, item.productVariantId);
-        if (!variant) {
-          // Не должно случиться — FK product_variant_id гарантирует
-          // существование строки; явная ошибка лучше, чем тихий undefined
-          // в снимке.
-          throw new NotFoundException({
-            statusCode: HttpStatus.NOT_FOUND,
-            code: "SPECIFICATION_VARIANT_NOT_FOUND",
-            message: `Вариант ${item.productVariantId} не найден`,
-          });
-        }
-        // Перенос строки, не запятая, между названием модели и цветом
-        // (ПРОМПТ №11.4, владелец проекта, 2026-09-19: эталон ВСЕГДА
-        // переносит цвет на отдельную строку ячейки "Товары", а не
-        // автоматическим переносом по ширине запятой — pdf-lib-template-
-        // renderer.ts теперь разбивает значение по "\n" так же, как шапку).
-        return { productVariantId: item.productVariantId, name: `${product.name}\n${variant.color}`, unit: "шт", size: variant.size };
-      }),
-    );
+      const itemLines = await Promise.all(
+        spec.items.map(async (item) => {
+          const variant = await this.catalogService.findProductVariantById(companyId, item.productVariantId);
+          if (!variant) {
+            // Не должно случиться — FK product_variant_id гарантирует
+            // существование строки; явная ошибка лучше, чем тихий undefined
+            // в снимке.
+            throw new NotFoundException({
+              statusCode: HttpStatus.NOT_FOUND,
+              code: "SPECIFICATION_VARIANT_NOT_FOUND",
+              message: `Вариант ${item.productVariantId} не найден`,
+            });
+          }
+          // Перенос строки, не запятая, между названием модели и цветом
+          // (ПРОМПТ №11.4, владелец проекта, 2026-09-19: эталон ВСЕГДА
+          // переносит цвет на отдельную строку ячейки "Товары", а не
+          // автоматическим переносом по ширине запятой — pdf-lib-template-
+          // renderer.ts теперь разбивает значение по "\n" так же, как шапку).
+          return { productVariantId: item.productVariantId, name: `${product.name}\n${variant.color}`, unit: "шт", size: variant.size };
+        }),
+      );
 
-    return approveSpecification(
-      { specifications: this.specifications, workshops: this.workshopPort },
-      {
-        companyId,
-        specificationId,
-        product: { name: product.name, code: product.code },
-        workshop: {
-          name: workshop.name,
-          contractNumber: workshop.contractNumber,
-          contractDate: workshop.contractDate,
-          paymentTerms: workshop.paymentTerms,
-          deliveryMethod: workshop.deliveryMethod,
-          // Юр.адрес цеха («Производитель» в эталонном PDF, ПРОМПТ №2.2/№3) —
-          // существующая сущность workshop (workshops.legal_address).
-          legalAddress: workshop.legalAddress,
-          signerRole: workshop.signerRole,
-          signerName: workshop.signerName,
+      return approveSpecification(
+        { specifications: this.specifications, workshops: this.workshopPort },
+        {
+          companyId,
+          specificationId,
+          product: { name: product.name, code: product.code },
+          workshop: {
+            name: workshop.name,
+            contractNumber: workshop.contractNumber,
+            contractDate: workshop.contractDate,
+            paymentTerms: workshop.paymentTerms,
+            deliveryMethod: workshop.deliveryMethod,
+            // Юр.адрес цеха («Производитель» в эталонном PDF, ПРОМПТ №2.2/№3) —
+            // существующая сущность workshop (workshops.legal_address).
+            legalAddress: workshop.legalAddress,
+            signerRole: workshop.signerRole,
+            signerName: workshop.signerName,
+          },
+          company: { legalName: company.legalName ?? company.name, signerName: company.signerName },
+          itemLines,
         },
-        company: { legalName: company.legalName ?? company.name, signerName: company.signerName },
-        itemLines,
-      },
-    );
+      );
+    });
   }
 
   // Сколько из каждой строки спецификации уже размещено производственными
@@ -389,149 +397,158 @@ export class SpecificationService {
     input: CreateProductionOrderFromSpecificationDto,
     createdBy: string | null,
   ): Promise<ProductionOrder> {
-    const spec = await this.findById(companyId, specificationId);
-    if (spec.status !== "approved" || !spec.snapshotJson) {
-      throw new BadRequestException({
-        statusCode: HttpStatus.BAD_REQUEST,
-        code: "SPECIFICATION_NOT_APPROVED",
-        message: "Производственную партию можно создать только из утверждённой спецификации",
-      });
-    }
-    const snapshot = spec.snapshotJson as unknown as SpecificationSnapshot;
-
-    const allocatedByVariant = await this.computeAllocatedByVariant(companyId, specificationId);
-    const availableByVariant = new Map<string, number>();
-    for (const item of spec.items) {
-      const allocated = allocatedByVariant.get(item.productVariantId) ?? 0;
-      availableByVariant.set(item.productVariantId, Number(item.quantity) - allocated);
-    }
-
-    let requestedLines: Array<{ productVariantId: string; quantity: number }>;
-    if (input.items && input.items.length > 0) {
-      for (const line of input.items) {
-        const available = availableByVariant.get(line.productVariantId);
-        if (available === undefined) {
-          throw new BadRequestException({
-            statusCode: HttpStatus.BAD_REQUEST,
-            code: "SPECIFICATION_ITEM_NOT_FOUND",
-            message: `Строка ${line.productVariantId} не входит в эту спецификацию`,
-          });
-        }
-        if (line.quantity - available > 0.0005) {
-          throw new BadRequestException({
-            statusCode: HttpStatus.BAD_REQUEST,
-            code: "SPECIFICATION_QUANTITY_EXCEEDS_AVAILABLE",
-            message: `Запрошенное количество (${line.quantity}) превышает доступный остаток спецификации (${available})`,
-          });
-        }
+    return this.transaction.run(companyId, "specification", specificationId, async () => {
+      const spec = await this.findById(companyId, specificationId);
+      if (spec.status !== "approved" || !spec.snapshotJson) {
+        throw new BadRequestException({
+          statusCode: HttpStatus.BAD_REQUEST,
+          code: "SPECIFICATION_NOT_APPROVED",
+          message: "Производственную партию можно создать только из утверждённой спецификации",
+        });
       }
-      requestedLines = input.items;
-    } else {
-      // Ничего не передано — берём всё доступное количество по каждой строке
-      // (минимум кликов, принцип 17).
-      requestedLines = [...availableByVariant.entries()]
-        .filter(([, quantity]) => quantity > 0.0005)
-        .map(([productVariantId, quantity]) => ({ productVariantId, quantity }));
-    }
+      const snapshot = spec.snapshotJson as unknown as SpecificationSnapshot;
 
-    if (requestedLines.length === 0) {
-      throw new BadRequestException({
-        statusCode: HttpStatus.BAD_REQUEST,
-        code: "SPECIFICATION_FULLY_ALLOCATED",
-        message: "Спецификация уже полностью размещена в производственных партиях",
+      const allocatedByVariant = await this.computeAllocatedByVariant(companyId, specificationId);
+      const availableByVariant = new Map<string, number>();
+      for (const item of spec.items) {
+        const allocated = allocatedByVariant.get(item.productVariantId) ?? 0;
+        availableByVariant.set(item.productVariantId, Number(item.quantity) - allocated);
+      }
+
+      let requestedLines: Array<{ productVariantId: string; quantity: number }>;
+      if (input.items && input.items.length > 0) {
+        if (new Set(input.items.map((line) => line.productVariantId)).size !== input.items.length) {
+          throw new BadRequestException({
+            statusCode: HttpStatus.BAD_REQUEST,
+            code: "SPECIFICATION_DUPLICATE_ITEM",
+            message: "Размер/цвет указан в партии повторно",
+          });
+        }
+        for (const line of input.items) {
+          const available = availableByVariant.get(line.productVariantId);
+          if (available === undefined) {
+            throw new BadRequestException({
+              statusCode: HttpStatus.BAD_REQUEST,
+              code: "SPECIFICATION_ITEM_NOT_FOUND",
+              message: `Строка ${line.productVariantId} не входит в эту спецификацию`,
+            });
+          }
+          if (line.quantity - available > 0.0005) {
+            throw new BadRequestException({
+              statusCode: HttpStatus.BAD_REQUEST,
+              code: "SPECIFICATION_QUANTITY_EXCEEDS_AVAILABLE",
+              message: `Запрошенное количество (${line.quantity}) превышает доступный остаток спецификации (${available})`,
+            });
+          }
+        }
+        requestedLines = input.items;
+      } else {
+        // Ничего не передано — берём всё доступное количество по каждой строке
+        // (минимум кликов, принцип 17).
+        requestedLines = [...availableByVariant.entries()]
+          .filter(([, quantity]) => quantity > 0.0005)
+          .map(([productVariantId, quantity]) => ({ productVariantId, quantity }));
+      }
+
+      if (requestedLines.length === 0) {
+        throw new BadRequestException({
+          statusCode: HttpStatus.BAD_REQUEST,
+          code: "SPECIFICATION_FULLY_ALLOCATED",
+          message: "Спецификация уже полностью размещена в производственных партиях",
+        });
+      }
+
+      // ensureApproved — не getApproved+throw (см. комментарий в BomService):
+      // этот путь обязан вести себя так же, как прямой POST /production-orders,
+      // а не требовать от пользователя заранее сходить в карточку модели за
+      // BOM, о котором мастер спецификации нигде не предупреждал.
+      const bom = await this.bomService.ensureApproved(companyId, spec.productId, createdBy);
+
+      const itemByVariant = new Map(spec.items.map((item) => [item.productVariantId, item]));
+      const variants: ProductionOrderVariantDraft[] = requestedLines.map((line) => {
+        const item = itemByVariant.get(line.productVariantId);
+        return {
+          productVariantId: line.productVariantId,
+          quantity: line.quantity,
+          variantType: "new",
+          unitPrice: item ? Number(item.unitPrice) : undefined,
+        };
       });
-    }
+      const plannedQuantity = variants.reduce((sum, variant) => sum + variant.quantity, 0);
+      const totalSum = variants.reduce((sum, variant) => sum + variant.quantity * (variant.unitPrice ?? 0), 0);
+      // Цена заказа — средневзвешенная по фактически размещаемым строкам этой
+      // партии (не всей спецификации): справочное значение, реальная цена
+      // каждой строки уже зафиксирована явно в variants[].unitPrice.
+      const agreedUnitPrice = plannedQuantity > 0 ? totalSum / plannedQuantity : 0;
 
-    // ensureApproved — не getApproved+throw (см. комментарий в BomService):
-    // этот путь обязан вести себя так же, как прямой POST /production-orders,
-    // а не требовать от пользователя заранее сходить в карточку модели за
-    // BOM, о котором мастер спецификации нигде не предупреждал.
-    const bom = await this.bomService.ensureApproved(companyId, spec.productId, createdBy);
+      const [pricing, materialNorms, materialNormsVersion, orderNumber] = await Promise.all([
+        this.costingService.computeSpecificationPricing(companyId, spec.productId),
+        this.costingService.captureMaterialNorms(companyId, spec.productId),
+        this.costingService.findApprovedBomVersion(companyId, spec.productId),
+        this.identityService.reserveNextProductionOrderNumber(companyId),
+      ]);
 
-    const itemByVariant = new Map(spec.items.map((item) => [item.productVariantId, item]));
-    const variants: ProductionOrderVariantDraft[] = requestedLines.map((line) => {
-      const item = itemByVariant.get(line.productVariantId);
-      return {
-        productVariantId: line.productVariantId,
-        quantity: line.quantity,
-        variantType: "new",
-        unitPrice: item ? Number(item.unitPrice) : undefined,
+      const costSnapshot: ProductionOrderCostSnapshot = {
+        capturedAt: new Date().toISOString(),
+        materialNorms,
+        ...(materialNormsVersion !== null ? { materialNormsVersion } : {}),
+        agreedUnitPrice,
+        agreedUnitPriceCurrency: "RUB",
+        fabricCostPerUnit: pricing.fabricCostPerUnit,
+        trimCostPerUnit: pricing.trimCostPerUnit,
+        packagingCostPerUnit: pricing.packagingCostPerUnit,
+        sewingCostPerUnit: pricing.sewingCostPerUnit,
+        otherCostPerUnit: pricing.otherCostPerUnit,
+        materialCostsByCurrency: pricing.materialCostsByCurrency,
+        actualCostPerUnit: pricing.actualCostPerUnit,
+        actualCostCurrency: pricing.actualCostCurrency,
+        currencyWarning: pricing.currencyWarning,
+        deductionPerUnit: pricing.deductionPerUnit,
+        specificationPricePerUnit: pricing.specificationPricePerUnit,
+        materialsWithoutPriceHistory: pricing.materialsWithoutPriceHistory,
+        // Вариант B — коммерческие поля из snapshot спецификации, НЕ из живых
+        // workshop/company (требование №7): реквизиты, изменённые после
+        // утверждения спецификации, не должны повлиять на партию.
+        paymentTerms: snapshot.workshop.paymentTerms ?? formatDefaultPaymentTerms(totalSum),
+        deliveryMethod: snapshot.workshop.deliveryMethod ?? "",
+        contractNumber: snapshot.workshop.contractNumber ?? "",
+        contractDate: snapshot.workshop.contractDate ?? "",
+        contractorName: snapshot.workshop.name,
+        customerName: snapshot.company.legalName,
+        contractorSignerRole: snapshot.workshop.signerRole ?? "",
+        contractorSignerName: snapshot.workshop.signerName ?? "",
+        customerSignerName: snapshot.company.signerName ?? "",
       };
-    });
-    const plannedQuantity = variants.reduce((sum, variant) => sum + variant.quantity, 0);
-    const totalSum = variants.reduce((sum, variant) => sum + variant.quantity * (variant.unitPrice ?? 0), 0);
-    // Цена заказа — средневзвешенная по фактически размещаемым строкам этой
-    // партии (не всей спецификации): справочное значение, реальная цена
-    // каждой строки уже зафиксирована явно в variants[].unitPrice.
-    const agreedUnitPrice = plannedQuantity > 0 ? totalSum / plannedQuantity : 0;
 
-    const [pricing, materialNorms, materialNormsVersion, orderNumber] = await Promise.all([
-      this.costingService.computeSpecificationPricing(companyId, spec.productId),
-      this.costingService.captureMaterialNorms(companyId, spec.productId),
-      this.costingService.findApprovedBomVersion(companyId, spec.productId),
-      this.identityService.reserveNextProductionOrderNumber(companyId),
-    ]);
-
-    const costSnapshot: ProductionOrderCostSnapshot = {
-      capturedAt: new Date().toISOString(),
-      materialNorms,
-      ...(materialNormsVersion !== null ? { materialNormsVersion } : {}),
-      agreedUnitPrice,
-      agreedUnitPriceCurrency: "RUB",
-      fabricCostPerUnit: pricing.fabricCostPerUnit,
-      trimCostPerUnit: pricing.trimCostPerUnit,
-      packagingCostPerUnit: pricing.packagingCostPerUnit,
-      sewingCostPerUnit: pricing.sewingCostPerUnit,
-      otherCostPerUnit: pricing.otherCostPerUnit,
-      materialCostsByCurrency: pricing.materialCostsByCurrency,
-      actualCostPerUnit: pricing.actualCostPerUnit,
-      actualCostCurrency: pricing.actualCostCurrency,
-      currencyWarning: pricing.currencyWarning,
-      deductionPerUnit: pricing.deductionPerUnit,
-      specificationPricePerUnit: pricing.specificationPricePerUnit,
-      materialsWithoutPriceHistory: pricing.materialsWithoutPriceHistory,
-      // Вариант B — коммерческие поля из snapshot спецификации, НЕ из живых
-      // workshop/company (требование №7): реквизиты, изменённые после
-      // утверждения спецификации, не должны повлиять на партию.
-      paymentTerms: snapshot.workshop.paymentTerms ?? formatDefaultPaymentTerms(totalSum),
-      deliveryMethod: snapshot.workshop.deliveryMethod ?? "",
-      contractNumber: snapshot.workshop.contractNumber ?? "",
-      contractDate: snapshot.workshop.contractDate ?? "",
-      contractorName: snapshot.workshop.name,
-      customerName: snapshot.company.legalName,
-      contractorSignerRole: snapshot.workshop.signerRole ?? "",
-      contractorSignerName: snapshot.workshop.signerName ?? "",
-      customerSignerName: snapshot.company.signerName ?? "",
-    };
-
-    const order = await this.contractManufacturingService.createProductionOrderFromSpecification(companyId, {
-      productId: spec.productId,
-      bomId: bom.id,
-      workshopId: spec.workshopId,
-      plannedQuantity,
-      agreedUnitPrice,
-      dueDate: spec.deliveryDeadline,
-      variants,
-      createdBy,
-      specificationId: spec.id,
-      orderNumber,
-      costSnapshot,
-    });
-
-    await this.auditService.record(companyId, createdBy, "http_api", {
-      entityType: "production_order",
-      entityId: order.id,
-      action: "production_order.created_from_specification",
-      afterJson: {
-        specificationId: spec.id,
-        specNumber: spec.specNumber,
-        orderNumber,
+      const order = await this.contractManufacturingService.createProductionOrderFromSpecification(companyId, {
+        productId: spec.productId,
+        bomId: bom.id,
+        workshopId: spec.workshopId,
         plannedQuantity,
-        variants: variants.map((variant) => ({ productVariantId: variant.productVariantId, quantity: variant.quantity })),
-      },
-    });
+        agreedUnitPrice,
+        dueDate: spec.deliveryDeadline,
+        variants,
+        createdBy,
+        specificationId: spec.id,
+        orderNumber,
+        costSnapshot,
+      });
 
-    return order;
+      await this.auditService.record(companyId, createdBy, "http_api", {
+        entityType: "production_order",
+        entityId: order.id,
+        action: "production_order.created_from_specification",
+        afterJson: {
+          specificationId: spec.id,
+          specNumber: spec.specNumber,
+          orderNumber,
+          plannedQuantity,
+          variants: variants.map((variant) => ({ productVariantId: variant.productVariantId, quantity: variant.quantity })),
+        },
+      });
+
+      return order;
+    });
   }
 
   async findById(companyId: string, id: string): Promise<Specification> {

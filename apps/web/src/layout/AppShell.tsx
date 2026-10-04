@@ -239,14 +239,14 @@ function SidebarBody({
         ) : null}
       </div>
 
-      {/* Model-first Minimal Core (ПРОМПТ №06.1 §6): группы «Снабжение»
-          (Материалы/Закупки/Склады/Поставщики/Импорт документов) и «Учёт»
-          (Документы) скрыты из пользовательского меню — их backend/маршруты
-          не удалены (§16 отчёта), скрыт только пункт навигации. Тот же
-          SidebarBody используется в мобильном drawer'е (edge-swipe панель
-          ниже) — правка одного места скрывает группы в обоих. */}
+      {/* Основной производственный путь остаётся первым. Существующие
+          закупки, склад и документы доступны здесь же: скрытые разделы
+          делали связанную систему недоступной без знания прямых ссылок.
+          Общий SidebarBody обслуживает и десктоп, и мобильную панель. */}
       <nav className="flex-1 overflow-y-auto pb-4">
         <NavGroup label="Производство" items={NAV_PRODUCTION} collapsed={collapsed} mobile={mobile} onNavigate={onNavigate} />
+        <NavGroup label="Снабжение" items={NAV_SUPPLY} collapsed={collapsed} mobile={mobile} onNavigate={onNavigate} />
+        <NavGroup label="Учёт" items={NAV_OFFICE} collapsed={collapsed} mobile={mobile} onNavigate={onNavigate} />
         <NavGroup label="Служебное" items={NAV_SERVICE} collapsed={collapsed} mobile={mobile} onNavigate={onNavigate} />
       </nav>
 

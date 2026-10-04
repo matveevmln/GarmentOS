@@ -49,8 +49,13 @@ export interface CuttingFactResult {
 }
 
 function validate(input: CuttingFactInput, order: CuttingOrder): void {
+  const seenMaterials = new Set<string>();
   const knownMaterials = new Set(order.materials.map((row) => row.materialId));
   for (const row of input.materials) {
+    if (seenMaterials.has(row.materialId)) {
+      throw new DomainError("Материал указан в факте кроя повторно", "CUTTING_DUPLICATE_MATERIAL");
+    }
+    seenMaterials.add(row.materialId);
     if (!knownMaterials.has(row.materialId)) {
       throw new DomainError(
         `Материал ${row.materialId} не входит в это раскройное задание`,
@@ -63,8 +68,13 @@ function validate(input: CuttingFactInput, order: CuttingOrder): void {
     }
   }
 
+  const seenVariants = new Set<string>();
   const knownVariants = new Set(order.results.map((row) => row.productVariantId));
   for (const row of input.results) {
+    if (seenVariants.has(row.productVariantId)) {
+      throw new DomainError("Размер/цвет указан в факте кроя повторно", "CUTTING_DUPLICATE_VARIANT");
+    }
+    seenVariants.add(row.productVariantId);
     if (!knownVariants.has(row.productVariantId)) {
       throw new DomainError(
         `Размер/цвет ${row.productVariantId} не входит в это раскройное задание`,

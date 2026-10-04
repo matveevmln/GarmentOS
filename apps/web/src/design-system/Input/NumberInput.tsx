@@ -55,7 +55,14 @@ export const NumberInput = forwardRef<HTMLInputElement, NumberInputProps>(
             setFocused(true);
             setDisplay(value === undefined ? "" : String(value));
           }}
-          onChange={(event) => setDisplay(event.target.value)}
+          onChange={(event) => {
+            const raw = event.target.value;
+            setDisplay(raw);
+            // Значение формы обновляется сразу; оформление и ограничения —
+            // при blur. Иначе кнопка остаётся выключенной после ввода, а
+            // отправка через Enter использует прежнее количество/цену.
+            onChange(parseInput(raw));
+          }}
           onBlur={() => {
             setFocused(false);
             let parsed = parseInput(display);

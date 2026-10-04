@@ -1,4 +1,5 @@
-import { Inject, Injectable } from "@nestjs/common";
+import { DatabaseTransaction } from "../database/database-transaction";
+import { Inject, Injectable, NotFoundException } from "@nestjs/common";
 import {
   confirmPurchaseOrder,
   createMaterial,
@@ -23,6 +24,7 @@ import { MATERIAL_REPOSITORY, PURCHASE_ORDER_REPOSITORY, SUPPLIER_REPOSITORY } f
 @Injectable()
 export class ProcurementService {
   constructor(
+    private readonly transaction: DatabaseTransaction,
     @Inject(MATERIAL_REPOSITORY) private readonly materials: MaterialRepository,
     @Inject(SUPPLIER_REPOSITORY) private readonly suppliers: SupplierRepository,
     @Inject(PURCHASE_ORDER_REPOSITORY) private readonly purchaseOrders: PurchaseOrderRepository,
@@ -62,6 +64,11 @@ export class ProcurementService {
   }
 
   async createPurchaseOrderDraft(companyId: string, input: CreatePurchaseOrderDto): Promise<PurchaseOrder> {
+    for (const item of input.items) {
+      if (!await this.materials.findById(companyId, item.materialId)) {
+        throw new NotFoundException({ statusCode: 404, code: "MATERIAL_NOT_FOUND", message: "Материал не найден в этой компании" });
+      }
+    }
     return createPurchaseOrderDraft(
       { purchaseOrders: this.purchaseOrders, suppliers: this.suppliers },
       { ...input, companyId },
@@ -82,18 +89,21 @@ export class ProcurementService {
     purchaseOrderId: string,
     warehouseId: string,
   ): Promise<PurchaseOrder> {
-    const order = await receivePurchaseOrderUseCase(
-      { purchaseOrders: this.purchaseOrders },
-      { companyId: currentUser.companyId, purchaseOrderId },
-    );
+    return this.transaction.run(currentUser.companyId, "purchase_order", purchaseOrderId, async () => {
+      await this.warehouseService.assertWarehouseBelongsToCompany(currentUser.companyId, warehouseId);
+      const order = await receivePurchaseOrderUseCase(
+        { purchaseOrders: this.purchaseOrders },
+        { companyId: currentUser.companyId, purchaseOrderId },
+      );
 
-    for (const item of order.items) {
-      await this.warehouseService.receiveMaterialStock(currentUser, warehouseId, item.materialId, Number(item.quantity), {
-        referenceType: "purchase_order",
-        referenceId: order.id,
-      });
-    }
+      for (const item of order.items) {
+        await this.warehouseService.receiveMaterialStock(currentUser, warehouseId, item.materialId, Number(item.quantity), {
+          referenceType: "purchase_order",
+          referenceId: order.id,
+        });
+      }
 
-    return order;
+      return order;
+    });
   }
 }

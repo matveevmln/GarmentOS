@@ -1,3 +1,4 @@
+import { DatabaseTransaction } from "../database/database-transaction";
 import { Inject, Injectable } from "@nestjs/common";
 import type { BomItem } from "@garmentos/domain-bom";
 import type { ProductionOrder } from "@garmentos/domain-contract-manufacturing";
@@ -98,6 +99,7 @@ export class ProductionOrderOrchestrationService {
   private readonly pendingByChannel = new Map<string, PendingProductionRequest>();
 
   constructor(
+    private readonly transaction: DatabaseTransaction,
     private readonly productionRequestService: ProductionRequestService,
     private readonly catalogService: CatalogService,
     private readonly bomService: BomService,
@@ -375,100 +377,102 @@ export class ProductionOrderOrchestrationService {
     userId: string | null,
     source: AuditSource = "http_api",
   ): Promise<ProductionOrder> {
-    const draft = await this.contractManufacturingService.findProductionOrderById(companyId, productionOrderId);
-    if (!draft) {
-      throw new ProductionRequestOrchestrationError(
-        `Заказ пошива ${productionOrderId} не найден`,
-        "PRODUCTION_ORDER_NOT_FOUND",
+    return this.transaction.run(companyId, "production_order", productionOrderId, async () => {
+      const draft = await this.contractManufacturingService.findProductionOrderById(companyId, productionOrderId);
+      if (!draft) {
+        throw new ProductionRequestOrchestrationError(
+          `Заказ пошива ${productionOrderId} не найден`,
+          "PRODUCTION_ORDER_NOT_FOUND",
+        );
+      }
+      const [workshop, company] = await Promise.all([
+        this.contractManufacturingService.findWorkshopById(companyId, draft.workshopId),
+        this.identityService.findCompanyById(companyId),
+      ]);
+      if (!workshop) {
+        throw new ProductionRequestOrchestrationError(`Цех ${draft.workshopId} не найден`, "WORKSHOP_NOT_FOUND");
+      }
+      if (!company) {
+        throw new ProductionRequestOrchestrationError(`Компания ${companyId} не найдена`, "COMPANY_NOT_FOUND");
+      }
+      // Основание генерации (owner, 2026-08-03 — «Паспорт партии», раздел 5):
+      // без номера договора спецификация физически не может быть выпущена
+      // ("Спецификация №N к договору № ___") — а раз он фиксируется в Snapshot
+      // именно сейчас и больше не меняется, проверить его нужно ДО перевода
+      // заказа в "placed", а не после: иначе при отказе заказ навсегда
+      // остаётся подтверждённым, но без снимка (assertCanConfirm разрешает
+      // подтверждение только из "draft" — повторно не подтвердить).
+      if (!workshop.contractNumber) {
+        throw new ProductionRequestOrchestrationError(
+          `У цеха "${workshop.name}" не указан номер договора — заполните его в карточке цеха перед подтверждением заказа`,
+          "WORKSHOP_CONTRACT_NUMBER_MISSING",
+        );
+      }
+
+      // computeSpecificationPricing тоже валидирует "основание генерации" —
+      // бросает 404, если у модели нет утверждённого BOM — тоже до перевода
+      // статуса, по той же причине.
+      const pricing = await this.costingService.computeSpecificationPricing(companyId, draft.productId);
+      // Нормы расхода замораживаются вместе с ценами (Pilot v1, этап 4).
+      // Требование исторической памяти: партия хранит ту норму, по которой
+      // была запущена, и изменение карточки модели её не меняет.
+      const [materialNorms, materialNormsVersion] = await Promise.all([
+        this.costingService.captureMaterialNorms(companyId, draft.productId),
+        this.costingService.findApprovedBomVersion(companyId, draft.productId),
+      ]);
+      const snapshot: ProductionOrderCostSnapshot = {
+        capturedAt: new Date().toISOString(),
+        materialNorms,
+        ...(materialNormsVersion !== null ? { materialNormsVersion } : {}),
+        // Согласованная цена пошива и её валюта (P1-1) — RUB зафиксирован как
+        // бизнес-правило (принцип 21), не введён отдельным полем ввода: смена
+        // валюты пошива — решение владельца, не техническое.
+        agreedUnitPrice: Number(draft.agreedUnitPrice),
+        agreedUnitPriceCurrency: "RUB",
+        fabricCostPerUnit: pricing.fabricCostPerUnit,
+        trimCostPerUnit: pricing.trimCostPerUnit,
+        packagingCostPerUnit: pricing.packagingCostPerUnit,
+        sewingCostPerUnit: pricing.sewingCostPerUnit,
+        otherCostPerUnit: pricing.otherCostPerUnit,
+        materialCostsByCurrency: pricing.materialCostsByCurrency,
+        actualCostPerUnit: pricing.actualCostPerUnit,
+        actualCostCurrency: pricing.actualCostCurrency,
+        currencyWarning: pricing.currencyWarning,
+        deductionPerUnit: pricing.deductionPerUnit,
+        specificationPricePerUnit: pricing.specificationPricePerUnit,
+        materialsWithoutPriceHistory: pricing.materialsWithoutPriceHistory,
+        paymentTerms: workshop.paymentTerms ?? formatDefaultPaymentTerms(Number(draft.plannedQuantity) * Number(draft.agreedUnitPrice)),
+        deliveryMethod: workshop.deliveryMethod ?? "",
+        contractNumber: workshop.contractNumber,
+        contractDate: workshop.contractDate ?? "",
+        contractorName: workshop.name,
+        customerName: company.legalName ?? company.name,
+        contractorSignerRole: workshop.signerRole ?? "",
+        contractorSignerName: workshop.signerName ?? "",
+        customerSignerName: company.signerName ?? "",
+      };
+
+      const order = await this.contractManufacturingService.confirmProductionOrder(companyId, productionOrderId);
+      const confirmed = await this.contractManufacturingService.updateProductionOrderCostSnapshot(
+        companyId,
+        order.id,
+        snapshot,
       );
-    }
-    const [workshop, company] = await Promise.all([
-      this.contractManufacturingService.findWorkshopById(companyId, draft.workshopId),
-      this.identityService.findCompanyById(companyId),
-    ]);
-    if (!workshop) {
-      throw new ProductionRequestOrchestrationError(`Цех ${draft.workshopId} не найден`, "WORKSHOP_NOT_FOUND");
-    }
-    if (!company) {
-      throw new ProductionRequestOrchestrationError(`Компания ${companyId} не найдена`, "COMPANY_NOT_FOUND");
-    }
-    // Основание генерации (owner, 2026-08-03 — «Паспорт партии», раздел 5):
-    // без номера договора спецификация физически не может быть выпущена
-    // ("Спецификация №N к договору № ___") — а раз он фиксируется в Snapshot
-    // именно сейчас и больше не меняется, проверить его нужно ДО перевода
-    // заказа в "placed", а не после: иначе при отказе заказ навсегда
-    // остаётся подтверждённым, но без снимка (assertCanConfirm разрешает
-    // подтверждение только из "draft" — повторно не подтвердить).
-    if (!workshop.contractNumber) {
-      throw new ProductionRequestOrchestrationError(
-        `У цеха "${workshop.name}" не указан номер договора — заполните его в карточке цеха перед подтверждением заказа`,
-        "WORKSHOP_CONTRACT_NUMBER_MISSING",
-      );
-    }
 
-    // computeSpecificationPricing тоже валидирует "основание генерации" —
-    // бросает 404, если у модели нет утверждённого BOM — тоже до перевода
-    // статуса, по той же причине.
-    const pricing = await this.costingService.computeSpecificationPricing(companyId, draft.productId);
-    // Нормы расхода замораживаются вместе с ценами (Pilot v1, этап 4).
-    // Требование исторической памяти: партия хранит ту норму, по которой
-    // была запущена, и изменение карточки модели её не меняет.
-    const [materialNorms, materialNormsVersion] = await Promise.all([
-      this.costingService.captureMaterialNorms(companyId, draft.productId),
-      this.costingService.findApprovedBomVersion(companyId, draft.productId),
-    ]);
-    const snapshot: ProductionOrderCostSnapshot = {
-      capturedAt: new Date().toISOString(),
-      materialNorms,
-      ...(materialNormsVersion !== null ? { materialNormsVersion } : {}),
-      // Согласованная цена пошива и её валюта (P1-1) — RUB зафиксирован как
-      // бизнес-правило (принцип 21), не введён отдельным полем ввода: смена
-      // валюты пошива — решение владельца, не техническое.
-      agreedUnitPrice: Number(draft.agreedUnitPrice),
-      agreedUnitPriceCurrency: "RUB",
-      fabricCostPerUnit: pricing.fabricCostPerUnit,
-      trimCostPerUnit: pricing.trimCostPerUnit,
-      packagingCostPerUnit: pricing.packagingCostPerUnit,
-      sewingCostPerUnit: pricing.sewingCostPerUnit,
-      otherCostPerUnit: pricing.otherCostPerUnit,
-      materialCostsByCurrency: pricing.materialCostsByCurrency,
-      actualCostPerUnit: pricing.actualCostPerUnit,
-      actualCostCurrency: pricing.actualCostCurrency,
-      currencyWarning: pricing.currencyWarning,
-      deductionPerUnit: pricing.deductionPerUnit,
-      specificationPricePerUnit: pricing.specificationPricePerUnit,
-      materialsWithoutPriceHistory: pricing.materialsWithoutPriceHistory,
-      paymentTerms: workshop.paymentTerms ?? formatDefaultPaymentTerms(Number(draft.plannedQuantity) * Number(draft.agreedUnitPrice)),
-      deliveryMethod: workshop.deliveryMethod ?? "",
-      contractNumber: workshop.contractNumber,
-      contractDate: workshop.contractDate ?? "",
-      contractorName: workshop.name,
-      customerName: company.legalName ?? company.name,
-      contractorSignerRole: workshop.signerRole ?? "",
-      contractorSignerName: workshop.signerName ?? "",
-      customerSignerName: company.signerName ?? "",
-    };
+      // Аудит партии (владелец проекта, 2026-08-04: "кто изменил партию, когда,
+      // что изменил, старое/новое значение" — момент подтверждения заказа —
+      // самое важное событие в жизни партии, здесь фиксируется Snapshot
+      // себестоимости, который больше никогда не пересчитывается).
+      await this.auditService.record(companyId, userId, source, {
+        entityType: "production_order",
+        entityId: confirmed.id,
+        action: "production_order.confirmed",
+        beforeJson: { status: draft.status },
+        afterJson: { status: confirmed.status, costSnapshot: snapshot },
+      });
 
-    const order = await this.contractManufacturingService.confirmProductionOrder(companyId, productionOrderId);
-    const confirmed = await this.contractManufacturingService.updateProductionOrderCostSnapshot(
-      companyId,
-      order.id,
-      snapshot,
-    );
-
-    // Аудит партии (владелец проекта, 2026-08-04: "кто изменил партию, когда,
-    // что изменил, старое/новое значение" — момент подтверждения заказа —
-    // самое важное событие в жизни партии, здесь фиксируется Snapshot
-    // себестоимости, который больше никогда не пересчитывается).
-    await this.auditService.record(companyId, userId, source, {
-      entityType: "production_order",
-      entityId: confirmed.id,
-      action: "production_order.confirmed",
-      beforeJson: { status: draft.status },
-      afterJson: { status: confirmed.status, costSnapshot: snapshot },
+      return confirmed;
     });
-
-    return confirmed;
   }
 
   // Canonical data flow (ПРОМПТ №12.2, владелец проекта, 2026-09-21 —
@@ -594,20 +598,22 @@ export class ProductionOrderOrchestrationService {
     productionOrderId: string,
     reason: string,
   ): Promise<ProductionOrder> {
-    const result = await this.contractManufacturingService.cancelProductionOrder(currentUser, productionOrderId, reason);
+    return this.transaction.run(currentUser.companyId, "production_order", productionOrderId, async () => {
+      const result = await this.contractManufacturingService.cancelProductionOrder(currentUser, productionOrderId, reason);
 
-    const spec = await this.specificationService.resolveOrderSpecificationLink(currentUser.companyId, result.order);
-    if (spec && spec.productionOrderId === result.order.id && spec.status !== "cancelled") {
-      await this.specificationService.cancel(currentUser.companyId, spec.id, currentUser.id);
-    }
-
-    const cuttingOrders = await this.cuttingService.listByProductionOrder(currentUser.companyId, result.order.id);
-    for (const cuttingOrder of cuttingOrders) {
-      if (cuttingOrder.status === "draft" || cuttingOrder.status === "issued") {
-        await this.cuttingService.cancel(currentUser, cuttingOrder.id);
+      const spec = await this.specificationService.resolveOrderSpecificationLink(currentUser.companyId, result.order);
+      if (spec && spec.productionOrderId === result.order.id && spec.status !== "cancelled") {
+        await this.specificationService.cancel(currentUser.companyId, spec.id, currentUser.id);
       }
-    }
 
-    return result.order;
+      const cuttingOrders = await this.cuttingService.listByProductionOrder(currentUser.companyId, result.order.id);
+      for (const cuttingOrder of cuttingOrders) {
+        if (cuttingOrder.status === "draft" || cuttingOrder.status === "issued") {
+          await this.cuttingService.cancel(currentUser, cuttingOrder.id);
+        }
+      }
+
+      return result.order;
+    });
   }
 }
