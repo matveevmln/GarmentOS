@@ -8,6 +8,8 @@ import {
   type DocumentResponseDto,
   type ProductProductionResponseDto,
   type ProductResponseDto,
+  type ProductVariantResponseDto,
+  type ProductSizeResponseDto,
 } from "@garmentos/shared-types";
 import { apiRequest } from "../api/client";
 import { useCrudResource } from "../api/useCrudResource";
@@ -27,10 +29,12 @@ import { ApiError } from "../api/client";
 
 // Пятый из 7 перенесённых экранов (docs/DESIGN_SYSTEM_MAP.md, задача #72).
 export function ProductsPage() {
-  const { items, isLoading, error, reload, create } = useCrudResource<ProductResponseDto, CreateProductDto>(
-    "/products",
-  );
+  const { items, isLoading, error, reload, create } = useCrudResource<
+    ProductResponseDto,
+    CreateProductDto
+  >("/products");
   const [query, setQuery] = useState("");
+  const [showArchive, setShowArchive] = useState(false);
   const navigate = useNavigate();
 
   // Витрина моделей — production-first (визуальная переработка 2026-09-13,
@@ -41,16 +45,39 @@ export function ProductsPage() {
   // правила в интерфейсе быть не должно, поэтому запрос идёт по одному
   // на модель (тот же паттерн N-запросов, что уже применяется ниже для
   // фото), а не общим списком заказов с подсчётом на клиенте.
-  const [productionByProduct, setProductionByProduct] = useState<Record<string, ProductProductionResponseDto | null>>(
-    {},
-  );
+  const [productionByProduct, setProductionByProduct] = useState<
+    Record<string, ProductProductionResponseDto | null>
+  >({});
   useEffect(() => {
-    const missing = items.filter((item) => !(item.id in productionByProduct)).map((item) => item.id);
+    const missing = items
+      .filter((item) => !(item.id in productionByProduct))
+      .map((item) => item.id);
     if (missing.length === 0) return;
     for (const productId of missing) {
       void apiRequest<ProductProductionResponseDto>(`/products/${productId}/production`)
         .then((data) => setProductionByProduct((prev) => ({ ...prev, [productId]: data })))
         .catch(() => setProductionByProduct((prev) => ({ ...prev, [productId]: null })));
+    }
+  }, [items]);
+
+  const [variantsByProduct, setVariantsByProduct] = useState<
+    Record<string, ProductVariantResponseDto[]>
+  >({});
+  useEffect(() => {
+    for (const model of items.filter((item) => !(item.id in variantsByProduct))) {
+      void Promise.all([
+        apiRequest<ProductVariantResponseDto[]>(`/product-variants?productId=${model.id}`),
+        apiRequest<ProductSizeResponseDto[]>(`/products/${model.id}/sizes`),
+      ])
+        .then(([rows, sizes]) =>
+          setVariantsByProduct((prev) => ({
+            ...prev,
+            [model.id]: sizes.length
+              ? rows.filter((row) => sizes.some((size) => size.size === row.size))
+              : rows,
+          })),
+        )
+        .catch(() => setVariantsByProduct((prev) => ({ ...prev, [model.id]: [] })));
     }
   }, [items]);
 
@@ -63,7 +90,8 @@ export function ProductsPage() {
     for (const productId of missing) {
       void apiRequest<DocumentResponseDto[]>(`/documents?entityType=product&entityId=${productId}`)
         .then((docs) => {
-          const photo = docs.find((doc) => doc.docType === "photo_product" && doc.isCurrentVersion) ?? null;
+          const photo =
+            docs.find((doc) => doc.docType === "photo_product" && doc.isCurrentVersion) ?? null;
           setPhotoByProduct((prev) => ({ ...prev, [productId]: photo?.id ?? null }));
         })
         .catch(() => setPhotoByProduct((prev) => ({ ...prev, [productId]: null })));
@@ -91,7 +119,13 @@ export function ProductsPage() {
   // как запасной вариант (Number(a)-Number(b) даёт NaN, а NaN ложно в JS —
   // ("" || x) переходит на localeCompare).
   function deriveModelStats(data: ProductProductionResponseDto | null | undefined) {
-    if (!data) return { colorNames: [] as string[], sizeLabels: [] as string[], batchCount: 0, inProgressCount: 0 };
+    if (!data)
+      return {
+        colorNames: [] as string[],
+        sizeLabels: [] as string[],
+        batchCount: 0,
+        inProgressCount: 0,
+      };
     const colors = new Set<string>();
     const sizes = new Set<string>();
     for (const batch of data.batches) {
@@ -131,7 +165,10 @@ export function ProductsPage() {
           <CardTitle>Новая модель</CardTitle>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
-          <form className="flex flex-col gap-4" onSubmit={(event) => void handleSubmit(onSubmit)(event)}>
+          <form
+            className="flex flex-col gap-4"
+            onSubmit={(event) => void handleSubmit(onSubmit)(event)}
+          >
             <div className="grid grid-cols-1 gap-4 md:max-w-sm">
               <Field label="Название модели" error={errors.name?.message}>
                 <Input {...register("name")} placeholder="Двойка" />
@@ -147,20 +184,46 @@ export function ProductsPage() {
 
       {isLoading && <SkeletonList />}
       {!isLoading && error && (
-        <ErrorState title="Не удалось загрузить модели" description={error} onRetry={() => void reload()} />
+        <ErrorState
+          title="Не удалось загрузить модели"
+          description={error}
+          onRetry={() => void reload()}
+        />
       )}
 
       {!isLoading && !error && (
         <>
-          <SearchBar value={query} onChange={setQuery} placeholder="Поиск модели" className="mb-3 md:w-[340px]" />
+          <SearchBar
+            value={query}
+            onChange={setQuery}
+            placeholder="Поиск модели"
+            className="mb-3 md:w-[340px]"
+          />
 
+          <Button
+            className="mb-3"
+            variant="ghost"
+            size="lg"
+            onClick={() => setShowArchive(!showArchive)}
+          >
+            {showArchive ? "Показать рабочие модели" : "Открыть архив"}
+          </Button>
           <ModelGrid
             items={items
+              .filter((row) =>
+                showArchive ? row.status === "discontinued" : row.status !== "discontinued",
+              )
               .filter((row) => row.name.toLowerCase().includes(query.trim().toLowerCase()))
               .map((row): ModelGridItem => ({
                 product: row,
                 photoDocumentId: photoByProduct[row.id] ?? null,
                 ...deriveModelStats(productionByProduct[row.id]),
+                colorNames: [
+                  ...new Set((variantsByProduct[row.id] ?? []).map((variant) => variant.color)),
+                ],
+                sizeLabels: [
+                  ...new Set((variantsByProduct[row.id] ?? []).map((variant) => variant.size)),
+                ],
               }))}
             onItemClick={(row) => void navigate(`/products/${row.id}`)}
             emptyTitle="Пока нет ни одной модели"

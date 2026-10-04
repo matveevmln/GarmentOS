@@ -60,10 +60,8 @@ interface NavItem {
 // (SpecificationDetailPage.tsx) по-прежнему работает, если цехов вообще нет.
 const NAV_PRODUCTION: NavItem[] = [
   { to: "/dashboard", label: "Главная", icon: IconHome },
+  { to: "/production-orders", label: "Партии", icon: IconBatch, match: "/production-orders/*" },
   { to: "/products", label: "Модели", icon: IconModel, match: "/products/*" },
-  { to: "/specifications", label: "Спецификации", icon: IconDocument, match: "/specifications/*" },
-  { to: "/production-orders", label: "Заказы пошива", icon: IconBatch, match: "/production-orders/*" },
-  { to: "/fulfillment", label: "Фулфилмент ОТК", icon: IconCheck },
 ];
 
 const NAV_SUPPLY: NavItem[] = [
@@ -76,21 +74,17 @@ const NAV_SUPPLY: NavItem[] = [
   { to: "/document-import", label: "Импорт документов", icon: IconInbox },
 ];
 
-const NAV_OFFICE: NavItem[] = [{ to: "/documents", label: "Документы", icon: IconDocument }];
+const NAV_OFFICE: NavItem[] = [
+  { to: "/documents", label: "Документы", icon: IconDocument },
+  { to: "/workshops", label: "Мой цех", icon: IconUser },
+];
 
 // Pilot v1 (владелец проекта, 2026-08-04, docs/MASTER_BACKLOG.md, раздел
 // 0.5) — временный пункт, убрать после завершения пилота.
 const NAV_SERVICE: NavItem[] = [{ to: "/pilot", label: "Pilot v1", icon: IconCheck }];
 
-// Нижняя навигация мобильного (ПРОМПТ №06.1 §6): Главная/Модели/
-// Спецификации/Заказы + «Ещё» — та же цепочка Модель → Спецификация →
-// Партия, что и в десктопном меню.
-const MOBILE_NAV: NavItem[] = [
-  { to: "/dashboard", label: "Главная", icon: IconHome },
-  { to: "/products", label: "Модели", icon: IconModel, match: "/products/*" },
-  { to: "/specifications", label: "Спецификации", icon: IconDocument, match: "/specifications/*" },
-  { to: "/production-orders", label: "Заказы", icon: IconBatch, match: "/production-orders/*" },
-];
+// Основной мобильный путь владельца: Главная → Партии → Модели → Ещё.
+const MOBILE_NAV: NavItem[] = NAV_PRODUCTION;
 
 const ALL_NAV = [...NAV_PRODUCTION, ...NAV_SUPPLY, ...NAV_OFFICE, ...NAV_SERVICE];
 
@@ -245,9 +239,7 @@ function SidebarBody({
           Общий SidebarBody обслуживает и десктоп, и мобильную панель. */}
       <nav className="flex-1 overflow-y-auto pb-4">
         <NavGroup label="Производство" items={NAV_PRODUCTION} collapsed={collapsed} mobile={mobile} onNavigate={onNavigate} />
-        <NavGroup label="Снабжение" items={NAV_SUPPLY} collapsed={collapsed} mobile={mobile} onNavigate={onNavigate} />
         <NavGroup label="Учёт" items={NAV_OFFICE} collapsed={collapsed} mobile={mobile} onNavigate={onNavigate} />
-        <NavGroup label="Служебное" items={NAV_SERVICE} collapsed={collapsed} mobile={mobile} onNavigate={onNavigate} />
       </nav>
 
       {/* Подвал рельса. В прототипе здесь имя и название компании; названия
@@ -605,7 +597,7 @@ export function AppShell() {
       </div>
 
       {/* Нижняя навигация — мобильный */}
-      <nav className="glass-bar fixed inset-x-0 bottom-0 z-30 grid grid-cols-5 border-t pb-[env(safe-area-inset-bottom)] shadow-[0_-2px_18px_color-mix(in_oklab,var(--foreground)_8%,transparent)] md:hidden">
+      <nav className="glass-bar fixed inset-x-0 bottom-0 z-30 grid grid-cols-4 border-t pb-[env(safe-area-inset-bottom)] shadow-[0_-2px_18px_color-mix(in_oklab,var(--foreground)_8%,transparent)] md:hidden">
         {MOBILE_NAV.map((it) => (
           <BottomNavItem key={it.to} item={it} />
         ))}

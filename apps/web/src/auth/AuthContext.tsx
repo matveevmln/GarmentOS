@@ -79,6 +79,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = useCallback(() => {
     clearTokens();
+    for (const key of Object.keys(localStorage)) {
+      if (key.startsWith("garmentos.batch-draft:")) localStorage.removeItem(key);
+    }
     localStorage.removeItem(USER_STORAGE_KEY);
     setUser(null);
   }, []);

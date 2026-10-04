@@ -1,9 +1,24 @@
-import { Body, Controller, Delete, Get, HttpStatus, NotFoundException, Param, Patch, Post, Put, Query } from "@nestjs/common";
+import {
+  ParseUUIDPipe,
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpStatus,
+  NotFoundException,
+  Param,
+  Patch,
+  Post,
+  Put,
+  Query,
+} from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
 import { createZodDto } from "nestjs-zod";
 import {
   addProductColorSchema,
   createProductSchema,
+  quickProductSchema,
+  productLifecycleSchema,
   findProductByNameQuerySchema,
   productAttributeDraftSchema,
   productAttributePresetsResponseSchema,
@@ -23,6 +38,10 @@ import {
 import { CurrentUser, type AuthenticatedRequestUser } from "../auth/current-user.decorator";
 import { RequirePermissions } from "../auth/require-permissions.decorator";
 import { CatalogService } from "./catalog.service";
+
+class ProductLifecycleDto extends createZodDto(productLifecycleSchema) {}
+
+class QuickProductDto extends createZodDto(quickProductSchema) {}
 
 class CreateProductDto extends createZodDto(createProductSchema) {}
 class FindProductByNameQueryDto extends createZodDto(findProductByNameQuerySchema) {}
@@ -45,6 +64,27 @@ export class ProductsController {
   ): Promise<ProductResponseDto> {
     const product = await this.catalogService.createProduct(currentUser, body);
     return productResponseSchema.parse(product);
+  }
+
+  @RequirePermissions("catalog.write")
+  @Post("quick")
+  async quick(
+    @Body() body: QuickProductDto,
+    @CurrentUser() user: AuthenticatedRequestUser,
+  ): Promise<ProductResponseDto> {
+    return productResponseSchema.parse(await this.catalogService.quickProduct(user, body));
+  }
+
+  @RequirePermissions("catalog.write")
+  @Patch(":id/lifecycle")
+  async lifecycle(
+    @Param("id", new ParseUUIDPipe()) id: string,
+    @Body() body: ProductLifecycleDto,
+    @CurrentUser() user: AuthenticatedRequestUser,
+  ): Promise<ProductResponseDto> {
+    return productResponseSchema.parse(
+      await this.catalogService.setProductStatus(user, id, body.status),
+    );
   }
 
   // Без ?name= — список всех моделей компании (apps/web, Итерация 11).
@@ -181,7 +221,12 @@ export class ProductsController {
     @Body() body: ProductAttributeDraftDto,
     @CurrentUser() currentUser: AuthenticatedRequestUser,
   ): Promise<ProductAttributeResponseDto> {
-    const attribute = await this.catalogService.updateProductAttribute(currentUser, id, attributeId, body);
+    const attribute = await this.catalogService.updateProductAttribute(
+      currentUser,
+      id,
+      attributeId,
+      body,
+    );
     return productAttributeResponseSchema.parse(attribute);
   }
 
@@ -202,7 +247,9 @@ export class ProductsController {
   // "/products/colors" был бы ошибочно распознан как ":id" = "colors".
   @RequirePermissions("catalog.read")
   @Get("colors")
-  async listColors(@CurrentUser() currentUser: AuthenticatedRequestUser): Promise<ProductColorPresetsResponseDto> {
+  async listColors(
+    @CurrentUser() currentUser: AuthenticatedRequestUser,
+  ): Promise<ProductColorPresetsResponseDto> {
     const colors = await this.catalogService.listCompanyColors(currentUser.companyId);
     return productColorPresetsResponseSchema.parse(colors);
   }

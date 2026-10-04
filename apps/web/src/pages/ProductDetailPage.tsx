@@ -497,15 +497,34 @@ export function ProductDetailPage() {
   };
 
   // Готовность модели к производству (ПРОМПТ №06.1 §5) — три сигнала,
-  // которые уже загружены этой же страницей: заказ пошива физически
-  // невозможен без фото (образец для цеха), хотя бы одного варианта
-  // размер×цвет и утверждённых норм расхода. Ничего не считается заново на
-  // backend — это композиция уже загруженных данных, не новая бизнес-логика.
+  // Для обычной партии нужны варианты. Фото и материалы заполняются при необходимости.
   const readinessChecks: Array<{ label: string; ok: boolean }> = [
-    { label: "фото", ok: photoDoc !== null },
     { label: "цвета и размеры", ok: variants.length > 0 },
-    { label: "утверждённые нормы расхода", ok: currentBomId !== null },
   ];
+  const [lifecycleBusy, setLifecycleBusy] = useState(false);
+  const changeLifecycle = async () => {
+    if (!product) return;
+    const archive = product.status !== "discontinued";
+    if (
+      archive &&
+      !window.confirm(
+        "Убрать модель в архив? История партий и документы сохранятся. Модель можно будет восстановить.",
+      )
+    )
+      return;
+    setLifecycleBusy(true);
+    try {
+      await apiRequest(`/products/${id}/lifecycle`, {
+        method: "PATCH",
+        body: { status: archive ? "discontinued" : "active" },
+      });
+      loadProduct();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Не удалось сохранить");
+    } finally {
+      setLifecycleBusy(false);
+    }
+  };
   const missingForReadiness = readinessChecks.filter((check) => !check.ok).map((check) => check.label);
 
   if (productError) {
@@ -516,6 +535,26 @@ export function ProductDetailPage() {
 
   return (
     <div className="mx-auto max-w-[1400px]">
+      <div className="mb-3 flex flex-wrap gap-2">
+        {product.status !== "discontinued" && (
+          <Button
+            size="lg"
+            className="md:w-auto"
+            onClick={() => void navigate(`/new-batch?productId=${id}`)}
+          >
+            + Новая партия
+          </Button>
+        )}
+        <Button
+          size="lg"
+          variant="secondary"
+          className="md:w-auto"
+          loading={lifecycleBusy}
+          onClick={() => void changeLifecycle()}
+        >
+          {product.status === "discontinued" ? "Восстановить модель" : "Убрать в архив"}
+        </Button>
+      </div>
       <PageHeader
         title={product.name}
         subtitle={
@@ -525,7 +564,7 @@ export function ProductDetailPage() {
                 смысла; артикул варианта (product.code-размер-цвет) ниже на
                 этой странице остаётся — это реальный SKU для склада. */}
             <span className="flex items-center gap-2">
-              <StatusBadge status={product.status} />
+              <span className="text-sm">{product.status === "discontinued" ? "В архиве" : variants.length ? "Размеры и цвета заданы" : "Добавьте размеры и цвет"}</span>
             </span>
             {/* Строка агрегатов (§10 отчёта Model-first) — «4 партии · 3 600
                 шт · 1 в работе», сразу под заголовком, а не только внутри
@@ -597,10 +636,10 @@ export function ProductDetailPage() {
                     <EmptyState
                       compact
                       title="Пока нет ни одной спецификации"
-                      description="Спецификация — первый шаг производства: цех, количество и цена."
+                      description="Создайте партию: спецификация сохранится вместе с ней."
                       action={
-                        <Button size="sm" onClick={() => void navigate("/specifications")}>
-                          + Создать спецификацию
+                        <Button size="sm" onClick={() => void navigate(`/new-batch?productId=${id}`)}>
+                          + Новая партия
                         </Button>
                       }
                     />
@@ -624,8 +663,8 @@ export function ProductDetailPage() {
                           </li>
                         ))}
                       </ul>
-                      <Button size="sm" variant="secondary" className="self-start" onClick={() => void navigate("/specifications")}>
-                        + Создать спецификацию
+                      <Button size="sm" variant="secondary" className="self-start" onClick={() => void navigate(`/new-batch?productId=${id}`)}>
+                        + Новая партия
                       </Button>
                     </>
                   )}

@@ -192,5 +192,30 @@ export const productAttributePresetResponseSchema = z.object({
   value: z.string(),
 });
 export const productAttributePresetsResponseSchema = z.array(productAttributePresetResponseSchema);
-export type ProductAttributePresetResponseDto = z.infer<typeof productAttributePresetResponseSchema>;
-export type ProductAttributePresetsResponseDto = z.infer<typeof productAttributePresetsResponseSchema>;
+export type ProductAttributePresetResponseDto = z.infer<
+  typeof productAttributePresetResponseSchema
+>;
+export type ProductAttributePresetsResponseDto = z.infer<
+  typeof productAttributePresetsResponseSchema
+>;
+
+// Быстрая подготовка модели в мастере. Артикулы — внутренние технические коды.
+export const quickProductSchema = z.object({
+  requestId: z.string().uuid(),
+  productId: z.string().uuid().optional(),
+  name: z.string().trim().min(1),
+  sizes: z
+    .array(z.object({ size: z.string().trim().min(1), ratioWeight: z.number().positive() }))
+    .min(1)
+    .refine(
+      (rows) => new Set(rows.map((row) => row.size)).size === rows.length,
+      "Размеры повторяются",
+    ),
+  colors: z
+    .array(z.string().trim().min(1))
+    .min(1)
+    .refine((rows) => new Set(rows).size === rows.length, "Цвета повторяются"),
+});
+export type QuickProductDto = z.infer<typeof quickProductSchema>;
+
+export const productLifecycleSchema = z.object({ status: z.enum(["active", "discontinued"]) });

@@ -1,6 +1,5 @@
 import { usePhotoUrl } from "../Blocks/BatchCard";
 import { ColorDot } from "../Blocks/Breakdown";
-import { StatusBadge } from "../StatusBadge/StatusBadge";
 import { initialsFromName } from "../../lib/product-code";
 
 // ModelCard — карточка модели для витрины «Модели». ПРОМПТ №09.2 v2
@@ -52,7 +51,7 @@ export function ModelCard({
 
   return (
     <button type="button" onClick={onClick} className="model-card focus-ring anim-rise text-left">
-      <div className="model-card-image">
+      <div className={photoUrl ? "model-card-image !h-36 ![aspect-ratio:auto]" : "model-card-image !h-20 ![aspect-ratio:auto]"}>
         <div className="model-card-glow" aria-hidden="true" />
         {photoUrl ? (
           <div className="model-card-photo">
@@ -65,7 +64,9 @@ export function ModelCard({
           </div>
         )}
         <div className="model-card-badge">
-          <StatusBadge status={model.status} className="model-card-status" />
+          <span className="rounded-full border border-border bg-card px-3 py-1 text-xs font-semibold">
+            {model.status === "discontinued" ? "В архиве" : sizeLabels.length > 0 && colorNames.length > 0 ? "Размеры и цвета заданы" : "Нужно добавить размеры и цвет"}
+          </span>
         </div>
       </div>
 

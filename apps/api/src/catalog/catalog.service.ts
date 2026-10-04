@@ -1,4 +1,13 @@
-import { Inject, Injectable } from "@nestjs/common";
+import { createHash } from "node:crypto";
+import { z } from "zod";
+import { DatabaseTransaction } from "../database/database-transaction";
+import {
+  ConflictException,
+  Inject,
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+} from "@nestjs/common";
 import {
   addProductAttribute,
   addProductColor,
@@ -23,6 +32,7 @@ import {
 } from "@garmentos/domain-catalog";
 import type {
   AddProductColorDto,
+  QuickProductDto,
   CreateCollectionDto,
   CreateProductDto,
   CreateProductVariantDto,
@@ -71,9 +81,77 @@ export class CatalogService {
     @Inject(PRODUCT_REPOSITORY) private readonly products: ProductRepository,
     @Inject(PRODUCT_VARIANT_REPOSITORY) private readonly productVariants: ProductVariantRepository,
     @Inject(PRODUCT_SIZE_REPOSITORY) private readonly productSizes: ProductSizeRepository,
-    @Inject(PRODUCT_ATTRIBUTE_REPOSITORY) private readonly productAttributes: ProductAttributeRepository,
+    @Inject(PRODUCT_ATTRIBUTE_REPOSITORY)
+    private readonly productAttributes: ProductAttributeRepository,
     private readonly auditService: AuditService,
+    private readonly transaction: DatabaseTransaction,
   ) {}
+
+  async setProductStatus(
+    user: AuthenticatedRequestUser,
+    id: string,
+    status: "active" | "discontinued",
+  ): Promise<Product> {
+    return this.transaction.run(user.companyId, "product", id, async () => {
+      const before = await this.products.findById(user.companyId, id);
+      if (!before || before.deletedAt) throw new NotFoundException("Модель не найдена");
+      const product = await this.products.setStatus(user.companyId, id, status);
+      await this.auditService.recordForUser(user, {
+        entityType: "product",
+        entityId: id,
+        action: status === "discontinued" ? "product.archived" : "product.restored",
+        beforeJson: { status: before.status },
+        afterJson: { status: product.status },
+      });
+      return product;
+    });
+  }
+
+  async quickProduct(user: AuthenticatedRequestUser, input: QuickProductDto): Promise<Product> {
+    const hash = createHash("sha256").update(JSON.stringify(input)).digest("hex");
+    return this.transaction.run(user.companyId, "product_request", input.requestId, async () => {
+      const previous = (
+        await this.auditService.listForEntity(user.companyId, "product_request", input.requestId)
+      ).find((entry) => entry.action === "product.request_completed");
+      if (previous) {
+        const saved = z
+          .object({ productId: z.string().uuid(), hash: z.string() })
+          .parse(previous.afterJson);
+        if (previous.userId !== user.id || saved.hash !== hash)
+          throw new ConflictException("Эта попытка уже сохранена с другими данными");
+        const product = await this.findProductById(user.companyId, saved.productId);
+        if (!product) throw new NotFoundException("Модель не найдена");
+        return product;
+      }
+      const product = input.productId
+        ? await this.findProductById(user.companyId, input.productId)
+        : await this.createProduct(user, { name: input.name, code: `MODEL-${input.requestId}` });
+      if (!product) throw new NotFoundException("Модель не найдена в вашей компании");
+      if (product.deletedAt || product.status === "discontinued")
+        throw new BadRequestException("Модель находится в архиве");
+      return this.transaction.run(user.companyId, "product", product.id, async () => {
+        await this.replaceProductSizes(user, product.id, { sizes: input.sizes });
+        const oldVariants = await this.listProductVariants(user.companyId, product.id);
+        for (const [index, color] of input.colors.entries()) {
+          const existing = oldVariants.find((row) => row.color === color);
+          const prefix = existing ? `${product.code}-${existing.size}-` : "";
+          const colorCode = existing?.skuCode.startsWith(prefix)
+            ? existing.skuCode.slice(prefix.length)
+            : existing
+              ? `C-${existing.id}`
+              : `C-${input.requestId}-${index + 1}`;
+          await this.addProductColor(user, product.id, { color, colorCode });
+        }
+        await this.auditService.recordForUser(user, {
+          entityType: "product_request",
+          entityId: input.requestId,
+          action: "product.request_completed",
+          afterJson: { productId: product.id, hash },
+        });
+        return product;
+      });
+    });
+  }
 
   // Размерный ряд модели: порядок размеров и веса раскладки (владелец
   // проекта, 2026-08-30). Правка ряда не затрагивает уже созданные заказы —
@@ -87,19 +165,46 @@ export class CatalogService {
     productId: string,
     input: ReplaceProductSizesDto,
   ): Promise<ProductSize[]> {
-    const before = await this.productSizes.listByProduct(currentUser.companyId, productId);
-    const sizes = await replaceProductSizes(
-      { products: this.products, productSizes: this.productSizes },
-      { companyId: currentUser.companyId, productId, sizes: input.sizes },
-    );
-    await this.auditService.recordForUser(currentUser, {
-      entityType: "product",
-      entityId: productId,
-      action: "product.sizes_replaced",
-      beforeJson: before.map((row) => ({ size: row.size, ratioWeight: row.ratioWeight })),
-      afterJson: sizes.map((row) => ({ size: row.size, ratioWeight: row.ratioWeight })),
+    return this.transaction.run(currentUser.companyId, "product", productId, async () => {
+      const before = await this.productSizes.listByProduct(currentUser.companyId, productId);
+      const sizes = await replaceProductSizes(
+        { products: this.products, productSizes: this.productSizes },
+        { companyId: currentUser.companyId, productId, sizes: input.sizes },
+      );
+      await this.auditService.recordForUser(currentUser, {
+        entityType: "product",
+        entityId: productId,
+        action: "product.sizes_replaced",
+        beforeJson: before.map((row) => ({ size: row.size, ratioWeight: row.ratioWeight })),
+        afterJson: sizes.map((row) => ({ size: row.size, ratioWeight: row.ratioWeight })),
+      });
+      const product = await this.products.findById(currentUser.companyId, productId);
+      const variants = await this.productVariants.listByProduct(currentUser.companyId, productId);
+      if (product) {
+        for (const color of new Set(variants.map((row) => row.color))) {
+          const existing = variants.find((row) => row.color === color)!;
+          const prefix = `${product.code}-${existing.size}-`;
+          const colorCode = existing.skuCode.startsWith(prefix)
+            ? existing.skuCode.slice(prefix.length)
+            : `C-${existing.id}`;
+          await addProductColor(
+            {
+              products: this.products,
+              productSizes: this.productSizes,
+              productVariants: this.productVariants,
+            },
+            {
+              companyId: currentUser.companyId,
+              productId,
+              color,
+              colorCode,
+              createdBy: currentUser.id,
+            },
+          );
+        }
+      }
+      return sizes;
     });
-    return sizes;
   }
 
   async addProductColor(
@@ -107,24 +212,44 @@ export class CatalogService {
     productId: string,
     input: AddProductColorDto,
   ): Promise<{ created: number; skipped: number }> {
+    return this.transaction.run(currentUser.companyId, "product", productId, async () => {
     const result = await addProductColor(
-      { products: this.products, productSizes: this.productSizes, productVariants: this.productVariants },
-      { companyId: currentUser.companyId, productId, color: input.color, colorCode: input.colorCode, createdBy: currentUser.id },
+      {
+        products: this.products,
+        productSizes: this.productSizes,
+        productVariants: this.productVariants,
+      },
+      {
+        companyId: currentUser.companyId,
+        productId,
+        color: input.color,
+        colorCode: input.colorCode,
+        createdBy: currentUser.id,
+      },
     );
     await this.auditService.recordForUser(currentUser, {
       entityType: "product",
       entityId: productId,
       action: "product.color_added",
-      afterJson: { color: input.color, colorCode: input.colorCode, created: result.created, skipped: result.skipped },
+      afterJson: {
+        color: input.color,
+        colorCode: input.colorCode,
+        created: result.created,
+        skipped: result.skipped,
+      },
     });
     return result;
+    });
   }
 
   async createCollection(companyId: string, input: CreateCollectionDto): Promise<Collection> {
     return createCollection({ collections: this.collections }, { ...input, companyId });
   }
 
-  async createProduct(currentUser: AuthenticatedRequestUser, input: CreateProductDto): Promise<Product> {
+  async createProduct(
+    currentUser: AuthenticatedRequestUser,
+    input: CreateProductDto,
+  ): Promise<Product> {
     const product = await createProduct(
       { products: this.products },
       { ...input, companyId: currentUser.companyId, createdBy: input.createdBy ?? currentUser.id },
@@ -138,7 +263,10 @@ export class CatalogService {
     return product;
   }
 
-  async createProductVariant(companyId: string, input: CreateProductVariantDto): Promise<ProductVariant> {
+  async createProductVariant(
+    companyId: string,
+    input: CreateProductVariantDto,
+  ): Promise<ProductVariant> {
     return createProductVariant(
       { productVariants: this.productVariants, products: this.products },
       { ...input, companyId },
@@ -222,7 +350,9 @@ export class CatalogService {
     return this.productVariants.listDistinctColorsByCompany(companyId);
   }
 
-  async listCompanyAttributePresets(companyId: string): Promise<Array<{ name: string; value: string }>> {
+  async listCompanyAttributePresets(
+    companyId: string,
+  ): Promise<Array<{ name: string; value: string }>> {
     return this.productAttributes.listDistinctByCompany(companyId);
   }
 
@@ -268,7 +398,13 @@ export class CatalogService {
     const before = await this.productAttributes.findById(productId, attributeId);
     const attribute = await updateProductAttribute(
       { products: this.products, productAttributes: this.productAttributes },
-      { companyId: currentUser.companyId, productId, attributeId, name: input.name, value: input.value },
+      {
+        companyId: currentUser.companyId,
+        productId,
+        attributeId,
+        name: input.name,
+        value: input.value,
+      },
     );
     await this.auditService.recordForUser(currentUser, {
       entityType: "product",
@@ -280,7 +416,11 @@ export class CatalogService {
     return attribute;
   }
 
-  async removeProductAttribute(currentUser: AuthenticatedRequestUser, productId: string, attributeId: string): Promise<void> {
+  async removeProductAttribute(
+    currentUser: AuthenticatedRequestUser,
+    productId: string,
+    attributeId: string,
+  ): Promise<void> {
     const before = await this.productAttributes.findById(productId, attributeId);
     await removeProductAttribute(
       { products: this.products, productAttributes: this.productAttributes },

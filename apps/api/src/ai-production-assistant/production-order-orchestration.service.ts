@@ -1,10 +1,12 @@
+import { createHash } from "node:crypto";
+import { z } from "zod";
 import { DatabaseTransaction } from "../database/database-transaction";
-import { Inject, Injectable } from "@nestjs/common";
+import { ConflictException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import type { BomItem } from "@garmentos/domain-bom";
 import type { ProductionOrder } from "@garmentos/domain-contract-manufacturing";
 import type { AuditSource } from "@garmentos/domain-audit";
 import type { DocumentEntity } from "@garmentos/domain-document";
-import type { ProductionOrderCostSnapshot } from "@garmentos/shared-types";
+import type { PlaceProductionOrderDto, ProductionOrderCostSnapshot } from "@garmentos/shared-types";
 import type { AuthenticatedRequestUser } from "../auth/current-user.decorator";
 import { AuditService } from "../audit/audit.service";
 import { BomService } from "../bom/bom.service";
@@ -113,6 +115,87 @@ export class ProductionOrderOrchestrationService {
     private readonly auditService: AuditService,
     @Inject(TELEGRAM_CLIENT) private readonly telegramClient: TelegramClient,
   ) {}
+
+  async placeProductionOrder(
+    currentUser: AuthenticatedRequestUser,
+    input: PlaceProductionOrderDto,
+  ): Promise<ProductionOrder> {
+    const { requestId, mode, ...draftInput } = input;
+    const inputHash = createHash("sha256")
+      .update(
+        JSON.stringify({
+          ...draftInput,
+          mode,
+          variants: [...draftInput.variants].sort((a, b) =>
+            a.productVariantId.localeCompare(b.productVariantId),
+          ),
+        }),
+      )
+      .digest("hex");
+    return this.transaction.run(
+      currentUser.companyId,
+      "production_order_request",
+      requestId,
+      async () => {
+        const entries = await this.auditService.listForEntity(
+          currentUser.companyId,
+          "production_order_request",
+          requestId,
+        );
+        const previous = entries.find(
+          (entry) => entry.action === "production_order.request_completed",
+        );
+        if (previous) {
+          const saved = z
+            .object({ orderId: z.string().uuid(), inputHash: z.string() })
+            .parse(previous.afterJson);
+          if (previous.userId !== currentUser.id || saved.inputHash !== inputHash) {
+            throw new ConflictException({
+              code: "PRODUCTION_ORDER_REQUEST_REUSED",
+              message: "Эта попытка уже сохранена с другими данными. Откройте сохранённую партию.",
+            });
+          }
+          const order = await this.contractManufacturingService.findProductionOrderById(
+            currentUser.companyId,
+            saved.orderId,
+          );
+          if (!order)
+            throw new NotFoundException({
+              code: "PRODUCTION_ORDER_NOT_FOUND",
+              message: "Сохранённая партия не найдена",
+            });
+          return order;
+        }
+        const draft = await this.contractManufacturingService.createProductionOrderDraft(
+          currentUser.companyId,
+          {
+            ...draftInput,
+            createdBy: currentUser.id,
+          },
+        );
+        const order =
+          mode === "draft"
+            ? draft
+            : await this.confirmProductionOrder(currentUser.companyId, draft.id, currentUser.id);
+        if (mode === "place") {
+          // Только запись спецификации. PDF и отправка цеху — отдельные явные
+          // действия; внешнего сообщения внутри транзакции не возникает.
+          await this.specificationService.createFromProductionOrder(
+            currentUser.companyId,
+            order.id,
+            currentUser.id,
+          );
+        }
+        await this.auditService.recordForUser(currentUser, {
+          entityType: "production_order_request",
+          entityId: requestId,
+          action: "production_order.request_completed",
+          afterJson: { orderId: order.id, inputHash },
+        });
+        return order;
+      },
+    );
+  }
 
   async createFromText(
     companyId: string,
