@@ -16,6 +16,7 @@ import type { BomApprovalPort, ProductionOrderRepository, WorkshopRepository } f
 
 export interface CreateProductionOrderInput {
   companyId: string;
+  orderNumber?: number;
   productId: string;
   bomId: string;
   workshopId: string;
@@ -55,14 +56,24 @@ export async function createProductionOrderDraft(
 
   const workshop = await deps.workshops.findById(input.companyId, input.workshopId);
   if (!workshop) {
-    throw new DomainError(`Цех ${input.workshopId} не найден в этой компании`, "WORKSHOP_NOT_FOUND");
+    throw new DomainError(
+      `Цех ${input.workshopId} не найден в этой компании`,
+      "WORKSHOP_NOT_FOUND",
+    );
   }
 
-  const bomApproved = await deps.bomApproval.isBomApproved(input.companyId, input.bomId, input.productId);
+  const bomApproved = await deps.bomApproval.isBomApproved(
+    input.companyId,
+    input.bomId,
+    input.productId,
+  );
   assertBomIsApproved(bomApproved, input.bomId);
 
   if (input.sourceProductionOrderId) {
-    const source = await deps.productionOrders.findById(input.companyId, input.sourceProductionOrderId);
+    const source = await deps.productionOrders.findById(
+      input.companyId,
+      input.sourceProductionOrderId,
+    );
     assertSourceOrderExists(input.sourceProductionOrderId, source !== null);
   }
 
@@ -77,6 +88,7 @@ export async function createProductionOrderDraft(
     status: "draft",
     dueDate: input.dueDate ?? null,
     createdBy: input.createdBy ?? null,
+    orderNumber: input.orderNumber ?? null,
     variants: input.variants,
     sourceProductionOrderId: input.sourceProductionOrderId ?? null,
   });

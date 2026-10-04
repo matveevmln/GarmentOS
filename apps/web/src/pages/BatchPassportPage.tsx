@@ -165,12 +165,15 @@ export function BatchPassportPage() {
   // рендерится диалог (вне ветки renderTab("cutting")).
   const [cancelCuttingOrderId, setCancelCuttingOrderId] = useState<string | null>(null);
   const [factWarehouse, setFactWarehouse] = useState("");
+  const [receivePlaceName, setReceivePlaceName] = useState("");
+  const [placeBusy, setPlaceBusy] = useState(false);
   const [warehouses, setWarehouses] = useState<WarehouseResponseDto[]>([]);
   // Приёмка партии прямо с паспорта (см. комментарий у кнопки «Принять
   // партию» ниже) — то же действие и тот же эндпоинт, что и диалог на
   // /production-orders, план/факт по каждому варианту редактируемый.
   const [showReceiveDialog, setShowReceiveDialog] = useState(false);
   const [receiveWarehouseId, setReceiveWarehouseId] = useState("");
+  const [receiveChecked, setReceiveChecked] = useState(false);
   const [receiveQuantities, setReceiveQuantities] = useState<Record<string, number>>({});
   const [isReceiving, setIsReceiving] = useState(false);
   const [allocations, setAllocations] = useState<Record<string, number | undefined>>({});
@@ -707,13 +710,25 @@ export function BatchPassportPage() {
     for (const variant of passport.variants) quantities[variant.productVariantId] = Number(variant.quantity);
     setReceiveQuantities(quantities);
     setReceiveWarehouseId(warehouses.length === 1 && warehouses[0] ? warehouses[0].id : "");
+    setReceiveChecked(false);
     setShowReceiveDialog(true);
+  };
+
+  const saveReceivePlace = async () => {
+    if (!receivePlaceName.trim()) { toast.error("Укажите, где принимаете изделия"); return; }
+    setPlaceBusy(true);
+    try {
+      const place = await apiRequest<WarehouseResponseDto>("/warehouses", { method: "POST", body: { name: receivePlaceName.trim(), type: "own" } });
+      setWarehouses(prev => [...prev, place]); setReceiveWarehouseId(place.id);
+    } catch (err) { toast.error(err instanceof Error ? err.message : "Не удалось сохранить место приёмки"); }
+    finally { setPlaceBusy(false); }
   };
 
   const receivePlannedTotal = passport?.variants.reduce((sum, v) => sum + Number(v.quantity), 0) ?? 0;
   const receiveActualTotal = Object.values(receiveQuantities).reduce((sum, value) => sum + (value || 0), 0);
 
   const submitReceiveFromPassport = async () => {
+    if (!receiveChecked) { toast.error("Проверьте фактические количества и подтвердите приёмку"); return; }
     if (!id || !passport || !receiveWarehouseId) {
       toast.error("Выберите склад для приёмки");
       return;
@@ -1744,6 +1759,26 @@ export function BatchPassportPage() {
         }
       />
 
+      <Card className="mb-4 p-4 md:p-5" aria-label="Следующий шаг партии">
+        <CardTitle className="mb-2">Следующий шаг</CardTitle>
+        {passport.status === "draft" ? <Button size="lg" loading={isConfirming} onClick={() => void confirmOrder()}>Подтвердить партию</Button>
+          : passport.status === "ready_for_pickup" || passport.status === "shipped_to_fulfillment" ? <>
+            <p className="mb-3 text-sm text-muted-foreground">Когда получите изделия, сверяйте фактические количества при приёмке.</p>
+            <Button size="lg" onClick={openReceiveDialog}>Принять партию</Button>
+            {passport.status === "ready_for_pickup" && <Button size="lg" variant="ghost" loading={isChangingStatus} onClick={() => void changeOrderStatus("shipped_to_fulfillment")}>Цех отправил изделия</Button>}
+          </> : NEXT_STATUS[passport.status] ? <>
+            <p className="mb-3 text-sm text-muted-foreground">Отметьте следующий этап, когда цех сообщит о нём.</p>
+            <Button size="lg" loading={isChangingStatus} onClick={() => void changeOrderStatus(NEXT_STATUS[passport.status])}>{ORDER_STATUS_LABELS[NEXT_STATUS[passport.status]]}</Button>
+          </> : passport.status === "received" ? <>
+            <p className="mb-3 text-sm text-muted-foreground">Изделия приняты. {qcResult ? "Результат проверки качества сохранён." : "Проверьте качество и укажите годные изделия и брак."}</p>
+            {qcResult ? <Button size="lg" loading={isCompleting} onClick={requestCompleteOrder}>Завершить партию</Button>
+              : <Button size="lg" onClick={() => document.getElementById("party-quality")?.scrollIntoView({ behavior: "smooth", block: "start" })}>Проверить качество</Button>}
+          </> : passport.status === "completed" ? <>
+            <p className="mb-3 text-sm text-muted-foreground">Партия закрыта. Размеры и цвета можно использовать снова.</p>
+            <Button size="lg" onClick={() => void navigate(`/new-batch?productId=${passport.product.id}`)}>+ Новая партия этой модели</Button>
+          </> : <p className="text-sm">Партия отменена. История сохранена.</p>}
+      </Card>
+
       {/* Повторное формирование расходует номер спецификации по договору
           цеха и делает прежнюю редакцию неактуальной — поэтому оно требует
           явного подтверждения, а не одного нажатия. */}
@@ -1863,60 +1898,17 @@ export function BatchPassportPage() {
         </div>
         <div className="p-4 md:p-5">
           {isProductionStage(passport.status) ? (
-            <ProductionStepper
-              current={passport.status}
-              cutting={cuttingStage}
-              hasSpecification={hasSpecificationStage}
-              materialsChecked={hasMaterialsStage}
-            />
+            <Accordion title="Подробные этапы производства">
+              <ProductionStepper
+                current={passport.status}
+                cutting={cuttingStage}
+                hasSpecification={hasSpecificationStage}
+                materialsChecked={hasMaterialsStage}
+              />
+            </Accordion>
           ) : (
             <p className="t-secondary">Заказ отменён — партия вышла из производственной шкалы.</p>
           )}
-
-          {/* Подтверждение черновика (владелец проекта, 2026-09-22) — тот же
-              эндпоинт, что и у ProductionOrdersPage.confirmOrder. Раньше
-              единственным местом подтвердить свежий черновик был список
-              заказов пошива — на паспорте черновика не было ни одного
-              действия вообще. */}
-          {passport.status === "draft" ? (
-            <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-border pt-4">
-              <Button type="button" size="sm" loading={isConfirming} onClick={() => void confirmOrder()}>
-                Подтвердить
-              </Button>
-            </div>
-          ) : null}
-
-          {/* Текущее действие цеха — ровно одна кнопка на стадию (P0-1: переход
-              без Telegram, канал не настроен ни для одного цеха на пилоте).
-              ПРОМПТ №3, раздел 8 — sewing_completed/shipped_to_fulfillment
-              такие же явные отдельные шаги, не пропускаются автоматически. */}
-          {NEXT_STATUS[passport.status] || passport.status === "ready_for_pickup" || passport.status === "shipped_to_fulfillment" ? (
-            <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-border pt-4">
-              <span className="t-secondary">Цех сообщил:</span>
-              {NEXT_STATUS[passport.status] ? (
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="secondary"
-                  loading={isChangingStatus}
-                  onClick={() => void changeOrderStatus(NEXT_STATUS[passport.status])}
-                >
-                  {ORDER_STATUS_LABELS[NEXT_STATUS[passport.status]]}
-                </Button>
-              ) : null}
-              {/* Приёмка партии (ПРОМПТ №3, раздел 8 допускает вход из
-                  "ready_for_pickup" и "shipped_to_fulfillment") — раньше была
-                  доступна только со списка заказов пошива; на паспорте партии
-                  "shipped_to_fulfillment" был тупиком: далее по шкале действий
-                  не было вообще ни одной кнопки (аудит пользовательского пути,
-                  owner, 2026-09-21). */}
-              {passport.status === "ready_for_pickup" || passport.status === "shipped_to_fulfillment" ? (
-                <Button type="button" size="sm" onClick={() => openReceiveDialog()}>
-                  Принять партию
-                </Button>
-              ) : null}
-            </div>
-          ) : null}
 
           {/* Откат статуса на шаг назад — вынесено в отдельный, независимый
               от "Цех сообщил" блок (найдено владельцем проекта, 2026-09-22):
@@ -2118,16 +2110,21 @@ export function BatchPassportPage() {
 
       {/* Приёмка партии — см. openReceiveDialog/submitReceiveFromPassport выше. */}
       <Dialog open={showReceiveDialog} onOpenChange={setShowReceiveDialog}>
-        <DialogContent className="max-w-xl">
+        <DialogContent className="max-w-xl max-md:inset-0 max-md:left-0 max-md:top-0 max-md:h-dvh max-md:max-h-dvh max-md:w-full max-md:translate-x-0 max-md:translate-y-0 max-md:rounded-none max-md:pb-[calc(1rem+env(safe-area-inset-bottom))]">
           <DialogHeader>
             <DialogTitle>Приёмка партии</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
             <div>
-              <label className="t-meta mb-1.5 block">Склад приёмки</label>
+              {!warehouses.length && <div className="mb-4 flex flex-col gap-2">
+                <Field label="Где принимаете изделия?"><Input aria-label="Где принимаете изделия?" className="min-h-11 text-base" placeholder="Например, мой офис" value={receivePlaceName} onChange={event => setReceivePlaceName(event.target.value)} /></Field>
+                <Button size="lg" variant="secondary" loading={placeBusy} onClick={() => void saveReceivePlace()}>Сохранить место приёмки</Button>
+                <p className="text-sm text-muted-foreground">Достаточно указать один раз. В следующих партиях оно подставится само.</p>
+              </div>}
+              <label className="t-meta mb-1.5 block">Место приёмки</label>
               <Select value={receiveWarehouseId} onValueChange={setReceiveWarehouseId}>
                 <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Выберите склад" />
+                  <SelectValue placeholder="Выберите место приёмки" />
                 </SelectTrigger>
                 <SelectContent>
                   {warehouses.map((warehouse) => (
@@ -2172,11 +2169,16 @@ export function BatchPassportPage() {
               <p className="t-meta text-warning">Отклонение от плана: {formatQuantity(receiveActualTotal - receivePlannedTotal)} шт.</p>
             ) : null}
           </div>
+          <p className="my-3 text-sm text-muted-foreground">Факт заполнен по заказу. Сверьте его с полученными изделиями и исправьте расхождения. Проверка качества — следующий отдельный шаг.</p>
+          <label className="my-3 flex min-h-11 items-center gap-3 text-base">
+            <input type="checkbox" className="h-5 w-5" checked={receiveChecked} onChange={event => setReceiveChecked(event.target.checked)} />
+            Проверил фактические количества
+          </label>
           <DialogFooter>
             <Button type="button" variant="secondary" onClick={() => setShowReceiveDialog(false)}>
               Отмена
             </Button>
-            <Button type="button" loading={isReceiving} disabled={!receiveWarehouseId} onClick={() => void submitReceiveFromPassport()}>
+            <Button type="button" loading={isReceiving} size="lg" disabled={!receiveWarehouseId || !receiveChecked} onClick={() => void submitReceiveFromPassport()}>
               Принять партию
             </Button>
           </DialogFooter>
@@ -2190,7 +2192,7 @@ export function BatchPassportPage() {
           получено/годных/брак/произведено/компенсировано/осталось,
           деталировка дефектов, «Добавить компенсацию» и «Компенсировано
           полностью» показаны здесь ровно так же, как раньше. */}
-      <Card className="mt-4 overflow-hidden p-0">
+      <Card id="party-quality" className="mt-4 scroll-mt-20 overflow-hidden p-0">
         <div className="border-b border-border bg-muted/20 px-4 py-3 md:px-5">
           <CardTitle className="text-[16px]">ОТК и брак</CardTitle>
         </div>
@@ -2256,10 +2258,10 @@ export function BatchPassportPage() {
                 <NumberInput value={qcReceivedFact ?? undefined} onChange={() => undefined} disabled />
               </Field>
               <Field label="Годных, шт">
-                <NumberInput value={qcGood} onChange={setQcGood} min={0} />
+                <NumberInput className="min-h-11 text-base" aria-label="Годных, шт" value={qcGood} onChange={setQcGood} min={0} />
               </Field>
               <Field label="Брак, шт">
-                <NumberInput value={qcDefect} onChange={setQcDefect} min={0} />
+                <NumberInput className="min-h-11 text-base" aria-label="Брак, шт" value={qcDefect} onChange={setQcDefect} min={0} />
               </Field>
               {qcDefect !== undefined && qcDefect > 0 ? (
                 <Field label="Причина брака" className="sm:col-span-3">
@@ -2276,7 +2278,7 @@ export function BatchPassportPage() {
               <div className="sm:col-span-3">
                 <Button
                   type="button"
-                  size="sm"
+                  size="lg"
                   loading={isSubmittingQc}
                   disabled={qcGood === undefined || qcDefect === undefined}
                   onClick={() => void submitQc()}
@@ -2456,7 +2458,7 @@ export function BatchPassportPage() {
       </div>
 
       <Dialog open={nextOrderOpen} onOpenChange={setNextOrderOpen}>
-        <DialogContent className="max-w-xl">
+        <DialogContent className="max-w-xl max-md:inset-0 max-md:left-0 max-md:top-0 max-md:h-dvh max-md:max-h-dvh max-md:w-full max-md:translate-x-0 max-md:translate-y-0 max-md:rounded-none max-md:pb-[calc(1rem+env(safe-area-inset-bottom))]">
           <DialogHeader>
             <DialogTitle>Следующий заказ</DialogTitle>
             <DialogDescription>

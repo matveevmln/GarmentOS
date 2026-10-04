@@ -125,17 +125,39 @@ export class ContractManufacturingService {
     }
   }
 
-  async createProductionOrderDraft(companyId: string, input: CreateProductionOrderDto): Promise<ProductionOrder> {
-    await this.assertVariantsBelongToProduct(companyId, input.productId, input.variants);
-    // ПРОМПТ №3, раздел 8 — bomId необязателен: визард с матрицей размер×цвет
-    // не заставляет выбирать BOM, backend сам находит/заводит approved BOM
-    // модели прозрачно для пользователя (тот же путь, что и /from-quantity).
-    const bomId = input.bomId ?? (await this.bomApproval.ensureApprovedBomForProduct(companyId, input.productId, input.createdBy ?? null));
+  async createProductionOrderDraft(
+    companyId: string,
+    input: CreateProductionOrderDto & { orderNumber?: number },
+  ): Promise<ProductionOrder> {
+    return this.transaction.run(companyId, "product", input.productId, async () => {
+      const product = await this.catalogService.findProductById(companyId, input.productId);
+      if (!product || product.deletedAt || product.status === "discontinued") {
+        throw new BadRequestException({
+          code: "PRODUCT_UNAVAILABLE",
+          message: "Выберите доступную модель",
+        });
+      }
+      await this.assertVariantsBelongToProduct(companyId, input.productId, input.variants);
+      // ПРОМПТ №3, раздел 8 — bomId необязателен: визард с матрицей размер×цвет
+      // не заставляет выбирать BOM, backend сам находит/заводит approved BOM
+      // модели прозрачно для пользователя (тот же путь, что и /from-quantity).
+      const bomId =
+        input.bomId ??
+        (await this.bomApproval.ensureApprovedBomForProduct(
+          companyId,
+          input.productId,
+          input.createdBy ?? null,
+        ));
 
-    return createProductionOrderDraft(
-      { productionOrders: this.productionOrders, workshops: this.workshops, bomApproval: this.bomApproval },
-      { ...input, bomId, companyId },
-    );
+      return createProductionOrderDraft(
+        {
+          productionOrders: this.productionOrders,
+          workshops: this.workshops,
+          bomApproval: this.bomApproval,
+        },
+        { ...input, bomId, companyId },
+      );
+    });
   }
 
   // «Указываю только общее количество, размерный ряд распределяется
@@ -150,9 +172,16 @@ export class ContractManufacturingService {
     companyId: string,
     input: CreateProductionOrderFromQuantityDto,
   ): Promise<ProductionOrder> {
+    return this.transaction.run(companyId, "product", input.productId, async () => {
+      const product = await this.catalogService.findProductById(companyId, input.productId);
+      if (!product || product.deletedAt || product.status === "discontinued") throw new BadRequestException({ code: "PRODUCT_UNAVAILABLE", message: "Выберите доступную модель" });
+
     const variants = await this.catalogService.listProductVariants(companyId, input.productId);
     if (variants.length === 0) {
-      throw new CatalogDomainError(`У модели ${input.productId} нет ни одного SKU`, "PRODUCT_HAS_NO_VARIANTS");
+      throw new CatalogDomainError(
+        `У модели ${input.productId} нет ни одного SKU`,
+        "PRODUCT_HAS_NO_VARIANTS",
+      );
     }
     const ratios = await this.loadSizeRatios(companyId, input.productId);
 
@@ -183,7 +212,13 @@ export class ContractManufacturingService {
     // передан явно, находим/заводим approved BOM модели прозрачно для
     // пользователя (пустой BOM = материалы для модели пока не описаны, не
     // блокирует создание заказа).
-    const bomId = input.bomId ?? (await this.bomApproval.ensureApprovedBomForProduct(companyId, input.productId, input.createdBy ?? null));
+    const bomId =
+      input.bomId ??
+      (await this.bomApproval.ensureApprovedBomForProduct(
+        companyId,
+        input.productId,
+        input.createdBy ?? null,
+      ));
 
     return this.createProductionOrderDraft(companyId, {
       productId: input.productId,
@@ -195,6 +230,7 @@ export class ContractManufacturingService {
       dueDate: input.dueDate,
       createdBy: input.createdBy,
       variants: variantDrafts,
+    });
     });
   }
 
@@ -240,16 +276,15 @@ export class ContractManufacturingService {
   ): Promise<PreviewProductionOrderVariantsResponseDto> {
     const variants = await this.catalogService.listProductVariants(companyId, input.productId);
     if (variants.length === 0) {
-      throw new CatalogDomainError(`У модели ${input.productId} нет ни одного SKU`, "PRODUCT_HAS_NO_VARIANTS");
+      throw new CatalogDomainError(
+        `У модели ${input.productId} нет ни одного SKU`,
+        "PRODUCT_HAS_NO_VARIANTS",
+      );
     }
     const ratios = await this.loadSizeRatios(companyId, input.productId);
 
-    // Порядок размеров — из раскладки модели; размеры без раскладки идут
-    // следом в порядке появления среди вариантов.
-    const orderedSizes = [...ratios.keys()];
-    for (const variant of variants) {
-      if (!orderedSizes.includes(variant.size)) orderedSizes.push(variant.size);
-    }
+    // Настроенный ряд — источник новых партий. Старые SKU остаются для истории.
+    const orderedSizes = ratios.size ? [...ratios.keys()] : [...new Set(variants.map(row => row.size))];
 
     const rows: PreviewProductionOrderVariantsResponseDto["rows"] = [];
     const missingVariants: PreviewProductionOrderVariantsResponseDto["missingVariants"] = [];
@@ -340,10 +375,19 @@ export class ContractManufacturingService {
     companyId: string,
     input: Omit<CreateProductionOrderFromSpecificationInput, "companyId">,
   ): Promise<ProductionOrder> {
+    return this.transaction.run(companyId, "product", input.productId, async () => {
+      const product = await this.catalogService.findProductById(companyId, input.productId);
+      if (!product || product.deletedAt || product.status === "discontinued") throw new BadRequestException({ code: "PRODUCT_UNAVAILABLE", message: "Выберите доступную модель" });
+
     return createProductionOrderFromSpecification(
-      { productionOrders: this.productionOrders, workshops: this.workshops, bomApproval: this.bomApproval },
+      {
+        productionOrders: this.productionOrders,
+        workshops: this.workshops,
+        bomApproval: this.bomApproval,
+      },
       { ...input, companyId },
     );
+    });
   }
 
   async findWorkshopById(companyId: string, id: string): Promise<Workshop | null> {

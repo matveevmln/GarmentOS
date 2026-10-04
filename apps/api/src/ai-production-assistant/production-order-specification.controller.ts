@@ -3,6 +3,7 @@ import { ApiTags } from "@nestjs/swagger";
 import { createZodDto } from "nestjs-zod";
 import {
   cancelProductionOrderSchema,
+  placeProductionOrderSchema,
   documentResponseSchema,
   productionOrderResponseSchema,
   type DocumentResponseDto,
@@ -13,6 +14,7 @@ import { RequirePermissions } from "../auth/require-permissions.decorator";
 import { ProductionOrderOrchestrationService } from "./production-order-orchestration.service";
 
 class CancelProductionOrderDto extends createZodDto(cancelProductionOrderSchema) {}
+class PlaceProductionOrderDto extends createZodDto(placeProductionOrderSchema) {}
 
 // Генерация спецификации по подтверждённому заказу пошива + отправка цеху в
 // Telegram, если чат привязан (Итерация 7, вертикальный сценарий).
@@ -23,6 +25,17 @@ class CancelProductionOrderDto extends createZodDto(cancelProductionOrderSchema)
 @Controller("production-orders")
 export class ProductionOrderSpecificationController {
   constructor(private readonly orchestrationService: ProductionOrderOrchestrationService) {}
+
+  @RequirePermissions("contract_manufacturing.write")
+  @Post("place")
+  async place(
+    @Body() body: PlaceProductionOrderDto,
+    @CurrentUser() currentUser: AuthenticatedRequestUser,
+  ): Promise<ProductionOrderResponseDto> {
+    return productionOrderResponseSchema.parse(
+      await this.orchestrationService.placeProductionOrder(currentUser, body),
+    );
+  }
 
   @RequirePermissions("contract_manufacturing.write")
   @Post(":id/confirm")
@@ -62,7 +75,11 @@ export class ProductionOrderSpecificationController {
     @Param("id") id: string,
     @CurrentUser() currentUser: AuthenticatedRequestUser,
   ): Promise<DocumentResponseDto> {
-    const document = await this.orchestrationService.generateAndSendAct(currentUser.companyId, id, currentUser.id);
+    const document = await this.orchestrationService.generateAndSendAct(
+      currentUser.companyId,
+      id,
+      currentUser.id,
+    );
     return documentResponseSchema.parse(document);
   }
 
@@ -80,7 +97,11 @@ export class ProductionOrderSpecificationController {
     @Body() body: CancelProductionOrderDto,
     @CurrentUser() currentUser: AuthenticatedRequestUser,
   ): Promise<ProductionOrderResponseDto> {
-    const productionOrder = await this.orchestrationService.cancelProductionOrder(currentUser, id, body.reason);
+    const productionOrder = await this.orchestrationService.cancelProductionOrder(
+      currentUser,
+      id,
+      body.reason,
+    );
     return productionOrderResponseSchema.parse(productionOrder);
   }
 }

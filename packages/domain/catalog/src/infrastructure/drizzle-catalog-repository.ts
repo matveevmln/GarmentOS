@@ -1,7 +1,7 @@
 import { collections, productAttributes, productSizes, products, productVariants, type DbOrTx } from "@garmentos/db-schema";
 import { and, asc, eq, ilike } from "drizzle-orm";
 import type { Collection } from "../domain/collection";
-import type { Product } from "../domain/product";
+import type { Product, ProductStatus } from "../domain/product";
 import type { ProductVariant } from "../domain/product-variant";
 import type { ProductSize, ProductSizeDraft } from "../domain/product-size";
 import type { ProductAttribute, ProductAttributeDraft } from "../domain/product-attribute";
@@ -132,6 +132,13 @@ export class DrizzleProductRepository implements ProductRepository {
 
   // undefined — «не трогать» (PATCH одним полем не должен стирать
   // остальные), null — «явно очистить» (например, description: null).
+  async setStatus(companyId: string, id: string, status: ProductStatus): Promise<Product> {
+    const [row] = await this.db.update(products).set({ status, updatedAt: new Date() })
+      .where(and(eq(products.companyId, companyId), eq(products.id, id))).returning();
+    if (!row) throw new Error("Модель не найдена");
+    return toProduct(row);
+  }
+
   async updateDetails(companyId: string, id: string, input: ProductDetailsInput): Promise<Product> {
     const patch: Partial<typeof products.$inferInsert> = {};
     if (input.name !== undefined) patch.name = input.name;

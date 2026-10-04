@@ -35,6 +35,8 @@ import { DefectService } from "./defect/defect.service";
 import { CuttingService } from "./cutting/cutting.service";
 import { SpecificationService } from "./specification/specification.service";
 import { ProductionOrderOrchestrationService } from "./ai-production-assistant/production-order-orchestration.service";
+import { CatalogService } from "./catalog/catalog.service";
+import { AuditService } from "./audit/audit.service";
 import { DatabaseTransaction } from "./database/database-transaction";
 
 const db = createDb(process.env.DATABASE_URL!);
@@ -164,6 +166,7 @@ describe("Целостность связей между бизнес-модул
       await db.execute(
         sql`delete from purchase_order_items where purchase_order_id in (select id from purchase_orders where company_id = ${user.companyId})`,
       );
+      await db.execute(sql`update specifications set production_order_id = null where company_id = ${user.companyId}`);
       await db.execute(sql`delete from production_orders where company_id = ${user.companyId}`);
       await db.execute(
         sql`delete from specification_items where specification_id in (select id from specifications where company_id = ${user.companyId})`,
@@ -181,7 +184,12 @@ describe("Целостность связей между бизнес-модул
           sql`delete from ${sql.identifier(table)} where company_id in (${ids[0]}, ${ids[1]})`,
         );
       }
-      await db.execute(sql`delete from product_variants where product_id in (select id from products where company_id in (${ids[0]}, ${ids[1]}))`);
+      await db.execute(
+        sql`delete from product_sizes where product_id in (select id from products where company_id in (${ids[0]}, ${ids[1]}))`,
+      );
+      await db.execute(
+        sql`delete from product_variants where product_id in (select id from products where company_id in (${ids[0]}, ${ids[1]}))`,
+      );
       await db.execute(sql`delete from products where company_id in (${ids[0]}, ${ids[1]})`);
       await db.delete(users).where(eq(users.id, user.id));
       for (const id of ids) await db.delete(companies).where(eq(companies.id, id));
@@ -243,25 +251,21 @@ describe("Целостность связей между бизнес-модул
       .insert(cuttingOrders)
       .values({ companyId: user.companyId, productionOrderId, number: 1, status: "issued" })
       .returning();
-    await db
-      .insert(cuttingOrderMaterials)
-      .values(
-        materialIds.map((materialId) => ({
-          cuttingOrderId: cutting.id,
-          materialId,
-          unit: "m" as const,
-          requiredQuantity: "20",
-        })),
-      );
-    await db
-      .insert(cuttingOrderResults)
-      .values(
-        variantIds.map((productVariantId) => ({
-          cuttingOrderId: cutting.id,
-          productVariantId,
-          plannedQuantity: "10",
-        })),
-      );
+    await db.insert(cuttingOrderMaterials).values(
+      materialIds.map((materialId) => ({
+        cuttingOrderId: cutting.id,
+        materialId,
+        unit: "m" as const,
+        requiredQuantity: "20",
+      })),
+    );
+    await db.insert(cuttingOrderResults).values(
+      variantIds.map((productVariantId) => ({
+        cuttingOrderId: cutting.id,
+        productVariantId,
+        plannedQuantity: "10",
+      })),
+    );
     return cutting.id;
   }
 
@@ -581,38 +585,245 @@ describe("Целостность связей между бизнес-модул
   });
 
   it("закупка не может ссылаться на материал другой компании", async () => {
-    const [foreign] = await db.insert(materials).values({ companyId: foreignCompanyId, name: "Чужая ткань", type: "fabric", unit: "m" }).returning();
-    await expect(procurement.createPurchaseOrderDraft(user.companyId, {
-      supplierId, items: [{ materialId: foreign.id, quantity: 10, unitPrice: 2 }],
-    })).rejects.toMatchObject({ status: 404 });
+    const [foreign] = await db
+      .insert(materials)
+      .values({ companyId: foreignCompanyId, name: "Чужая ткань", type: "fabric", unit: "m" })
+      .returning();
+    await expect(
+      procurement.createPurchaseOrderDraft(user.companyId, {
+        supplierId,
+        items: [{ materialId: foreign.id, quantity: 10, unitPrice: 2 }],
+      }),
+    ).rejects.toMatchObject({ status: 404 });
   });
 
   it("партия не может содержать размер и цвет другой модели", async () => {
-    const [other] = await db.insert(products).values({ companyId: user.companyId, name: "Другая модель", code: randomUUID() }).returning();
-    const [variant] = await db.insert(productVariants).values({ productId: other.id, size: "M", color: "Синий", skuCode: randomUUID() }).returning();
-    await expect(production.createProductionOrderDraft(user.companyId, {
-      productId, bomId, workshopId, plannedQuantity: 10, agreedUnitPrice: 100,
-      variants: [{ productVariantId: variant.id, quantity: 10 }],
-    })).rejects.toMatchObject({ status: 400 });
+    const [other] = await db
+      .insert(products)
+      .values({ companyId: user.companyId, name: "Другая модель", code: randomUUID() })
+      .returning();
+    const [variant] = await db
+      .insert(productVariants)
+      .values({ productId: other.id, size: "M", color: "Синий", skuCode: randomUUID() })
+      .returning();
+    await expect(
+      production.createProductionOrderDraft(user.companyId, {
+        productId,
+        bomId,
+        workshopId,
+        plannedQuantity: 10,
+        agreedUnitPrice: 100,
+        variants: [{ productVariantId: variant.id, quantity: 10 }],
+      }),
+    ).rejects.toMatchObject({ status: 400 });
   });
 
   it("подтверждение партии не сохраняет статус и снимок при ошибке аудита", async () => {
     const id = await newProductionOrder();
     await db.update(productionOrders).set({ status: "draft" }).where(eq(productionOrders.id, id));
     const { AuditService } = await import("./audit/audit.service");
-    vi.spyOn(app.get(AuditService), "record").mockRejectedValueOnce(new Error("Сбой аудита подтверждения"));
+    vi.spyOn(app.get(AuditService), "record").mockRejectedValueOnce(
+      new Error("Сбой аудита подтверждения"),
+    );
     const service = app.get(ProductionOrderOrchestrationService);
-    await expect(service.confirmProductionOrder(user.companyId, id, user.id)).rejects.toThrow("Сбой аудита подтверждения");
-    expect(await production.findProductionOrderById(user.companyId, id)).toMatchObject({ status: "draft", costSnapshot: null });
+    await expect(service.confirmProductionOrder(user.companyId, id, user.id)).rejects.toThrow(
+      "Сбой аудита подтверждения",
+    );
+    expect(await production.findProductionOrderById(user.companyId, id)).toMatchObject({
+      status: "draft",
+      costSnapshot: null,
+    });
     vi.restoreAllMocks();
-    await expect(service.confirmProductionOrder(user.companyId, id, user.id)).resolves.toMatchObject({ status: "placed" });
+    await expect(
+      service.confirmProductionOrder(user.companyId, id, user.id),
+    ).resolves.toMatchObject({ status: "placed" });
   });
 
   it("повтор одной строки при создании партии не превышает количество спецификации", async () => {
     const { service, id } = await approvedSpecification();
-    await expect(service.createProductionOrder(user.companyId, id, {
-      items: [1, 2].map(() => ({ productVariantId: variantIds[0], quantity: 10 })),
-    }, user.id)).rejects.toMatchObject({ status: 400 });
-    expect((await service.getAvailableQuantity(user.companyId, id)).items.reduce((sum, row) => sum + row.availableQuantity, 0)).toBe(20);
+    await expect(
+      service.createProductionOrder(
+        user.companyId,
+        id,
+        {
+          items: [1, 2].map(() => ({ productVariantId: variantIds[0], quantity: 10 })),
+        },
+        user.id,
+      ),
+    ).rejects.toMatchObject({ status: 400 });
+    expect(
+      (await service.getAvailableQuantity(user.companyId, id)).items.reduce(
+        (sum, row) => sum + row.availableQuantity,
+        0,
+      ),
+    ).toBe(20);
   });
+  const placementInput = () => ({
+    requestId: randomUUID(),
+    mode: "place" as const,
+    productId,
+    workshopId,
+    plannedQuantity: 20,
+    agreedUnitPrice: 700,
+    variants: variantIds.map((productVariantId) => ({ productVariantId, quantity: 10 })),
+  });
+
+  it("размещение создаёт одну связанную спецификацию и один неизменяемый снимок", async () => {
+    const input = placementInput();
+    const order = await app
+      .get(ProductionOrderOrchestrationService)
+      .placeProductionOrder(user, input);
+    expect(order.status).toBe("placed");
+    expect(order.orderNumber).toBeGreaterThan(0);
+    expect(order.costSnapshot).toBeTruthy();
+    const result = await db.execute(
+      sql`select id, total_quantity, total_sum from specifications where company_id=${user.companyId} and production_order_id=${order.id}`,
+    );
+    expect(result).toHaveLength(1);
+    expect(Number(result[0].total_quantity)).toBe(20);
+    expect(Number(result[0].total_sum)).toBe(14000);
+  });
+
+  it("одновременное размещение и повтор после потерянного ответа возвращают одну партию", async () => {
+    const service = app.get(ProductionOrderOrchestrationService);
+    const input = placementInput();
+    const orders = await Promise.all([
+      service.placeProductionOrder(user, input),
+      service.placeProductionOrder(user, input),
+    ]);
+    expect(orders[0].id).toBe(orders[1].id);
+    expect((await service.placeProductionOrder(user, input)).id).toBe(orders[0].id);
+    await expect(
+      service.placeProductionOrder(user, { ...input, agreedUnitPrice: 800 }),
+    ).rejects.toThrow("Эта попытка");
+    await expect(
+      service.placeProductionOrder({ ...user, id: randomUUID() }, input),
+    ).rejects.toThrow("Эта попытка");
+    const specs = await db.execute(
+      sql`select id from specifications where production_order_id=${orders[0].id}`,
+    );
+    expect(specs).toHaveLength(1);
+  });
+
+  it("сбой спецификации откатывает всю партию; повтор этой попытки успешно размещает её", async () => {
+    const service = app.get(ProductionOrderOrchestrationService);
+    const input = placementInput();
+    const before = await production.listProductionOrders(user.companyId);
+    const counterBefore = await db.execute(sql`select next_production_order_number from companies where id=${user.companyId}`);
+    const spy = vi
+      .spyOn(app.get(SpecificationService), "createFromProductionOrder")
+      .mockRejectedValueOnce(new Error("specification-save-failed"));
+    await expect(service.placeProductionOrder(user, input)).rejects.toThrow(
+      "specification-save-failed",
+    );
+    expect(await production.listProductionOrders(user.companyId)).toHaveLength(before.length);
+    expect(
+      await app
+        .get(AuditService)
+        .listForEntity(user.companyId, "production_order_request", input.requestId),
+    ).toHaveLength(0);
+    expect(await db.execute(sql`select next_production_order_number from companies where id=${user.companyId}`)).toEqual(counterBefore);
+    spy.mockRestore();
+    expect((await service.placeProductionOrder(user, input)).status).toBe("placed");
+  });
+
+  it("черновик сохраняется однократно без подтверждения и спецификации", async () => {
+    const service = app.get(ProductionOrderOrchestrationService);
+    const input = { ...placementInput(), mode: "draft" as const };
+    const first = await service.placeProductionOrder(user, input);
+    expect(first.status).toBe("draft");
+    expect(first.costSnapshot).toBeNull();
+    expect((await service.placeProductionOrder(user, input)).id).toBe(first.id);
+    expect(
+      await db.execute(sql`select id from specifications where production_order_id=${first.id}`),
+    ).toHaveLength(0);
+  });
+
+  it("подготовка модели атомарна и устойчива к повтору", async () => {
+    const catalog = app.get(CatalogService);
+    const input = {
+      requestId: randomUUID(),
+      name: "Новая модель",
+      sizes: [
+        { size: "48-50", ratioWeight: 1 },
+        { size: "52-54", ratioWeight: 1 },
+      ],
+      colors: ["Петроль"],
+    };
+    const before = await catalog.listProducts(user.companyId);
+    const spy = vi
+      .spyOn(catalog, "addProductColor")
+      .mockRejectedValueOnce(new Error("color-save-failed"));
+    await expect(catalog.quickProduct(user, input)).rejects.toThrow("color-save-failed");
+    expect(await catalog.listProducts(user.companyId)).toHaveLength(before.length);
+    spy.mockRestore();
+    const models = await Promise.all([
+      catalog.quickProduct(user, input),
+      catalog.quickProduct(user, input),
+    ]);
+    expect(models[0].id).toBe(models[1].id);
+    expect(await catalog.listProductVariants(user.companyId, models[0].id)).toHaveLength(2);
+    await expect(catalog.quickProduct(user, { ...input, name: "Другая" })).rejects.toThrow(
+      "Эта попытка",
+    );
+    await expect(
+      catalog.quickProduct(
+        { ...user, companyId: foreignCompanyId },
+        { ...input, requestId: randomUUID(), productId: models[0].id },
+      ),
+    ).rejects.toThrow("вашей компании");
+  });
+
+  it("новый размер создаёт варианты существующих цветов и сохраняет старые SKU", async () => {
+    const catalog = app.get(CatalogService);
+    const model = await catalog.quickProduct(user, {
+      requestId: randomUUID(),
+      name: "Размеры",
+      sizes: [{ size: "M", ratioWeight: 1 }],
+      colors: ["Синий"],
+    });
+    const before = await catalog.listProductVariants(user.companyId, model.id);
+    await catalog.replaceProductSizes(user, model.id, {
+      sizes: [
+        { size: "M", ratioWeight: 1 },
+        { size: "L", ratioWeight: 1 },
+      ],
+    });
+    const after = await catalog.listProductVariants(user.companyId, model.id);
+    expect(after).toHaveLength(2);
+    expect(after.find((row) => row.size === "M")).toEqual(before[0]);
+    expect(after.find((row) => row.size === "L")?.color).toBe("Синий");
+  });
+
+  it("архив сохраняет историю и блокирует новую партию до восстановления", async () => {
+    const catalog = app.get(CatalogService);
+    const order = await app
+      .get(ProductionOrderOrchestrationService)
+      .placeProductionOrder(user, placementInput());
+    try {
+      await catalog.setProductStatus(user, productId, "discontinued");
+      expect((await production.findProductionOrderById(user.companyId, order.id))?.id).toBe(
+        order.id,
+      );
+      await expect(
+        app.get(ProductionOrderOrchestrationService).placeProductionOrder(user, placementInput()),
+      ).rejects.toThrow("Выберите доступную модель");
+      await expect(
+        catalog.setProductStatus({ ...user, companyId: foreignCompanyId }, productId, "active"),
+      ).rejects.toThrow("Модель не найдена");
+    } finally {
+      await catalog.setProductStatus(user, productId, "active");
+    }
+  });
+  it("убранный размер остаётся в истории SKU, но не попадает в новую раскладку", async () => {
+    const catalog = app.get(CatalogService);
+    const model = await catalog.quickProduct(user, { requestId: randomUUID(), name: "Текущий ряд", sizes: [{ size: "M", ratioWeight: 1 }, { size: "L", ratioWeight: 1 }], colors: ["Синий"] });
+    await catalog.replaceProductSizes(user, model.id, { sizes: [{ size: "M", ratioWeight: 1 }] });
+    expect(await catalog.listProductVariants(user.companyId, model.id)).toHaveLength(2);
+    const preview = await production.previewProductionOrderVariants(user.companyId, { productId: model.id, colors: [{ color: "Синий", quantity: 5 }] });
+    expect(preview.rows).toHaveLength(1);
+    expect(preview.rows[0]?.size).toBe("M");
+    expect(preview.totalQuantity).toBe(5);
+  });
+
 });

@@ -33,7 +33,7 @@ import { cn } from "../design-system/utils";
 // «последних событий»/«последних документов» из GitHub-прототипа в
 // apps/web нет (см. прежний комментарий на этом экране).
 
-const ACTIVE_STATUSES = new Set(["placed", "in_progress", "ready_for_pickup"]);
+const ACTIVE_STATUSES = new Set(["placed", "in_progress", "sewing_completed", "ready_for_pickup", "shipped_to_fulfillment", "received"]);
 const MAX_ACTIVE_BATCHES = 6;
 const MAX_RECENT_SPECS = 5;
 
@@ -131,17 +131,9 @@ export function DashboardPage() {
         subtitle="Что происходит сейчас"
         breadcrumbs={<Breadcrumbs items={[{ label: "GarmentOS" }, { label: "Главная" }]} />}
         actions={
-          <div className="flex flex-wrap gap-2">
-            <Button size="sm" variant="secondary" onClick={() => void navigate("/products")}>
-              + Модель
-            </Button>
-            <Button size="sm" variant="secondary" onClick={() => void navigate("/specifications")}>
-              + Спецификация
-            </Button>
-            <Button size="sm" onClick={() => void navigate("/production-orders")}>
-              + Партия
-            </Button>
-          </div>
+          <Button size="sm" onClick={() => void navigate("/new-batch")}>
+            + Новая партия
+          </Button>
         }
       />
 

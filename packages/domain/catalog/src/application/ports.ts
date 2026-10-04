@@ -49,6 +49,7 @@ export interface ProductDetailsInput {
 export interface ProductRepository {
   create(input: NewProductInput): Promise<Product>;
   updateCosts(companyId: string, id: string, input: ProductCostsInput): Promise<Product>;
+  setStatus(companyId: string, id: string, status: ProductStatus): Promise<Product>;
   updateDetails(companyId: string, id: string, input: ProductDetailsInput): Promise<Product>;
   findByCode(companyId: string, code: string): Promise<Product | null>;
   findById(companyId: string, id: string): Promise<Product | null>;

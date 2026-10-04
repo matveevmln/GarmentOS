@@ -1,1004 +1,678 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import type {
-  BomResponseDto,
-  MaterialResponseDto,
-  PreviewProductionOrderVariantsResponseDto,
-  ProductResponseDto,
-  ProductSizeResponseDto,
-  ProductVariantResponseDto,
-  WorkshopResponseDto,
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { z } from "zod";
+import {
+  quickProductSchema,
+  placeProductionOrderSchema,
+  type PlaceProductionOrderDto,
+  type ProductResponseDto,
+  type ProductVariantResponseDto,
+  type ProductSizeResponseDto,
+  type WorkshopResponseDto,
+  type ProductionOrderResponseDto,
+  type PreviewProductionOrderVariantsResponseDto,
 } from "@garmentos/shared-types";
 import { apiRequest, ApiError } from "../api/client";
-import { Card, CardContent, CardHeader, CardTitle } from "../design-system/Card/Card";
-import { Field } from "../design-system/Form/Field";
-import { PageHeader, Breadcrumbs } from "../design-system/PageHeader/PageHeader";
-import { Input } from "../design-system/Input/Input";
-import { MoneyInput, NumberInput } from "../design-system/Input/NumberInput";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../design-system/Select/Select";
-import { Combobox } from "../design-system/Select/Combobox";
+import { useAuth } from "../auth/AuthContext";
 import { Button } from "../design-system/Button/Button";
-import { FilterTabs, type FilterOption } from "../design-system/Tabs/FilterTabs";
-import { SkeletonList } from "../design-system/Feedback/Skeleton";
+import { Input } from "../design-system/Input/Input";
+import { NumberInput } from "../design-system/Input/NumberInput";
+import { Field } from "../design-system/Form/Field";
+import { Card, CardContent } from "../design-system/Card/Card";
+import { PageHeader } from "../design-system/PageHeader/PageHeader";
 import { ErrorState } from "../design-system/Feedback/ErrorState";
-import { toast } from "../design-system/Toast/Toast";
-import { unitLabel } from "../lib/format";
-import { cn } from "../design-system/utils";
+import { SkeletonList } from "../design-system/Feedback/Skeleton";
 
-// Мастер новой партии (владелец проекта, 2026-09-11 — реакция на первое
-// реальное прохождение пилота: «слишком много кликов, между экранами нет
-// связующей памяти, поля не предзаполнены»). Не заменяет отдельные разделы
-// (/workshops, /materials, /products, /production-orders) — они остаются
-// источником полного CRUD и правки задним числом (docs/UI_MIGRATION_PLAN.md
-// эти разделы не отменяет). Мастер — это тот же самый набор эндпоинтов,
-// собранный в один линейный проход без переходов по вкладкам: выбор цеха →
-// материал → модель → размеры → цвет → BOM → заказ, где id, выбранный на
-// шаге N, автоматически становится значением по умолчанию на шаге N+1.
-//
-// Каждый шаг — либо выбор существующей записи (Combobox), либо создание
-// новой прямо здесь, без ухода со страницы. Ни один backend-эндпоинт не
-// добавлен: это тот же API, которым уже пользуются WorkshopsPage/
-// MaterialsPage/ProductsPage/ProductDetailPage/ProductionOrdersPage.
-
-const MATERIAL_TYPES: FilterOption<"fabric" | "trim" | "packaging" | "accessory">[] = [
-  { value: "fabric", label: "Ткани" },
-  { value: "trim", label: "Фурнитура" },
-  { value: "packaging", label: "Упаковка" },
-  { value: "accessory", label: "Прочее" },
+const rowSchema = z.object({
+  productVariantId: z.string().uuid(),
+  size: z.string(),
+  color: z.string(),
+  quantity: z.number().int().min(0),
+});
+const draftSchema = z.object({
+  step: z.number().int().min(0).max(3),
+  productId: z.string(),
+  workshopId: z.string(),
+  name: z.string(),
+  sizes: z.string(),
+  colors: z.string(),
+  setup: z.boolean(),
+  modelRequestId: z.string().uuid(),
+  requestId: z.string().uuid(),
+  quantities: z.record(z.string(), z.number().int().min(0)),
+  rows: z.array(rowSchema),
+  price: z.number().min(0),
+  dueDate: z.string(),
+  pending: placeProductionOrderSchema.nullable(),
+  modelPending: quickProductSchema.nullable().default(null),
+});
+type Draft = z.infer<typeof draftSchema>;
+const TITLES = ["Модель", "Количество", "Цена и срок", "Проверка"];
+const splitNames = (value: string) => [
+  ...new Set(
+    value
+      .split(/[,;\n]/)
+      .map((s) => s.trim())
+      .filter(Boolean),
+  ),
 ];
-const MATERIAL_UNITS = [
-  { value: "m", label: "м (метры)" },
-  { value: "kg", label: "кг (килограммы)" },
-  { value: "pcs", label: "шт (штуки)" },
-] as const;
+const inputClass = "min-h-11 text-base";
 
-interface SizeRow {
-  size: string;
-  ratioWeight: number | undefined;
-}
-
-const DEFAULT_SIZE_ROWS: SizeRow[] = [
-  { size: "S", ratioWeight: 1 },
-  { size: "M", ratioWeight: 2 },
-  { size: "L", ratioWeight: 2 },
-  { size: "XL", ratioWeight: 1 },
-];
-
-interface BomRow {
-  materialId: string;
-  quantityPerUnit: number | undefined;
-  wastePercent: number | undefined;
-}
-
-const STEP_ORDER = ["workshop", "material", "product", "sizes", "color", "bom", "order"] as const;
-type StepKey = (typeof STEP_ORDER)[number];
-
-const STEP_TITLES: Record<StepKey, string> = {
-  workshop: "Цех",
-  material: "Материал",
-  product: "Модель",
-  sizes: "Размерный ряд",
-  color: "Цвет / вариант",
-  bom: "Нормы расхода материалов",
-  order: "Производственный заказ",
-};
-
-function StepBadge({ index, state }: { index: number; state: "done" | "current" | "pending" }) {
-  return (
-    <span
-      className={cn(
-        "flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[12px] font-semibold",
-        state === "done" && "bg-primary/15 text-primary",
-        state === "current" && "bg-primary text-primary-foreground",
-        state === "pending" && "bg-muted text-muted-foreground",
-      )}
-    >
-      {state === "done" ? "✓" : index}
-    </span>
-  );
+function fresh(productId = ""): Draft {
+  return {
+    step: 0,
+    productId,
+    workshopId: "",
+    name: "",
+    sizes: "",
+    colors: "",
+    setup: false,
+    modelRequestId: crypto.randomUUID(),
+    requestId: crypto.randomUUID(),
+    quantities: {},
+    rows: [],
+    price: 0,
+    dueDate: "",
+    pending: null,
+    modelPending: null,
+  };
 }
 
 export function NewBatchWizardPage() {
   const navigate = useNavigate();
-
-  // ---- Справочники (совпадают с теми же списками, что и на отдельных
-  // страницах — мастер не заводит параллельного источника данных). ----
-  const [workshops, setWorkshops] = useState<WorkshopResponseDto[]>([]);
-  const [materials, setMaterials] = useState<MaterialResponseDto[]>([]);
-  const [products, setProducts] = useState<ProductResponseDto[]>([]);
-  const [isLoadingRefs, setIsLoadingRefs] = useState(true);
-  const [refsError, setRefsError] = useState<string | null>(null);
-
-  const loadRefs = () => {
-    setIsLoadingRefs(true);
-    setRefsError(null);
-    Promise.all([
-      apiRequest<WorkshopResponseDto[]>("/workshops").then(setWorkshops),
-      apiRequest<MaterialResponseDto[]>("/materials").then(setMaterials),
-      apiRequest<ProductResponseDto[]>("/products").then(setProducts),
-    ]).catch((err: unknown) => setRefsError(err instanceof ApiError ? err.message : "Не удалось загрузить справочники")).finally(() =>
-      setIsLoadingRefs(false),
-    );
-  };
-  useEffect(loadRefs, []);
-
-  // ---- Готовность шагов + цепочка id между ними ----
-  const [done, setDone] = useState<Record<StepKey, boolean>>({
-    workshop: false,
-    material: false,
-    product: false,
-    sizes: false,
-    color: false,
-    bom: false,
-    order: false,
+  const [params] = useSearchParams();
+  const { user } = useAuth();
+  const key = `garmentos.batch-draft:${user?.companyId}:${user?.id}`;
+  const [restored] = useState(() => {
+    try {
+      return draftSchema.safeParse(JSON.parse(localStorage.getItem(key) ?? "null")).success;
+    } catch {
+      return false;
+    }
   });
-  const reopenFrom = (step: StepKey) => {
-    const idx = STEP_ORDER.indexOf(step);
-    setDone((prev) => {
-      const next = { ...prev };
-      STEP_ORDER.slice(idx).forEach((key) => {
-        next[key] = false;
-      });
-      return next;
-    });
-  };
-  const isUnlocked = (step: StepKey) => {
-    const idx = STEP_ORDER.indexOf(step);
-    return idx === 0 || done[STEP_ORDER[idx - 1]];
-  };
-
-  // ---- Шаг 1: Цех ----
-  const [workshopMode, setWorkshopMode] = useState<"select" | "create">("create");
-  const [workshopId, setWorkshopId] = useState("");
-  const [newWorkshopName, setNewWorkshopName] = useState("");
-  const [newWorkshopSpecialization, setNewWorkshopSpecialization] = useState("");
-  const [newWorkshopContractNumber, setNewWorkshopContractNumber] = useState("");
-  const [workshopSubmitting, setWorkshopSubmitting] = useState(false);
-  const [workshopError, setWorkshopError] = useState<string | null>(null);
-
-  const submitWorkshopStep = async () => {
-    setWorkshopError(null);
-    if (workshopMode === "select") {
-      if (!workshopId) {
-        setWorkshopError("Выберите цех из списка");
-        return;
-      }
-      setDone((prev) => ({ ...prev, workshop: true }));
-      return;
-    }
-    if (!newWorkshopName.trim()) {
-      setWorkshopError("Укажите название цеха");
-      return;
-    }
-    if (!newWorkshopContractNumber.trim()) {
-      setWorkshopError("Номер договора нужен, чтобы подтвердить заказ позже — укажите хотя бы предварительный");
-      return;
-    }
-    setWorkshopSubmitting(true);
+  const [draft, setDraft] = useState<Draft>(() => {
     try {
-      const created = await apiRequest<WorkshopResponseDto>("/workshops", {
-        method: "POST",
-        body: {
-          name: newWorkshopName.trim(),
-          specialization: newWorkshopSpecialization.trim() || undefined,
-          contractNumber: newWorkshopContractNumber.trim(),
-        },
-      });
-      setWorkshops((prev) => [...prev, created]);
-      setWorkshopId(created.id);
-      setDone((prev) => ({ ...prev, workshop: true }));
-      toast.success(`Цех «${created.name}» создан`);
-    } catch (err) {
-      setWorkshopError(err instanceof ApiError ? err.message : "Не удалось создать цех");
-    } finally {
-      setWorkshopSubmitting(false);
+      const parsed = draftSchema.safeParse(JSON.parse(localStorage.getItem(key) ?? "null"));
+      if (parsed.success) return parsed.data;
+    } catch {
+      /* Повреждённый кеш не мешает начать заново. */
     }
-  };
-
-  // ---- Шаг 2: Материал ----
-  const [materialMode, setMaterialMode] = useState<"select" | "create">("create");
-  const [materialId, setMaterialId] = useState("");
-  const [newMaterialName, setNewMaterialName] = useState("");
-  const [newMaterialType, setNewMaterialType] = useState<"fabric" | "trim" | "packaging" | "accessory">("fabric");
-  const [newMaterialUnit, setNewMaterialUnit] = useState<"m" | "kg" | "pcs">("kg");
-  const [newMaterialReorderPoint, setNewMaterialReorderPoint] = useState<number | undefined>(undefined);
-  const [materialSubmitting, setMaterialSubmitting] = useState(false);
-  const [materialError, setMaterialError] = useState<string | null>(null);
-
-  const submitMaterialStep = async () => {
-    setMaterialError(null);
-    if (materialMode === "select") {
-      if (!materialId) {
-        setMaterialError("Выберите материал из списка");
-        return;
-      }
-      setDone((prev) => ({ ...prev, material: true }));
-      return;
-    }
-    if (!newMaterialName.trim()) {
-      setMaterialError("Укажите название материала");
-      return;
-    }
-    setMaterialSubmitting(true);
-    try {
-      const created = await apiRequest<MaterialResponseDto>("/materials", {
-        method: "POST",
-        body: {
-          name: newMaterialName.trim(),
-          type: newMaterialType,
-          unit: newMaterialUnit,
-          reorderPoint: newMaterialReorderPoint,
-        },
-      });
-      setMaterials((prev) => [...prev, created]);
-      setMaterialId(created.id);
-      setDone((prev) => ({ ...prev, material: true }));
-      toast.success(`Материал «${created.name}» создан`);
-    } catch (err) {
-      setMaterialError(err instanceof ApiError ? err.message : "Не удалось создать материал");
-    } finally {
-      setMaterialSubmitting(false);
-    }
-  };
-
-  // ---- Шаг 3: Модель ----
-  const [productMode, setProductMode] = useState<"select" | "create">("create");
-  const [productId, setProductId] = useState("");
-  const [newProductName, setNewProductName] = useState("");
-  const [newProductCode, setNewProductCode] = useState("");
-  const [productSubmitting, setProductSubmitting] = useState(false);
-  const [productError, setProductError] = useState<string | null>(null);
-
-  const submitProductStep = async () => {
-    setProductError(null);
-    if (productMode === "select") {
-      if (!productId) {
-        setProductError("Выберите модель из списка");
-        return;
-      }
-      setDone((prev) => ({ ...prev, product: true }));
-      return;
-    }
-    if (!newProductName.trim()) {
-      setProductError("Укажите название модели");
-      return;
-    }
-    if (!newProductCode.trim()) {
-      setProductError("Укажите артикул модели");
-      return;
-    }
-    setProductSubmitting(true);
-    try {
-      const created = await apiRequest<ProductResponseDto>("/products", {
-        method: "POST",
-        body: { name: newProductName.trim(), code: newProductCode.trim() },
-      });
-      setProducts((prev) => [...prev, created]);
-      setProductId(created.id);
-      setDone((prev) => ({ ...prev, product: true }));
-      toast.success(`Модель «${created.name}» создана`);
-    } catch (err) {
-      setProductError(err instanceof ApiError ? err.message : "Не удалось создать модель");
-    } finally {
-      setProductSubmitting(false);
-    }
-  };
-
-  // ---- Шаг 4: Размерный ряд ----
-  const [existingSizes, setExistingSizes] = useState<ProductSizeResponseDto[]>([]);
-  const [sizesLoaded, setSizesLoaded] = useState(false);
-  const [sizeRows, setSizeRows] = useState<SizeRow[]>(DEFAULT_SIZE_ROWS);
-  const [sizesEditing, setSizesEditing] = useState(false);
-  const [sizesSubmitting, setSizesSubmitting] = useState(false);
-  const [sizesError, setSizesError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!productId || !done.product) return;
-    setSizesLoaded(false);
-    apiRequest<ProductSizeResponseDto[]>(`/products/${productId}/sizes`)
-      .then((rows) => {
-        setExistingSizes(rows);
-        setSizesEditing(rows.length === 0);
-        if (rows.length > 0) {
-          setDone((prev) => ({ ...prev, sizes: true }));
-        }
-      })
-      .catch((err: unknown) => toast.error(err instanceof ApiError ? err.message : "Не удалось загрузить размерный ряд"))
-      .finally(() => setSizesLoaded(true));
-    // productId меняется только при переоткрытии шага 3 — новая загрузка
-    // размеров обязана произойти именно тогда.
-  }, [productId, done.product]);
-
-  const updateSizeRow = (index: number, patch: Partial<SizeRow>) => {
-    setSizeRows((prev) => prev.map((row, i) => (i === index ? { ...row, ...patch } : row)));
-  };
-  const addSizeRow = () => setSizeRows((prev) => [...prev, { size: "", ratioWeight: 1 }]);
-  const removeSizeRow = (index: number) => setSizeRows((prev) => prev.filter((_, i) => i !== index));
-
-  const submitSizesStep = async () => {
-    setSizesError(null);
-    const rows = sizeRows.filter((row) => row.size.trim() && row.ratioWeight);
-    if (rows.length === 0) {
-      setSizesError("Добавьте хотя бы один размер с весом пропорции");
-      return;
-    }
-    setSizesSubmitting(true);
-    try {
-      const saved = await apiRequest<ProductSizeResponseDto[]>(`/products/${productId}/sizes`, {
-        method: "PUT",
-        body: { sizes: rows.map((row) => ({ size: row.size.trim(), ratioWeight: row.ratioWeight })) },
-      });
-      setExistingSizes(saved);
-      setSizesEditing(false);
-      setDone((prev) => ({ ...prev, sizes: true }));
-      toast.success("Размерный ряд сохранён");
-    } catch (err) {
-      setSizesError(err instanceof ApiError ? err.message : "Не удалось сохранить размерный ряд");
-    } finally {
-      setSizesSubmitting(false);
-    }
-  };
-
-  // ---- Шаг 5: Цвет / вариант ----
+    return fresh(params.get("productId") ?? "");
+  });
+  const [products, setProducts] = useState<ProductResponseDto[]>([]);
+  const [workshops, setWorkshops] = useState<WorkshopResponseDto[]>([]);
   const [variants, setVariants] = useState<ProductVariantResponseDto[]>([]);
-  const [variantsLoaded, setVariantsLoaded] = useState(false);
-  const [colorMode, setColorMode] = useState<"select" | "create">("create");
-  const [orderColor, setOrderColor] = useState("");
-  const [newColorName, setNewColorName] = useState("");
-  const [newColorCode, setNewColorCode] = useState("");
-  const [colorSubmitting, setColorSubmitting] = useState(false);
-  const [colorError, setColorError] = useState<string | null>(null);
-
+  const [sizes, setSizes] = useState<ProductSizeResponseDto[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [modelLoading, setModelLoading] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [storageError, setStorageError] = useState(false);
+  const update = (patch: Partial<Draft>) => setDraft((prev) => ({ ...prev, ...patch }));
   useEffect(() => {
-    if (!productId || !done.sizes) return;
-    setVariantsLoaded(false);
-    apiRequest<ProductVariantResponseDto[]>(`/product-variants?productId=${productId}`)
-      .then((rows) => {
+    try {
+      localStorage.setItem(key, JSON.stringify(draft));
+      setStorageError(false);
+    } catch {
+      setStorageError(true);
+    }
+  }, [draft, key]);
+
+  const load = () => {
+    setLoading(true);
+    setError("");
+    void Promise.all([
+      apiRequest<ProductResponseDto[]>("/products"),
+      apiRequest<WorkshopResponseDto[]>("/workshops"),
+    ])
+      .then(([models, shops]) => {
+        setDraft((prev) => ({
+          ...prev,
+          name: prev.name || models.find((model) => model.id === prev.productId)?.name || "",
+        }));
+        setProducts(models.filter((model) => !model.deletedAt && model.status !== "discontinued"));
+        const active = shops.filter((shop) => shop.status === "active");
+        setWorkshops(active);
+        if (active.length === 1) setDraft((prev) => ({ ...prev, workshopId: prev.workshopId || active[0].id }));
+      })
+      .catch((err) => setError(err instanceof Error ? err.message : "Не удалось загрузить данные"))
+      .finally(() => setLoading(false));
+  };
+  useEffect(load, []);
+  useEffect(() => {
+    if (!draft.productId) {
+      setVariants([]);
+      setSizes([]);
+      return;
+    }
+    let live = true;
+    setVariants([]);
+    setSizes([]);
+    setModelLoading(true);
+    void Promise.all([
+      apiRequest<ProductVariantResponseDto[]>(`/product-variants?productId=${draft.productId}`),
+      apiRequest<ProductSizeResponseDto[]>(`/products/${draft.productId}/sizes`),
+    ])
+      .then(([rows, sizeRows]) => {
+        if (!live) return;
         setVariants(rows);
-        const colors = [...new Set(rows.map((row) => row.color))];
-        if (colors.length > 0) {
-          setColorMode("select");
-          setOrderColor((prev) => prev || colors[0] || "");
-        } else {
-          setColorMode("create");
-        }
+        setSizes(sizeRows);
+        if (rows.length === 0)
+          setDraft((prev) => ({
+            ...prev,
+            setup: true,
+            sizes: prev.sizes || sizeRows.map((row) => row.size).join(", "),
+          }));
       })
-      .catch((err: unknown) => toast.error(err instanceof ApiError ? err.message : "Не удалось загрузить варианты модели"))
-      .finally(() => setVariantsLoaded(true));
-  }, [productId, done.sizes]);
-
-  const existingColors = [...new Set(variants.map((row) => row.color))];
-
-  const submitColorStep = async () => {
-    setColorError(null);
-    if (colorMode === "select") {
-      if (!orderColor) {
-        setColorError("Выберите цвет из списка");
-        return;
-      }
-      setDone((prev) => ({ ...prev, color: true }));
-      return;
-    }
-    if (!newColorName.trim() || !newColorCode.trim()) {
-      setColorError("Укажите название и код цвета");
-      return;
-    }
-    setColorSubmitting(true);
-    try {
-      const result = await apiRequest<{ created: number; skipped: number }>(`/products/${productId}/colors`, {
-        method: "POST",
-        body: { color: newColorName.trim(), colorCode: newColorCode.trim() },
+      .catch((err) => {
+        if (live) setError(err instanceof Error ? err.message : "Не удалось загрузить размеры");
+      })
+      .finally(() => {
+        if (live) setModelLoading(false);
       });
-      const refreshed = await apiRequest<ProductVariantResponseDto[]>(`/product-variants?productId=${productId}`);
-      setVariants(refreshed);
-      setOrderColor(newColorName.trim());
-      setDone((prev) => ({ ...prev, color: true }));
-      toast.success(`Цвет «${newColorName.trim()}» добавлен`, {
-        description: `Создано вариантов: ${result.created}${result.skipped > 0 ? `, пропущено (уже были): ${result.skipped}` : ""}`,
-      });
-    } catch (err) {
-      setColorError(err instanceof ApiError ? err.message : "Не удалось добавить цвет");
-    } finally {
-      setColorSubmitting(false);
-    }
+    return () => {
+      live = false;
+    };
+  }, [draft.productId]);
+
+  const product = products.find((model) => model.id === draft.productId);
+  const colorNames = [
+    ...new Set(
+      variants
+        .filter((row) => sizes.length === 0 || sizes.some((size) => size.size === row.size))
+        .map((row) => row.color),
+    ),
+  ];
+  const total = draft.rows.reduce((sum, row) => sum + row.quantity, 0);
+  const totalRequested = Object.values(draft.quantities).reduce((sum, qty) => sum + qty, 0);
+  const workshop = workshops.find((shop) => shop.id === draft.workshopId);
+  const fail = (message: string) => {
+    setError(message);
   };
 
-  // ---- Шаг 6: нормы расхода материалов ----
-  const [existingBoms, setExistingBoms] = useState<BomResponseDto[]>([]);
-  const [bomsLoaded, setBomsLoaded] = useState(false);
-  const [bomId, setBomId] = useState("");
-  const [bomMode, setBomMode] = useState<"use" | "create">("create");
-  const [bomRows, setBomRows] = useState<BomRow[]>([{ materialId: "", quantityPerUnit: undefined, wastePercent: 0 }]);
-  const [bomSubmitting, setBomSubmitting] = useState(false);
-  const [bomError, setBomError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!productId || !done.color) return;
-    setBomsLoaded(false);
-    apiRequest<BomResponseDto[]>(`/boms?productId=${productId}`)
-      .then((rows) => {
-        setExistingBoms(rows);
-        const approved = rows.find((row) => row.status === "approved");
-        if (approved) {
-          setBomMode("use");
-          setBomId(approved.id);
-        } else {
-          setBomMode("create");
-          setBomRows((prev) =>
-            prev.map((row, i) => (i === 0 && !row.materialId ? { ...row, materialId } : row)),
+  const next = async () => {
+    setError("");
+    setBusy(true);
+    try {
+      if (draft.step === 0) {
+        if (draft.productId && !product)
+          return fail("Модель недоступна. Выберите рабочую модель или восстановите её из архива.");
+        if (!draft.productId && !draft.setup) return fail("Выберите модель или добавьте новую");
+        if (draft.setup) {
+          const sizeNames = splitNames(draft.sizes);
+          const colors = splitNames(draft.colors);
+          if (!draft.name.trim() || !sizeNames.length || !colors.length)
+            return fail("Укажите название, размеры и хотя бы один цвет");
+          const payload =
+            draft.modelPending ??
+            quickProductSchema.parse({
+              requestId: draft.modelRequestId,
+              productId: draft.productId || undefined,
+              name: draft.name.trim(),
+              sizes: sizeNames.map((size) => ({
+                size,
+                ratioWeight: sizes.find((row) => row.size === size)?.ratioWeight ?? 1,
+              })),
+              colors,
+            });
+          const pendingDraft = { ...draft, modelPending: payload };
+          try {
+            localStorage.setItem(key, JSON.stringify(pendingDraft));
+          } catch {
+            setStorageError(true);
+          }
+          setDraft(pendingDraft);
+          const model = await apiRequest<ProductResponseDto>("/products/quick", {
+            method: "POST",
+            body: payload,
+          });
+          setProducts((prev) => [...prev.filter((row) => row.id !== model.id), model]);
+          update({ productId: model.id, modelPending: null, setup: false, step: 1 });
+          const [rows, sizeRows] = await Promise.all([
+            apiRequest<ProductVariantResponseDto[]>(`/product-variants?productId=${model.id}`),
+            apiRequest<ProductSizeResponseDto[]>(`/products/${model.id}/sizes`),
+          ]);
+          setVariants(rows);
+          setSizes(sizeRows);
+        } else if (!variants.length) return fail("Добавьте размеры и цвет этой модели");
+        else update({ step: 1 });
+      } else if (draft.step === 1) {
+        if (!totalRequested) return fail("Укажите количество хотя бы для одного цвета");
+        if (!draft.rows.length) {
+          const preview = await apiRequest<PreviewProductionOrderVariantsResponseDto>(
+            "/production-orders/preview-variants",
+            {
+              method: "POST",
+              body: {
+                productId: draft.productId,
+                colors: colorNames
+                  .filter((color) => draft.quantities[color] > 0)
+                  .map((color) => ({ color, quantity: draft.quantities[color] })),
+                distributionMode: "ratio",
+              },
+            },
           );
+          if (preview.missingVariants.length)
+            return fail(
+              "У модели не хватает сочетаний размеров и цветов. Откройте “Настроить размеры и цвета” на первом шаге.",
+            );
+          // Сохраняем нулевые строки: маленькая партия может распределиться не на все размеры.
+          const rows = preview.rows;
+          update({ rows });
+          if (rows.reduce((sum, row) => sum + row.quantity, 0) !== totalRequested)
+            return fail("Количество по размерам не совпадает с общим количеством");
+          return;
         }
-      })
-      .catch((err: unknown) => toast.error(err instanceof ApiError ? err.message : "Не удалось загрузить нормы расхода материалов"))
-      .finally(() => setBomsLoaded(true));
-  }, [productId, done.color]);
-
-  const updateBomRow = (index: number, patch: Partial<BomRow>) => {
-    setBomRows((prev) => prev.map((row, i) => (i === index ? { ...row, ...patch } : row)));
-  };
-  const addBomRow = () => setBomRows((prev) => [...prev, { materialId: "", quantityPerUnit: undefined, wastePercent: 0 }]);
-  const removeBomRow = (index: number) => setBomRows((prev) => prev.filter((_, i) => i !== index));
-
-  const submitBomStep = async () => {
-    setBomError(null);
-    if (bomMode === "use") {
-      if (!bomId) {
-        setBomError("Не удалось определить утверждённые нормы расхода — переключитесь на создание новой");
-        return;
+        if (total !== totalRequested)
+          return fail(
+            `По размерам ${total} шт., а по цветам ${totalRequested} шт. Исправьте количества.`,
+          );
+        for (const color of colorNames) {
+          if (
+            draft.rows
+              .filter((row) => row.color === color)
+              .reduce((sum, row) => sum + row.quantity, 0) !== (draft.quantities[color] ?? 0)
+          )
+            return fail(`Количество по размерам цвета “${color}” не совпадает с итогом цвета`);
+        }
+        update({ step: 2 });
+      } else if (draft.step === 2) {
+        if (!(draft.price > 0)) return fail("Укажите согласованную цену пошива за изделие");
+        if (!workshop)
+          return fail(
+            "Выберите цех. Если список пуст, сначала добавьте цех в разделе “Ещё → Мой цех”.",
+          );
+        if (!workshop.contractNumber)
+          return fail(
+            "У цеха не указан номер договора. Заполните его в “Мой цех” перед размещением партии.",
+          );
+        update({ step: 3 });
       }
-      setDone((prev) => ({ ...prev, bom: true }));
-      return;
-    }
-    const rows = bomRows.filter((row) => row.materialId && row.quantityPerUnit);
-    if (rows.length === 0) {
-      setBomError("Добавьте хотя бы одну строку нормы расхода");
-      return;
-    }
-    setBomSubmitting(true);
-    try {
-      const draft = await apiRequest<BomResponseDto>("/boms", {
-        method: "POST",
-        body: {
-          productId,
-          items: rows.map((row) => ({
-            materialId: row.materialId,
-            quantityPerUnit: row.quantityPerUnit,
-            wastePercent: row.wastePercent ?? 0,
-          })),
-        },
-      });
-      const approved = await apiRequest<BomResponseDto>(`/boms/${draft.id}/approve`, { method: "POST" });
-      setExistingBoms((prev) => [...prev, approved]);
-      setBomId(approved.id);
-      setDone((prev) => ({ ...prev, bom: true }));
-      toast.success("Нормы расхода созданы и утверждены");
     } catch (err) {
-      setBomError(err instanceof ApiError ? err.message : "Не удалось создать нормы расхода");
-    } finally {
-      setBomSubmitting(false);
-    }
-  };
-
-  // ---- Шаг 7: Производственный заказ ----
-  const [totalQuantity, setTotalQuantity] = useState<number | undefined>(undefined);
-  const [unitPrice, setUnitPrice] = useState<number | undefined>(undefined);
-  const [orderSubmitting, setOrderSubmitting] = useState(false);
-  const [orderError, setOrderError] = useState<string | null>(null);
-  const [createdOrderId, setCreatedOrderId] = useState<string | null>(null);
-
-  const submitOrderStep = async () => {
-    setOrderError(null);
-    if (!totalQuantity || totalQuantity <= 0) {
-      setOrderError("Укажите общее количество единиц в партии");
-      return;
-    }
-    if (unitPrice === undefined || unitPrice < 0) {
-      setOrderError("Укажите цену за единицу");
-      return;
-    }
-    setOrderSubmitting(true);
-    try {
-      const preview = await apiRequest<PreviewProductionOrderVariantsResponseDto>(
-        "/production-orders/preview-variants",
-        { method: "POST", body: { productId, colors: [{ color: orderColor, quantity: totalQuantity }] } },
+      if (err instanceof ApiError && [400, 403, 404, 422].includes(err.status))
+        update({ modelPending: null });
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Не удалось сохранить. Введённые данные остались на этом устройстве.",
       );
-      const variantsPayload = preview.rows
-        .filter((row) => row.quantity > 0)
-        .map((row) => ({ productVariantId: row.productVariantId, quantity: row.quantity }));
-      const plannedQuantity = variantsPayload.reduce((sum, row) => sum + row.quantity, 0);
-      const order = await apiRequest<{ id: string }>("/production-orders", {
-        method: "POST",
-        body: {
-          productId,
-          bomId,
-          workshopId,
-          plannedQuantity,
-          agreedUnitPrice: unitPrice,
-          variants: variantsPayload,
-        },
-      });
-      await apiRequest(`/production-orders/${order.id}/confirm`, { method: "POST" });
-      setCreatedOrderId(order.id);
-      setDone((prev) => ({ ...prev, order: true }));
-      toast.success("Заказ создан и подтверждён", { description: "Snapshot партии зафиксирован" });
-    } catch (err) {
-      setOrderError(err instanceof ApiError ? err.message : "Не удалось создать или подтвердить заказ");
     } finally {
-      setOrderSubmitting(false);
+      setBusy(false);
     }
   };
 
-  if (isLoadingRefs) return <SkeletonList />;
-  if (refsError) return <ErrorState title="Не удалось загрузить справочники" description={refsError} onRetry={loadRefs} />;
-
-  const stepState = (step: StepKey): "done" | "current" | "pending" => {
-    if (done[step]) return "done";
-    if (isUnlocked(step)) return "current";
-    return "pending";
+  const submit = async (mode: "place" | "draft") => {
+    setBusy(true);
+    setError("");
+    try {
+      const payload: PlaceProductionOrderDto =
+        draft.pending ??
+        placeProductionOrderSchema.parse({
+          requestId: draft.requestId,
+          mode,
+          productId: draft.productId,
+          workshopId: draft.workshopId,
+          plannedQuantity: total,
+          agreedUnitPrice: draft.price,
+          dueDate: draft.dueDate || undefined,
+          variants: draft.rows
+            .filter((row) => row.quantity > 0)
+            .map(({ productVariantId, quantity }) => ({ productVariantId, quantity })),
+        });
+      const pendingDraft = { ...draft, pending: payload };
+      // Записываем попытку до HTTP-запроса, чтобы потерянный ответ можно было безопасно повторить.
+      try {
+        localStorage.setItem(key, JSON.stringify(pendingDraft));
+      } catch {
+        setStorageError(true);
+      }
+      setDraft(pendingDraft);
+      const order = await apiRequest<ProductionOrderResponseDto>("/production-orders/place", {
+        method: "POST",
+        body: payload,
+      });
+      localStorage.removeItem(key);
+      void navigate(`/production-orders/${order.id}`, { replace: true });
+    } catch (err) {
+      if (err instanceof ApiError && [400, 403, 404, 422].includes(err.status))
+        update({ pending: null });
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Ответ не получен. Повторите сохранение этой же партии.",
+      );
+    } finally {
+      setBusy(false);
+    }
   };
 
+  if (loading) return <SkeletonList />;
+  if (!products.length && error && !workshops.length)
+    return <ErrorState title={error} onRetry={load} />;
   return (
-    <div className="mx-auto max-w-[820px]">
+    <div className="mx-auto max-w-2xl pb-6">
       <PageHeader
         title="Новая партия"
-        subtitle="Один проход: цех → материал → модель → нормы расхода → заказ"
-        breadcrumbs={<Breadcrumbs items={[{ label: "GarmentOS" }, { label: "Новая партия" }]} />}
+        subtitle={`Шаг ${draft.step + 1} из 4 · ${TITLES[draft.step]}`}
       />
-
-      <div className="mt-5 flex flex-col gap-4">
-        {/* Шаг 1 — Цех */}
-        <Card>
-          <CardHeader className="flex-row items-center gap-3 space-y-0">
-            <StepBadge index={1} state={stepState("workshop")} />
-            <CardTitle>{STEP_TITLES.workshop}</CardTitle>
-            {done.workshop && (
-              <Button variant="ghost" size="sm" className="ml-auto" onClick={() => reopenFrom("workshop")}>
-                Изменить
-              </Button>
+      {restored && (
+        <p className="mb-3 text-sm text-muted-foreground">
+          Восстановлено то, что вы заполняли на этом устройстве.
+        </p>
+      )}
+      {storageError && (
+        <p role="alert" className="mb-3 text-sm text-destructive">
+          Браузер не сохраняет черновик. Оставьте эту страницу открытой до завершения.
+        </p>
+      )}
+      <ol className="mb-4 grid grid-cols-4 gap-1 text-xs" aria-label="Шаги создания партии">
+        {TITLES.map((title, index) => (
+          <li
+            key={title}
+            aria-current={index === draft.step ? "step" : undefined}
+            className={`rounded-lg p-2 ${index === draft.step ? "bg-primary/15 font-semibold" : "bg-muted"}`}
+          >
+            {index + 1}. {title}
+          </li>
+        ))}
+      </ol>
+      <Card>
+        <CardContent className="flex flex-col gap-4 pt-5">
+          <fieldset
+            disabled={busy || Boolean(draft.pending) || Boolean(draft.modelPending)}
+            className="flex min-w-0 flex-col gap-4"
+          >
+            {draft.step === 0 && (
+              <>
+                <Field label="Модель">
+                  <select
+                    className={`field w-full rounded-lg border border-border bg-card px-3 ${inputClass}`}
+                    aria-label="Модель"
+                    value={draft.productId}
+                    onChange={(event) =>
+                      update({
+                        productId: event.target.value,
+                        name: products.find((model) => model.id === event.target.value)?.name || "",
+                        sizes: "",
+                        colors: "",
+                        setup: false,
+                        rows: [],
+                        quantities: {},
+                        modelRequestId: crypto.randomUUID(),
+                      })
+                    }
+                  >
+                    <option value="">Выберите модель</option>
+                    {products.map((model) => (
+                      <option key={model.id} value={model.id}>
+                        {model.name}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+                <Button
+                  variant="secondary"
+                  size="lg"
+                  onClick={() =>
+                    update({
+                      productId: "",
+                      setup: true,
+                      name: "",
+                      sizes: "",
+                      colors: "",
+                      rows: [],
+                      quantities: {},
+                      modelRequestId: crypto.randomUUID(),
+                    })
+                  }
+                >
+                  + Новая модель
+                </Button>
+                {modelLoading && <p>Загружаем размеры и цвета…</p>}
+                {product && !draft.setup && (
+                  <>
+                    <p className="text-sm">
+                      Размеры:{" "}
+                      {[...new Set(variants.map((row) => row.size))].join(", ") || "ещё не заданы"}
+                      <br />
+                      Цвета: {colorNames.join(", ") || "ещё не заданы"}
+                    </p>
+                    <Button
+                      variant="ghost"
+                      size="lg"
+                      onClick={() =>
+                        update({
+                          setup: true,
+                          name: product.name,
+                          sizes: (sizes.length
+                            ? sizes.map((row) => row.size)
+                            : [...new Set(variants.map((row) => row.size))]
+                          ).join(", "),
+                          colors: colorNames.join(", "),
+                          modelRequestId: crypto.randomUUID(),
+                        })
+                      }
+                    >
+                      Настроить размеры и цвета
+                    </Button>
+                  </>
+                )}
+                {draft.setup && (
+                  <>
+                    <Field label="Название модели">
+                      <Input
+                        className={inputClass}
+                        value={draft.name}
+                        disabled={Boolean(draft.productId)}
+                        onChange={(event) => update({ name: event.target.value })}
+                        placeholder="Например, Хуплушка"
+                      />
+                    </Field>
+                    <Field label="Размеры через запятую">
+                      <Input
+                        className={inputClass}
+                        value={draft.sizes}
+                        onChange={(event) => update({ sizes: event.target.value })}
+                        placeholder="48-50, 52-54, 56-58"
+                      />
+                    </Field>
+                    <Field label={draft.productId ? "Цвета для добавления через запятую" : "Цвета через запятую"}>
+                      <Input
+                        className={inputClass}
+                        value={draft.colors}
+                        onChange={(event) => update({ colors: event.target.value })}
+                        placeholder="Петроль"
+                      />
+                    </Field>
+                    <p className="text-sm text-muted-foreground">
+                      Размеры и цвета сохранятся у модели для следующих партий. Фото можно добавить
+                      позже.
+                    </p>
+                  </>
+                )}
+              </>
             )}
-          </CardHeader>
-          <CardContent>
-            {done.workshop ? (
-              <p className="t-body">
-                Выбран цех: <strong>{workshops.find((w) => w.id === workshopId)?.name ?? workshopId}</strong>
-              </p>
-            ) : (
-              <div className="flex flex-col gap-3">
-                <FilterTabs
-                  options={[
-                    { value: "create", label: "Создать новый" },
-                    { value: "select", label: "Выбрать существующий" },
-                  ]}
-                  value={workshopMode}
-                  onChange={setWorkshopMode}
-                />
-                {workshopMode === "select" ? (
-                  <Field label="Цех">
-                    <Combobox
-                      options={workshops.map((w) => ({ value: w.id, label: w.name }))}
-                      value={workshopId}
-                      onChange={setWorkshopId}
-                      placeholder="Выберите цех..."
-                      emptyText="Цехов пока нет — создайте новый"
+            {draft.step === 1 && (
+              <>
+                <p className="font-medium">{product?.name}</p>
+                {colorNames.map((color) => (
+                  <Field key={color} label={`${color} · всего изделий`}>
+                    <NumberInput
+                      className={inputClass}
+                      aria-label={`${color} · всего изделий`}
+                      min={0}
+                      value={draft.quantities[color] || undefined}
+                      onChange={(qty) =>
+                        update({ quantities: { ...draft.quantities, [color]: qty ?? 0 }, rows: [] })
+                      }
+                      suffix="шт."
                     />
                   </Field>
-                ) : (
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <Field label="Название" className="sm:col-span-2">
-                      <Input value={newWorkshopName} onChange={(e) => setNewWorkshopName(e.target.value)} placeholder="Цех №1 — Пилот" />
-                    </Field>
-                    <Field label="Специализация">
-                      <Input
-                        value={newWorkshopSpecialization}
-                        onChange={(e) => setNewWorkshopSpecialization(e.target.value)}
-                        placeholder="Трикотаж"
-                      />
-                    </Field>
-                    <Field label="Номер договора" hint={<span className="text-muted-foreground/70">нужен для подтверждения заказа</span>}>
-                      <Input
-                        value={newWorkshopContractNumber}
-                        onChange={(e) => setNewWorkshopContractNumber(e.target.value)}
-                        placeholder="Пилот-1"
-                      />
-                    </Field>
-                  </div>
-                )}
-                {workshopError && <p className="text-[12px] font-medium text-danger">{workshopError}</p>}
-                <Button onClick={() => void submitWorkshopStep()} loading={workshopSubmitting} size="sm" className="self-start">
-                  Далее
-                </Button>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Шаг 2 — Материал */}
-        <Card className={cn(!isUnlocked("material") && "opacity-50")}>
-          <CardHeader className="flex-row items-center gap-3 space-y-0">
-            <StepBadge index={2} state={stepState("material")} />
-            <CardTitle>{STEP_TITLES.material}</CardTitle>
-            {done.material && (
-              <Button variant="ghost" size="sm" className="ml-auto" onClick={() => reopenFrom("material")}>
-                Изменить
-              </Button>
-            )}
-          </CardHeader>
-          {isUnlocked("material") && (
-            <CardContent>
-              {done.material ? (
-                <p className="t-body">
-                  Выбран материал: <strong>{materials.find((m) => m.id === materialId)?.name ?? materialId}</strong>
-                </p>
-              ) : (
-                <div className="flex flex-col gap-3">
-                  <FilterTabs
-                    options={[
-                      { value: "create", label: "Создать новый" },
-                      { value: "select", label: "Выбрать существующий" },
-                    ]}
-                    value={materialMode}
-                    onChange={setMaterialMode}
-                  />
-                  {materialMode === "select" ? (
-                    <Field label="Материал">
-                      <Combobox
-                        options={materials.map((m) => ({ value: m.id, label: `${m.name} (${unitLabel(m.unit)})` }))}
-                        value={materialId}
-                        onChange={setMaterialId}
-                        placeholder="Выберите материал..."
-                        emptyText="Материалов пока нет — создайте новый"
-                      />
-                    </Field>
-                  ) : (
-                    <div className="grid gap-3 sm:grid-cols-3">
-                      <Field label="Название" className="sm:col-span-3">
-                        <Input value={newMaterialName} onChange={(e) => setNewMaterialName(e.target.value)} placeholder="Двухнитка пилот" />
-                      </Field>
-                      <Field label="Тип">
-                        <Select value={newMaterialType} onValueChange={(v) => setNewMaterialType(v as typeof newMaterialType)}>
-                          <SelectTrigger>
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {MATERIAL_TYPES.map((t) => (
-                              <SelectItem key={t.value} value={t.value}>
-                                {t.label}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </Field>
-                      <Field label="Единица">
-                        <Select value={newMaterialUnit} onValueChange={(v) => setNewMaterialUnit(v as typeof newMaterialUnit)}>
-                          <SelectTrigger>
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {MATERIAL_UNITS.map((u) => (
-                              <SelectItem key={u.value} value={u.value}>
-                                {u.label}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </Field>
-                      <Field label="Точка перезаказа">
-                        <NumberInput value={newMaterialReorderPoint} onChange={setNewMaterialReorderPoint} suffix={unitLabel(newMaterialUnit)} />
-                      </Field>
-                    </div>
-                  )}
-                  {materialError && <p className="text-[12px] font-medium text-danger">{materialError}</p>}
-                  <Button onClick={() => void submitMaterialStep()} loading={materialSubmitting} size="sm" className="self-start">
-                    Далее
-                  </Button>
-                </div>
-              )}
-            </CardContent>
-          )}
-        </Card>
-
-        {/* Шаг 3 — Модель */}
-        <Card className={cn(!isUnlocked("product") && "opacity-50")}>
-          <CardHeader className="flex-row items-center gap-3 space-y-0">
-            <StepBadge index={3} state={stepState("product")} />
-            <CardTitle>{STEP_TITLES.product}</CardTitle>
-            {done.product && (
-              <Button variant="ghost" size="sm" className="ml-auto" onClick={() => reopenFrom("product")}>
-                Изменить
-              </Button>
-            )}
-          </CardHeader>
-          {isUnlocked("product") && (
-            <CardContent>
-              {done.product ? (
-                <p className="t-body">
-                  Выбрана модель: <strong>{products.find((p) => p.id === productId)?.name ?? productId}</strong>
-                </p>
-              ) : (
-                <div className="flex flex-col gap-3">
-                  <FilterTabs
-                    options={[
-                      { value: "create", label: "Создать новую" },
-                      { value: "select", label: "Выбрать существующую" },
-                    ]}
-                    value={productMode}
-                    onChange={setProductMode}
-                  />
-                  {productMode === "select" ? (
-                    <Field label="Модель">
-                      <Combobox
-                        options={products.map((p) => ({ value: p.id, label: p.name }))}
-                        value={productId}
-                        onChange={setProductId}
-                        placeholder="Выберите модель..."
-                        emptyText="Моделей пока нет — создайте новую"
-                      />
-                    </Field>
-                  ) : (
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      <Field label="Название">
-                        <Input value={newProductName} onChange={(e) => setNewProductName(e.target.value)} placeholder="Худи Пилот" />
-                      </Field>
-                      <Field label="Артикул">
-                        <Input value={newProductCode} onChange={(e) => setNewProductCode(e.target.value)} placeholder="HUD-PILOT-01" />
-                      </Field>
-                    </div>
-                  )}
-                  {productError && <p className="text-[12px] font-medium text-danger">{productError}</p>}
-                  <Button onClick={() => void submitProductStep()} loading={productSubmitting} size="sm" className="self-start">
-                    Далее
-                  </Button>
-                </div>
-              )}
-            </CardContent>
-          )}
-        </Card>
-
-        {/* Шаг 4 — Размерный ряд */}
-        <Card className={cn(!isUnlocked("sizes") && "opacity-50")}>
-          <CardHeader className="flex-row items-center gap-3 space-y-0">
-            <StepBadge index={4} state={stepState("sizes")} />
-            <CardTitle>{STEP_TITLES.sizes}</CardTitle>
-            {done.sizes && (
-              <Button variant="ghost" size="sm" className="ml-auto" onClick={() => reopenFrom("sizes")}>
-                Изменить
-              </Button>
-            )}
-          </CardHeader>
-          {isUnlocked("sizes") && (
-            <CardContent>
-              {!sizesLoaded ? (
-                <SkeletonList />
-              ) : done.sizes && !sizesEditing ? (
-                <p className="t-body">
-                  Размерный ряд: {existingSizes.map((s) => `${s.size} (${s.ratioWeight})`).join(" / ")}
-                </p>
-              ) : (
-                <div className="flex flex-col gap-3">
-                  <div className="flex flex-col gap-2">
-                    {sizeRows.map((row, index) => (
-                      <div key={index} className="flex items-center gap-2">
-                        <Input
-                          value={row.size}
-                          onChange={(e) => updateSizeRow(index, { size: e.target.value })}
-                          placeholder="Размер, напр. S"
-                          className="w-28"
-                        />
-                        <NumberInput
-                          value={row.ratioWeight}
-                          onChange={(value) => updateSizeRow(index, { ratioWeight: value })}
-                          suffix="вес"
-                          min={0}
-                          className="w-32"
-                        />
-                        {sizeRows.length > 1 && (
-                          <Button variant="ghost" size="sm" onClick={() => removeSizeRow(index)}>
-                            Убрать
-                          </Button>
-                        )}
-                      </div>
-                    ))}
-                    <Button variant="secondary" size="sm" onClick={addSizeRow} className="self-start">
-                      + Добавить размер
-                    </Button>
-                  </div>
-                  {sizesError && <p className="text-[12px] font-medium text-danger">{sizesError}</p>}
-                  <Button onClick={() => void submitSizesStep()} loading={sizesSubmitting} size="sm" className="self-start">
-                    Сохранить размерный ряд
-                  </Button>
-                </div>
-              )}
-            </CardContent>
-          )}
-        </Card>
-
-        {/* Шаг 5 — Цвет / вариант */}
-        <Card className={cn(!isUnlocked("color") && "opacity-50")}>
-          <CardHeader className="flex-row items-center gap-3 space-y-0">
-            <StepBadge index={5} state={stepState("color")} />
-            <CardTitle>{STEP_TITLES.color}</CardTitle>
-            {done.color && (
-              <Button variant="ghost" size="sm" className="ml-auto" onClick={() => reopenFrom("color")}>
-                Изменить
-              </Button>
-            )}
-          </CardHeader>
-          {isUnlocked("color") && (
-            <CardContent>
-              {!variantsLoaded ? (
-                <SkeletonList />
-              ) : done.color ? (
-                <p className="t-body">
-                  Цвет для этой партии: <strong>{orderColor}</strong>
-                </p>
-              ) : (
-                <div className="flex flex-col gap-3">
-                  <FilterTabs
-                    options={[
-                      { value: "create", label: "Добавить новый цвет" },
-                      { value: "select", label: "Выбрать существующий" },
-                    ]}
-                    value={colorMode}
-                    onChange={setColorMode}
-                  />
-                  {colorMode === "select" ? (
-                    <Field label="Цвет">
-                      <Select value={orderColor} onValueChange={setOrderColor}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Выберите цвет" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {existingColors.map((color) => (
-                            <SelectItem key={color} value={color}>
-                              {color}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </Field>
-                  ) : (
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      <Field label="Название цвета">
-                        <Input value={newColorName} onChange={(e) => setNewColorName(e.target.value)} placeholder="Чёрный" />
-                      </Field>
-                      <Field label="Код цвета">
-                        <Input value={newColorCode} onChange={(e) => setNewColorCode(e.target.value)} placeholder="BLACK" />
-                      </Field>
-                    </div>
-                  )}
-                  {colorError && <p className="text-[12px] font-medium text-danger">{colorError}</p>}
-                  <Button onClick={() => void submitColorStep()} loading={colorSubmitting} size="sm" className="self-start">
-                    Далее
-                  </Button>
-                </div>
-              )}
-            </CardContent>
-          )}
-        </Card>
-
-        {/* Шаг 6 — нормы расхода материалов */}
-        <Card className={cn(!isUnlocked("bom") && "opacity-50")}>
-          <CardHeader className="flex-row items-center gap-3 space-y-0">
-            <StepBadge index={6} state={stepState("bom")} />
-            <CardTitle>{STEP_TITLES.bom}</CardTitle>
-            {done.bom && (
-              <Button variant="ghost" size="sm" className="ml-auto" onClick={() => reopenFrom("bom")}>
-                Изменить
-              </Button>
-            )}
-          </CardHeader>
-          {isUnlocked("bom") && (
-            <CardContent>
-              {!bomsLoaded ? (
-                <SkeletonList />
-              ) : done.bom ? (
-                <p className="t-body">Нормы расхода утверждены, будут использованы при создании заказа.</p>
-              ) : (
-                <div className="flex flex-col gap-3">
-                  {existingBoms.some((row) => row.status === "approved") && (
-                    <FilterTabs
-                      options={[
-                        { value: "use", label: "Использовать утверждённую" },
-                        { value: "create", label: "Создать новую версию" },
-                      ]}
-                      value={bomMode}
-                      onChange={setBomMode}
-                    />
-                  )}
-                  {bomMode === "use" ? (
-                    <p className="t-body text-muted-foreground">
-                      Уже утверждённые нормы расхода найдены — используем их без изменений.
+                ))}
+                {draft.rows.length > 0 && (
+                  <>
+                    <p className="text-sm">
+                      Размеры распределены автоматически. Можно изменить каждое количество.
                     </p>
-                  ) : (
-                    <div className="flex flex-col gap-2">
-                      {bomRows.map((row, index) => (
-                        <div key={index} className="flex flex-wrap items-center gap-2">
-                          <Combobox
-                            options={materials.map((m) => ({ value: m.id, label: `${m.name} (${unitLabel(m.unit)})` }))}
-                            value={row.materialId}
-                            onChange={(value) => updateBomRow(index, { materialId: value })}
-                            placeholder="Материал..."
-                          />
-                          <NumberInput
-                            value={row.quantityPerUnit}
-                            onChange={(value) => updateBomRow(index, { quantityPerUnit: value })}
-                            suffix="на ед."
-                            decimals={2}
-                            min={0}
-                            className="w-32"
-                          />
-                          <NumberInput
-                            value={row.wastePercent}
-                            onChange={(value) => updateBomRow(index, { wastePercent: value })}
-                            suffix="% отходы"
-                            decimals={1}
-                            min={0}
-                            className="w-32"
-                          />
-                          {bomRows.length > 1 && (
-                            <Button variant="ghost" size="sm" onClick={() => removeBomRow(index)}>
-                              Убрать
-                            </Button>
-                          )}
-                        </div>
+                    {draft.rows.map((row, index) => (
+                      <Field key={row.productVariantId} label={`${row.color} · ${row.size}`}>
+                        <NumberInput
+                          className={inputClass}
+                          aria-label={`${row.color} · ${row.size}`}
+                          value={row.quantity}
+                          min={0}
+                          suffix="шт."
+                          onChange={(qty) =>
+                            update({
+                              rows: draft.rows.map((old, i) =>
+                                i === index ? { ...old, quantity: qty ?? 0 } : old,
+                              ),
+                            })
+                          }
+                        />
+                      </Field>
+                    ))}
+                    <p className="font-semibold">
+                      По размерам: {total} шт. · Запланировано: {totalRequested} шт.
+                    </p>
+                  </>
+                )}
+              </>
+            )}
+            {draft.step === 2 && (
+              <>
+                <Field label="Цена пошива за изделие, ₽">
+                  <NumberInput
+                    className={inputClass}
+                    aria-label="Цена пошива за изделие, ₽"
+                    decimals={2}
+                    min={0}
+                    value={draft.price || undefined}
+                    onChange={(price) => update({ price: price ?? 0 })}
+                    suffix="₽"
+                  />
+                </Field>
+                <p className="font-medium">
+                  {total} шт. × {draft.price || "—"} ₽ ={" "}
+                  {(total * draft.price).toLocaleString("ru-RU")} ₽
+                </p>
+                <Field label="Срок готовности (необязательно)">
+                  <Input
+                    className={inputClass}
+                    type="date"
+                    aria-label="Срок готовности"
+                    value={draft.dueDate}
+                    onChange={(event) => update({ dueDate: event.target.value })}
+                  />
+                </Field>
+                {workshops.length === 1 ? (
+                  <p>
+                    Цех: <strong>{workshops[0].name}</strong>
+                  </p>
+                ) : (
+                  <Field label="Цех">
+                    <select
+                      className={`field w-full border border-border bg-card px-3 ${inputClass}`}
+                      value={draft.workshopId}
+                      aria-label="Цех"
+                      onChange={(event) => update({ workshopId: event.target.value })}
+                    >
+                      <option value="">Выберите цех</option>
+                      {workshops.map((shop) => (
+                        <option key={shop.id} value={shop.id}>
+                          {shop.name}
+                        </option>
                       ))}
-                      <Button variant="secondary" size="sm" onClick={addBomRow} className="self-start">
-                        + Добавить материал в норму
-                      </Button>
-                    </div>
-                  )}
-                  {bomError && <p className="text-[12px] font-medium text-danger">{bomError}</p>}
-                  <Button onClick={() => void submitBomStep()} loading={bomSubmitting} size="sm" className="self-start">
-                    {bomMode === "use" ? "Далее" : "Создать и утвердить нормы расхода"}
+                    </select>
+                  </Field>
+                )}
+                {!workshops.length && (
+                  <Button variant="secondary" size="lg" onClick={() => void navigate("/workshops")}>
+                    Добавить мой цех
                   </Button>
-                </div>
-              )}
-            </CardContent>
+                )}
+              </>
+            )}
+            {draft.step === 3 && (
+              <>
+                <h2 className="text-lg font-semibold">Проверьте партию</h2>
+                <p>
+                  <strong>{product?.name}</strong>
+                  <br />
+                  Цех: {workshop?.name}
+                  <br />
+                  Количество: {total} шт.
+                  <br />
+                  Пошив: {draft.price} ₽ за изделие
+                  <br />
+                  Итого: {(total * draft.price).toLocaleString("ru-RU")} ₽<br />
+                  Срок: {draft.dueDate || "не указан"}
+                </p>
+                <ul className="flex flex-col gap-2">
+                  {draft.rows
+                    .filter((row) => row.quantity > 0)
+                    .map((row) => (
+                      <li key={row.productVariantId}>
+                        {row.color} · {row.size}: <strong>{row.quantity} шт.</strong>
+                      </li>
+                    ))}
+                </ul>
+                <p className="text-sm text-muted-foreground">
+                  При размещении партия и её спецификация сохранятся вместе. Затем в карточке партии
+                  появится следующий шаг. Отправка документов цеху — отдельное действие.
+                </p>
+              </>
+            )}
+          </fieldset>
+          {error && (
+            <p role="alert" className="text-sm text-destructive">
+              {error}
+            </p>
           )}
-        </Card>
-
-        {/* Шаг 7 — Производственный заказ */}
-        <Card className={cn(!isUnlocked("order") && "opacity-50")}>
-          <CardHeader className="flex-row items-center gap-3 space-y-0">
-            <StepBadge index={7} state={stepState("order")} />
-            <CardTitle>{STEP_TITLES.order}</CardTitle>
-          </CardHeader>
-          {isUnlocked("order") && (
-            <CardContent>
-              {done.order && createdOrderId ? (
-                <div className="flex flex-col gap-3">
-                  <p className="t-body">
-                    Заказ создан и подтверждён — Snapshot партии зафиксирован (нормы расхода, цена, реквизиты цеха).
-                  </p>
-                  <Button onClick={() => void navigate(`/production-orders/${createdOrderId}`)} size="sm" className="self-start">
-                    Открыть Паспорт партии
-                  </Button>
-                </div>
-              ) : (
-                <div className="flex flex-col gap-3">
-                  <p className="t-body text-muted-foreground">
-                    Модель, цех, нормы расхода и цвет уже выбраны на предыдущих шагах — здесь только количество и цена.
-                    Раскладка по размерам ({existingSizes.map((s) => s.size).join("/")}) рассчитается автоматически по
-                    сохранённому размерному ряду.
-                  </p>
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <Field label="Общее количество, шт.">
-                      <NumberInput value={totalQuantity} onChange={setTotalQuantity} min={1} />
-                    </Field>
-                    <Field label="Цена за единицу">
-                      <MoneyInput currency="₽" value={unitPrice} onChange={setUnitPrice} />
-                    </Field>
-                  </div>
-                  {orderError && <p className="text-[12px] font-medium text-danger">{orderError}</p>}
-                  <Button onClick={() => void submitOrderStep()} loading={orderSubmitting} size="sm" className="self-start">
-                    Создать и подтвердить заказ
-                  </Button>
-                </div>
-              )}
-            </CardContent>
+          {draft.pending && (
+            <p className="text-sm">
+              Ожидаем подтверждение этой попытки. Повторное нажатие вернёт ту же партию.
+            </p>
           )}
-        </Card>
-      </div>
+          <div className="sticky bottom-[calc(4.5rem+env(safe-area-inset-bottom))] z-10 flex flex-col gap-2 rounded-lg border border-border bg-card p-3 shadow-md md:bottom-3">
+            {draft.step < 3 ? (
+              <Button size="lg" loading={busy} disabled={modelLoading} onClick={() => void next()}>
+                {draft.modelPending
+                  ? "Повторить сохранение модели"
+                  : draft.step === 1 && !draft.rows.length
+                    ? "Распределить по размерам"
+                    : "Далее"}
+              </Button>
+            ) : (
+              <>
+                <Button size="lg" loading={busy} onClick={() => void submit("place")}>
+                  {draft.pending ? "Повторить сохранение" : "Разместить партию"}
+                </Button>
+                {!draft.pending && (
+                  <Button
+                    size="lg"
+                    variant="secondary"
+                    disabled={busy}
+                    onClick={() => void submit("draft")}
+                  >
+                    Сохранить как черновик
+                  </Button>
+                )}
+              </>
+            )}
+            {draft.step > 0 && !draft.pending && (
+              <Button
+                size="lg"
+                variant="ghost"
+                disabled={busy}
+                onClick={() => update({ step: draft.step - 1 })}
+              >
+                Назад
+              </Button>
+            )}
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
 }

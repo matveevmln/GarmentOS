@@ -150,6 +150,40 @@ export const createProductionOrderSchema = z.object({
 });
 export type CreateProductionOrderDto = z.infer<typeof createProductionOrderSchema>;
 
+// Один явный шаг мобильного мастера: создание и подтверждение одной партии.
+// requestId сохраняется до ответа, чтобы повтор после обрыва связи не создавал
+// другую партию. Переделки используют существующий отдельный сценарий.
+export const placeProductionOrderSchema = createProductionOrderSchema
+  .omit({
+    createdBy: true,
+    bomId: true,
+    sourceProductionOrderId: true,
+    materialsProvidedByUs: true,
+  })
+  .extend({
+    requestId: z.string().uuid(),
+    dueDate: z.iso.date().optional(),
+    mode: z.enum(["place", "draft"]).default("place"),
+    agreedUnitPrice: z.number().positive("Укажите согласованную цену пошива"),
+    variants: z
+      .array(
+        z.object({
+          productVariantId: z.string().uuid(),
+          quantity: z.number().int().positive(),
+        }),
+      )
+      .min(1),
+  })
+  .refine(
+    (value) =>
+      new Set(value.variants.map((v) => v.productVariantId)).size === value.variants.length,
+    {
+      message: "Размер и цвет указаны повторно",
+      path: ["variants"],
+    },
+  );
+export type PlaceProductionOrderDto = z.infer<typeof placeProductionOrderSchema>;
+
 // Создание заказа пошива по общему количеству, без ручной разбивки по
 // SKU (владелец проекта, 2026-08-03 — «указываю только общее количество,
 // размерный ряд система распределяет автоматически»). Цвет не указывается —
@@ -179,7 +213,9 @@ export const createProductionOrderFromQuantitySchema = z.object({
   createdBy: z.string().uuid().optional(),
   distributionMode: sizeDistributionModeSchema.optional(),
 });
-export type CreateProductionOrderFromQuantityDto = z.infer<typeof createProductionOrderFromQuantitySchema>;
+export type CreateProductionOrderFromQuantityDto = z.infer<
+  typeof createProductionOrderFromQuantitySchema
+>;
 
 // Приёмка партии на склад (Итерация 10) — склад, на который зачисляются все
 // SKU заказа, выбирается человеком при приёмке (в отличие от материалов,
@@ -229,7 +265,9 @@ export const rollbackProductionOrderStatusResponseSchema = z.object({
   fromStatus: productionOrderStatusSchema,
   toStatus: productionOrderStatusSchema,
 });
-export type RollbackProductionOrderStatusResponseDto = z.infer<typeof rollbackProductionOrderStatusResponseSchema>;
+export type RollbackProductionOrderStatusResponseDto = z.infer<
+  typeof rollbackProductionOrderStatusResponseSchema
+>;
 
 // Отмена заказа пошива (владелец проекта, 2026-09-22) — как и у rollback,
 // причина обязательна и не заменяется никаким автоматическим текстом.
@@ -395,7 +433,9 @@ export const previewProductionOrderVariantsSchema = z.object({
     .min(1, "Укажите хотя бы один цвет с количеством"),
   distributionMode: sizeDistributionModeSchema.optional(),
 });
-export type PreviewProductionOrderVariantsDto = z.infer<typeof previewProductionOrderVariantsSchema>;
+export type PreviewProductionOrderVariantsDto = z.infer<
+  typeof previewProductionOrderVariantsSchema
+>;
 
 export const productionOrderVariantPreviewRowSchema = z.object({
   productVariantId: z.string().uuid(),
