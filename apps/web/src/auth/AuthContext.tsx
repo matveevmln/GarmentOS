@@ -1,6 +1,24 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
-import type { AuthResponseDto, AuthenticatedUserResponseDto, LoginDto } from "@garmentos/shared-types";
-import { apiRequest, clearTokens, getAccessToken, setTokens } from "../api/client";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
+import type {
+  AuthResponseDto,
+  AuthenticatedUserResponseDto,
+  LoginDto,
+} from "@garmentos/shared-types";
+import {
+  apiRequest,
+  clearTokens,
+  getAccessToken,
+  SESSION_CHANGED_EVENT,
+  setTokens,
+} from "../api/client";
 
 interface AuthContextValue {
   user: AuthenticatedUserResponseDto | null;
@@ -30,12 +48,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     // Сессия переживает закрытие браузера — access/refresh уже в localStorage
     // (docs/AUTH_ARCHITECTURE.md: refresh живёт 30 дней, скользящее окно).
-    if (getAccessToken()) setUser(loadStoredUser());
+    const syncSession = () => {
+      if (getAccessToken()) {
+        setUser(loadStoredUser());
+      } else {
+        localStorage.removeItem(USER_STORAGE_KEY);
+        setUser(null);
+      }
+    };
+    syncSession();
     setIsLoading(false);
+    window.addEventListener(SESSION_CHANGED_EVENT, syncSession);
+    window.addEventListener("storage", syncSession);
+    return () => {
+      window.removeEventListener(SESSION_CHANGED_EVENT, syncSession);
+      window.removeEventListener("storage", syncSession);
+    };
   }, []);
 
   const login = useCallback(async (input: LoginDto) => {
-    const response = await apiRequest<AuthResponseDto>("/auth/login", { method: "POST", body: input, auth: false });
+    const response = await apiRequest<AuthResponseDto>("/auth/login", {
+      method: "POST",
+      body: input,
+      auth: false,
+    });
     setTokens(response.accessToken, response.refreshToken);
     localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(response.user));
     setUser(response.user);
@@ -47,7 +83,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
   }, []);
 
-  const value = useMemo(() => ({ user, isLoading, login, logout }), [user, isLoading, login, logout]);
+  const value = useMemo(
+    () => ({ user, isLoading, login, logout }),
+    [user, isLoading, login, logout],
+  );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
