@@ -25,9 +25,9 @@ async function run() {
       }
       return { before, after: await check() };
     });
-    console.log(JSON.stringify({ check: "standard-batch-permissions", apply, checkedAt: new Date().toISOString(), ...result }));
+    console.log("standard-batch-permissions " + JSON.stringify({ check: "standard-batch-permissions", apply, checkedAt: new Date().toISOString(), ...result }));
   } catch (error) {
-    console.error(JSON.stringify({ check: "standard-batch-permissions", failed: true, code: error.code ?? "PERMISSION_REPAIR_FAILED" }));
+    console.error("standard-batch-permissions " + JSON.stringify({ check: "standard-batch-permissions", failed: true, code: error.code ?? "PERMISSION_REPAIR_FAILED" }));
     process.exitCode = 1;
   } finally { await db.end({ timeout: 5 }); }
 }
