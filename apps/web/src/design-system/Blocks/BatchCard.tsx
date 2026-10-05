@@ -6,7 +6,7 @@ import { formatDate, formatQuantity } from "../../lib/format";
 import { StatusBadge } from "../StatusBadge/StatusBadge";
 import { cn } from "../utils";
 
-// Компактная карточка из утверждённого макета (2026-10-05). Приёмка и закрытие — явные действия в паспорте.
+// Компактная структура утверждённого макета, фирменная тёмная шапка и светлое тело из Lovable.
 
 // Фото — свойство МОДЕЛИ (§7 ПРОМПТ №06.1): один и тот же photoDocumentId
 // повторяется у всех партий одной модели, поэтому blob кэшируется по
@@ -196,40 +196,45 @@ export function BatchCard({ data, onClick, actions, className }: BatchCardProps)
   const colorNames = data.breakdown.map((row) => row.color).join(" · ");
   const late = overdueDays(data.dueDate, data.status);
   return (
-    <article className={cn("seller-card", className)}>
-      <div className="flex items-start gap-3">
+    <article className={cn("batch-card seller-batch-card", className)}>
+      <div className="batch-hero seller-batch-hero flex items-start gap-3">
         <ModelThumb
           photoDocumentId={data.photoDocumentId}
           productName={data.productName}
           size={48}
+          className="seller-hero-thumb"
         />
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h3 className="min-w-0 break-words text-base font-semibold">{data.productName}</h3>
-            <StatusBadge status={data.status} />
+            <StatusBadge status={data.status} className="batch-status-badge" />
           </div>
-          <p className="mt-1 break-words text-sm text-muted-foreground">
+          <p className="seller-hero-meta mt-2 break-words text-xs">
             {data.orderNumber !== null ? `№${String(data.orderNumber).padStart(4, "0")} · ` : ""}
             {colorNames || data.workshopName}
           </p>
-          <p className={cn("mt-2 text-sm", late ? "text-danger" : "text-muted-foreground")}>
-            {formatQuantity(Number(data.plannedQuantity), "изделий")}
-            {data.dueDate ? ` · до ${formatDate(data.dueDate)}` : " · срок не указан"}
-          </p>
-          {onClick && (
-            <button
-              type="button"
-              className="focus-ring mt-1 min-h-11 text-sm font-semibold text-primary"
-              onClick={onClick}
-            >
-              {data.status === "draft" ? "Продолжить →" : "Открыть →"}
-            </button>
-          )}
         </div>
       </div>
-      {actions && (
-        <div className="mt-3 flex flex-wrap gap-2 border-t border-border pt-3">{actions}</div>
-      )}
+      <div className="seller-batch-footer flex items-center justify-between gap-3">
+        <p className={cn("min-w-0 text-xs", late ? "text-danger" : "text-muted-foreground")}>
+          <span className="seller-batch-total">
+            {formatQuantity(Number(data.plannedQuantity), "изделий")}
+          </span>
+          <span className="mt-1 block">
+            {data.dueDate ? `до ${formatDate(data.dueDate)}` : "Срок не указан"}
+          </span>
+        </p>
+        {onClick && (
+          <button
+            type="button"
+            className="focus-ring shrink-0 min-h-11 text-sm font-semibold text-primary"
+            onClick={onClick}
+          >
+            {data.status === "draft" ? "Продолжить →" : "Открыть →"}
+          </button>
+        )}
+      </div>
+      {actions && <div className="flex flex-wrap gap-2 border-t border-border p-3">{actions}</div>}
     </article>
   );
 }

@@ -5,6 +5,7 @@ import type { BatchPassportResponseDto, ProductionOrderActionsDto } from "@garme
 import { StatusBadge } from "../design-system/StatusBadge/StatusBadge";
 import { Button } from "../design-system/Button/Button";
 import { MobileActionBar } from "../design-system/Blocks/MobileActionBar";
+import { ModelThumb } from "../design-system/Blocks/BatchCard";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -88,86 +89,96 @@ export function SellerBatchView({
   const copy = messages[p.status] ?? ["Партия", "Проверьте текущее состояние."];
   return (
     <>
-      <header className="flex items-center gap-3">
-        <button
-          aria-label="Назад к партиям"
-          className="focus-ring grid h-11 w-11 shrink-0 place-items-center"
-          onClick={() => void navigate("/production-orders")}
-        >
-          <ArrowLeft size={22} />
-        </button>
-        <div className="min-w-0 flex-1 text-center">
-          <h1 className="!text-xl break-words">{p.product.name}</h1>
-          <p className="mt-1 text-xs text-muted-foreground">
-            {p.orderNumber
-              ? `Партия №${String(p.orderNumber).padStart(4, "0")}`
-              : p.status === "draft"
-                ? "Черновик партии"
-                : "Партия без номера"}{" "}
-            · {p.workshop.name}
-          </p>
-        </div>
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <button
-              aria-label="Действия партии"
-              className="focus-ring grid h-11 w-11 shrink-0 place-items-center"
-            >
-              <MoreHorizontal size={22} />
-            </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent>
-            <DropdownMenuItem
-              onSelect={() => void navigate(`/new-batch?productId=${p.product.id}`)}
-            >
-              Новая партия этой модели
-            </DropdownMenuItem>
-            {p.specification && (
-              <DropdownMenuItem
-                onSelect={() => void navigate(`/specifications/${p.specification!.id}`)}
+      <section className="batch-hero seller-party-hero" aria-label="Карточка партии">
+        <header className="flex items-center gap-3">
+          <button
+            aria-label="Назад к партиям"
+            className="focus-ring grid h-11 w-11 shrink-0 place-items-center"
+            onClick={() => void navigate("/production-orders")}
+          >
+            <ArrowLeft size={22} />
+          </button>
+          <div className="min-w-0 flex-1 text-center">
+            <div className="flex items-center justify-center gap-2">
+              <ModelThumb
+                photoDocumentId={p.product.photoDocumentId}
+                productName={p.product.name}
+                size={36}
+                className="seller-hero-thumb"
+              />
+              <h1 className="!text-xl break-words">{p.product.name}</h1>
+            </div>
+            <p className="seller-hero-meta mt-2 text-xs">
+              {p.orderNumber
+                ? `Партия №${String(p.orderNumber).padStart(4, "0")}`
+                : p.status === "draft"
+                  ? "Черновик партии"
+                  : "Партия без номера"}{" "}
+              · {p.workshop.name}
+            </p>
+          </div>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                aria-label="Действия партии"
+                className="focus-ring grid h-11 w-11 shrink-0 place-items-center"
               >
-                Открыть спецификацию
+                <MoreHorizontal size={22} />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent>
+              <DropdownMenuItem
+                onSelect={() => void navigate(`/new-batch?productId=${p.product.id}`)}
+              >
+                Новая партия этой модели
               </DropdownMenuItem>
-            )}
-            {onDownload && (
-              <DropdownMenuItem onSelect={onDownload}>Скачать спецификацию</DropdownMenuItem>
-            )}
-            {actions?.documents && !p.specification && (
-              <DropdownMenuItem onSelect={onCreateSpecification}>
-                Создать спецификацию
-              </DropdownMenuItem>
-            )}
-            {actions?.ship && (
-              <DropdownMenuItem onSelect={onShip}>Цех отправил изделия</DropdownMenuItem>
-            )}
-            {(hasQuality || actions?.quality) && (
-              <DropdownMenuItem onSelect={onQuality}>Качество и брак</DropdownMenuItem>
-            )}
-            {actions?.complete && !hasQuality && (
-              <DropdownMenuItem onSelect={onComplete}>
-                Завершить без проверки качества…
-              </DropdownMenuItem>
-            )}
-            {actions?.documents && ["received", "completed"].includes(p.status) && (
-              <DropdownMenuItem onSelect={onRework}>Переделка или допошив…</DropdownMenuItem>
-            )}
-            <DropdownMenuItem onSelect={onDetails}>Дополнительные данные</DropdownMenuItem>
-            {(actions?.rollback || actions?.cancel) && <DropdownMenuSeparator />}
-            {actions?.rollback && (
-              <DropdownMenuItem onSelect={onRollback}>Исправить последний этап…</DropdownMenuItem>
-            )}
-            {actions?.cancel && (
-              <DropdownMenuItem variant="destructive" onSelect={onCancel}>
-                Отменить партию…
-              </DropdownMenuItem>
-            )}
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </header>
-      <div className="mt-3 text-center">
-        <StatusBadge status={p.status} />
-      </div>
-      <dl className="mt-5 grid grid-cols-2 overflow-hidden rounded-xl border border-border">
+              {p.specification && (
+                <DropdownMenuItem
+                  onSelect={() => void navigate(`/specifications/${p.specification!.id}`)}
+                >
+                  Открыть спецификацию
+                </DropdownMenuItem>
+              )}
+              {onDownload && (
+                <DropdownMenuItem onSelect={onDownload}>Скачать спецификацию</DropdownMenuItem>
+              )}
+              {actions?.documents && !p.specification && (
+                <DropdownMenuItem onSelect={onCreateSpecification}>
+                  Создать спецификацию
+                </DropdownMenuItem>
+              )}
+              {actions?.ship && (
+                <DropdownMenuItem onSelect={onShip}>Цех отправил изделия</DropdownMenuItem>
+              )}
+              {(hasQuality || actions?.quality) && (
+                <DropdownMenuItem onSelect={onQuality}>Качество и брак</DropdownMenuItem>
+              )}
+              {actions?.complete && !hasQuality && (
+                <DropdownMenuItem onSelect={onComplete}>
+                  Завершить без проверки качества…
+                </DropdownMenuItem>
+              )}
+              {actions?.documents && ["received", "completed"].includes(p.status) && (
+                <DropdownMenuItem onSelect={onRework}>Переделка или допошив…</DropdownMenuItem>
+              )}
+              <DropdownMenuItem onSelect={onDetails}>Дополнительные данные</DropdownMenuItem>
+              {(actions?.rollback || actions?.cancel) && <DropdownMenuSeparator />}
+              {actions?.rollback && (
+                <DropdownMenuItem onSelect={onRollback}>Исправить последний этап…</DropdownMenuItem>
+              )}
+              {actions?.cancel && (
+                <DropdownMenuItem variant="destructive" onSelect={onCancel}>
+                  Отменить партию…
+                </DropdownMenuItem>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </header>
+        <div className="mt-3 text-center">
+          <StatusBadge status={p.status} className="batch-status-badge" />
+        </div>
+      </section>
+      <dl className="seller-stats mt-5 grid grid-cols-2 overflow-hidden rounded-xl border border-border">
         {[
           ["Количество", formatQuantity(Number(p.plannedQuantity), "шт.")],
           ["Срок", p.dueDate ? formatDate(p.dueDate) : "Не указан"],
@@ -203,7 +214,7 @@ export function SellerBatchView({
         </ol>
       )}
       <section
-        className="flex gap-3 rounded-xl border border-primary/15 bg-primary/[0.04] p-4"
+        className="seller-next-step flex gap-3 rounded-xl border border-primary/15 bg-primary/[0.04] p-4"
         aria-label="Следующий шаг партии"
       >
         <Scissors className="mt-1 shrink-0 text-primary" size={22} />
@@ -234,7 +245,7 @@ export function SellerBatchView({
       </div>
       <div id="party-tab-panel" role="tabpanel" aria-labelledby={`party-tab-${tab}`}>
         {tab === "colors" ? (
-          <div className="overflow-hidden rounded-xl border border-border divide-y divide-border">
+          <div className="seller-breakdown overflow-hidden rounded-xl border border-border divide-y divide-border">
             {p.variants.map((row) => (
               <div
                 key={row.productVariantId}
