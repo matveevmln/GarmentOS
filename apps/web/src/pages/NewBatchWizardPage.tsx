@@ -381,7 +381,7 @@ export function NewBatchWizardPage() {
     return <ErrorState title={error} onRetry={load} />;
   return (
     <div className="seller-screen">
-      <header className="mb-6 flex items-center justify-between gap-2">
+      <header className="batch-hero seller-wizard-heading mb-6 flex items-center justify-between gap-2">
         <button
           className="focus-ring grid h-11 w-11 place-items-center"
           aria-label="Назад к партиям"
@@ -542,7 +542,7 @@ export function NewBatchWizardPage() {
           )}
           {draft.step === 1 && (
             <>
-              <div className="seller-card flex items-center gap-3 bg-muted/30">
+              <div className="seller-card seller-model-chip flex items-center gap-3">
                 <ModelThumb
                   photoDocumentId={photoDocumentId}
                   productName={product?.name ?? "Модель"}

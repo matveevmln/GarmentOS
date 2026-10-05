@@ -571,10 +571,7 @@ export function AppShell() {
 
   return (
     <div
-      className={cn(
-        "isolate min-h-screen w-full bg-background text-foreground",
-        !sellerPage && "ambient-field",
-      )}
+      className={cn("isolate min-h-screen w-full bg-background text-foreground", "ambient-field")}
     >
       {/* Рельс — десктоп */}
       <aside

@@ -1,6 +1,7 @@
-/* Утверждённый владельцем мобильный макет. Общие токены/компоненты сохранены. */
+/* Компактный мобильный макет в фирменной тёплой палитре GarmentOS/Lovable.
+ * Цвета, шрифты, движение и свет — из Tokens/tokens.css, без второй палитры. */
 :root {
-  --seller-accent: #d95e25;
+  --seller-accent: var(--batch-copper);
   --keyboard-inset: 0px;
   --mobile-nav-height: calc(56px + env(safe-area-inset-bottom));
 }
@@ -15,14 +16,10 @@
 .seller-screen input {
   font-size: 16px;
 }
-.seller-screen .num {
-  font-family: inherit;
-  font-variant-numeric: tabular-nums;
-}
 .seller-screen h1 {
   font-size: 28px;
-  font-weight: 750;
-  letter-spacing: -0.035em;
+  font-weight: 600;
+  letter-spacing: -0.025em;
   line-height: 1.15;
 }
 .seller-action-bar {
@@ -32,8 +29,10 @@
   right: 0;
   z-index: 25;
   padding: 10px 16px;
-  background: var(--card);
-  border-top: 1px solid var(--border);
+  background: color-mix(in oklab, var(--batch-paper) 88%, transparent);
+  backdrop-filter: blur(var(--glass-blur));
+  border-top: 1px solid color-mix(in oklab, var(--batch-copper) 18%, var(--border));
+  box-shadow: 0 -8px 24px -18px color-mix(in oklab, var(--batch-ink) 32%, transparent);
 }
 .seller-action-bar-wizard {
   bottom: var(--keyboard-inset);
@@ -52,13 +51,15 @@
 .seller-action-inner button {
   min-height: 48px;
   font-size: 15px;
-  border-radius: 8px;
-  box-shadow: none;
+  border-radius: var(--r-lg);
 }
 .seller-card {
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  background: var(--card);
+  border: 1px solid color-mix(in oklab, var(--batch-copper) 15%, var(--border));
+  border-radius: var(--r-2xl);
+  background: var(--batch-paper);
+  box-shadow:
+    var(--shadow-1),
+    0 18px 38px -30px color-mix(in oklab, var(--batch-ink) 28%, transparent);
   padding: 16px;
 }
 .seller-tabs {
@@ -75,7 +76,7 @@
 }
 .seller-tabs button[aria-selected="true"] {
   color: var(--foreground);
-  font-weight: 650;
+  font-weight: 600;
   border-bottom-color: var(--seller-accent);
 }
 .seller-progress {
@@ -101,7 +102,7 @@
   display: none;
 }
 .seller-progress li[data-done="true"]::before {
-  background: #4a9c60;
+  background: var(--success);
 }
 .seller-phase-dot {
   position: relative;
@@ -119,7 +120,7 @@
 }
 .seller-progress li[aria-current="step"] .seller-phase-dot {
   border-color: var(--seller-accent);
-  outline: 2px solid #f6d6c5;
+  outline: 2px solid color-mix(in oklab, var(--batch-copper) 22%, var(--batch-paper));
   outline-offset: 3px;
 }
 .seller-progress li[aria-current="step"] .seller-phase-dot::after {
@@ -130,16 +131,12 @@
   background: var(--seller-accent);
 }
 .seller-progress li[data-done="true"] .seller-phase-dot {
-  background: #4a9c60;
-  border-color: #4a9c60;
-  color: white;
+  background: var(--success);
+  border-color: var(--success);
+  color: var(--primary-foreground);
 }
 .seller-screen [role="tablist"] {
   min-width: 0;
-}
-.seller-screen .seller-filter button[aria-selected="true"] {
-  background: var(--seller-accent);
-  color: white;
 }
 @media (min-width: 768px) {
   :root {
@@ -161,5 +158,111 @@
 .seller-screen input.seller-total-input {
   height: 64px;
   font-size: 28px;
-  font-weight: 700;
+  font-weight: 500;
+  font-family: var(--font-mono);
+}
+
+/* Компактная композиция; поверхности из утверждённого Lovable. */
+.seller-batch-card {
+  overflow: hidden;
+  border-radius: var(--r-2xl);
+}
+.seller-batch-hero {
+  padding: 14px 16px;
+  color: var(--sidebar-foreground);
+}
+.seller-batch-hero > *,
+.seller-party-hero > *,
+.seller-wizard-heading > * {
+  position: relative;
+  z-index: 1;
+}
+.seller-hero-meta {
+  color: color-mix(in oklab, var(--sidebar-foreground) 70%, transparent);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.seller-hero-thumb {
+  background: color-mix(in oklab, var(--card) 10%, transparent);
+  border-color: color-mix(in oklab, var(--card) 24%, transparent);
+  box-shadow: 0 8px 20px -12px color-mix(in oklab, var(--batch-ink) 80%, transparent);
+}
+.seller-hero-thumb svg {
+  color: color-mix(in oklab, var(--sidebar-foreground) 78%, transparent);
+}
+.seller-batch-footer {
+  padding: 8px 16px;
+  background: var(--batch-paper);
+}
+.seller-batch-footer button {
+  min-height: 44px;
+}
+.seller-batch-total {
+  color: var(--batch-ink);
+  font-family: var(--font-mono);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+.seller-party-hero,
+.seller-wizard-heading {
+  color: var(--sidebar-foreground);
+  border: 1px solid color-mix(in oklab, var(--batch-copper) 22%, var(--batch-ink));
+  border-radius: var(--r-2xl);
+  box-shadow: var(--shadow-2);
+  --focus-offset-color: var(--batch-ink);
+}
+.seller-party-hero {
+  padding: 14px 10px;
+}
+.seller-wizard-heading {
+  padding: 10px;
+}
+.seller-party-hero button,
+.seller-wizard-heading button {
+  border-radius: var(--r-lg);
+  transition: background-color var(--dur-2) var(--ease-out);
+}
+.seller-party-hero button:hover,
+.seller-wizard-heading button:hover {
+  background: color-mix(in oklab, var(--card) 8%, transparent);
+}
+.seller-stats,
+.seller-breakdown {
+  border-color: color-mix(in oklab, var(--batch-copper) 15%, var(--border));
+  border-radius: var(--r-2xl);
+  box-shadow: var(--shadow-1);
+}
+.seller-stats > div,
+.seller-breakdown > div {
+  background: var(--batch-paper);
+}
+.seller-stats dd,
+.seller-breakdown > div > span:last-child {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+}
+.seller-next-step {
+  border-color: color-mix(in oklab, var(--batch-copper) 24%, var(--border));
+  background: color-mix(in oklab, var(--batch-copper) 5%, var(--batch-paper));
+  box-shadow: var(--shadow-1);
+}
+.seller-tabs {
+  border-bottom-color: color-mix(in oklab, var(--batch-copper) 15%, var(--border));
+}
+.seller-tabs button[aria-selected="true"] {
+  color: var(--primary);
+}
+.seller-model-chip {
+  background: color-mix(in oklab, var(--batch-copper) 4%, var(--batch-paper));
+}
+.seller-screen input {
+  background-color: var(--batch-paper);
+}
+@media (prefers-reduced-motion: reduce) {
+  .seller-batch-card,
+  .seller-party-hero button,
+  .seller-wizard-heading button {
+    transition: none;
+  }
 }
