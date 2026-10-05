@@ -1,0 +1,165 @@
+/* Утверждённый владельцем мобильный макет. Общие токены/компоненты сохранены. */
+:root {
+  --seller-accent: #d95e25;
+  --keyboard-inset: 0px;
+  --mobile-nav-height: calc(56px + env(safe-area-inset-bottom));
+}
+.seller-screen {
+  max-width: 660px;
+  margin-inline: auto;
+  padding-bottom: 92px;
+}
+.seller-screen button {
+  min-height: 44px;
+}
+.seller-screen input {
+  font-size: 16px;
+}
+.seller-screen .num {
+  font-family: inherit;
+  font-variant-numeric: tabular-nums;
+}
+.seller-screen h1 {
+  font-size: 28px;
+  font-weight: 750;
+  letter-spacing: -0.035em;
+  line-height: 1.15;
+}
+.seller-action-bar {
+  position: fixed;
+  bottom: calc(var(--mobile-nav-height) + var(--keyboard-inset));
+  left: 0;
+  right: 0;
+  z-index: 25;
+  padding: 10px 16px;
+  background: var(--card);
+  border-top: 1px solid var(--border);
+}
+.seller-action-bar-wizard {
+  bottom: var(--keyboard-inset);
+  padding-bottom: calc(12px + env(safe-area-inset-bottom));
+}
+.seller-action-inner {
+  max-width: 628px;
+  margin-inline: auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.seller-action-inner > * {
+  flex: 1;
+}
+.seller-action-inner button {
+  min-height: 48px;
+  font-size: 15px;
+  border-radius: 8px;
+  box-shadow: none;
+}
+.seller-card {
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--card);
+  padding: 16px;
+}
+.seller-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--border);
+  margin-block: 20px 12px;
+}
+.seller-tabs button {
+  flex: 1;
+  padding: 10px 6px;
+  font-size: 14px;
+  color: var(--muted-foreground);
+  border-bottom: 2px solid transparent;
+}
+.seller-tabs button[aria-selected="true"] {
+  color: var(--foreground);
+  font-weight: 650;
+  border-bottom-color: var(--seller-accent);
+}
+.seller-progress {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-block: 22px;
+}
+.seller-progress li {
+  position: relative;
+  text-align: center;
+  font-size: 13px;
+}
+.seller-progress li::before {
+  content: "";
+  position: absolute;
+  top: 14px;
+  left: -50%;
+  right: 50%;
+  height: 2px;
+  background: var(--border);
+}
+.seller-progress li:first-child::before {
+  display: none;
+}
+.seller-progress li[data-done="true"]::before {
+  background: #4a9c60;
+}
+.seller-phase-dot {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  margin: 0 auto 8px;
+  background: var(--card);
+  border: 2px solid var(--border);
+  border-radius: 50%;
+}
+.seller-progress li[aria-current="step"] {
+  color: var(--seller-accent);
+}
+.seller-progress li[aria-current="step"] .seller-phase-dot {
+  border-color: var(--seller-accent);
+  outline: 2px solid #f6d6c5;
+  outline-offset: 3px;
+}
+.seller-progress li[aria-current="step"] .seller-phase-dot::after {
+  content: "";
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--seller-accent);
+}
+.seller-progress li[data-done="true"] .seller-phase-dot {
+  background: #4a9c60;
+  border-color: #4a9c60;
+  color: white;
+}
+.seller-screen [role="tablist"] {
+  min-width: 0;
+}
+.seller-screen .seller-filter button[aria-selected="true"] {
+  background: var(--seller-accent);
+  color: white;
+}
+@media (min-width: 768px) {
+  :root {
+    --mobile-nav-height: 0px;
+  }
+  .seller-action-bar {
+    position: sticky;
+    bottom: 16px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    margin-top: 20px;
+    padding: 12px;
+  }
+  .seller-screen {
+    padding-bottom: 24px;
+  }
+}
+
+.seller-screen input.seller-total-input {
+  height: 64px;
+  font-size: 28px;
+  font-weight: 700;
+}

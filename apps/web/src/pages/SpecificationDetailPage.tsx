@@ -1,3 +1,11 @@
+import { ArrowLeft, MoreHorizontal } from "lucide-react";
+import { MobileActionBar } from "../design-system/Blocks/MobileActionBar";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from "../design-system/DropdownMenu/DropdownMenu";
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import type {
@@ -18,7 +26,14 @@ import { Combobox } from "../design-system/Select/Combobox";
 import { FilterTabs } from "../design-system/Tabs/FilterTabs";
 import { Button } from "../design-system/Button/Button";
 import { DatePicker } from "../design-system/Form/DatePicker";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "../design-system/Modal/Dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "../design-system/Modal/Dialog";
 import { PageHeader, Breadcrumbs } from "../design-system/PageHeader/PageHeader";
 import { StatusBadge } from "../design-system/StatusBadge/StatusBadge";
 import { EmptyState } from "../design-system/Feedback/EmptyState";
@@ -83,7 +98,9 @@ function SpecificationWizard() {
 
   useEffect(() => {
     void apiRequest<ProductResponseDto[]>("/products").then(setProducts);
-    void apiRequest<string[]>("/products/colors").then(setColorPresets).catch(() => setColorPresets([]));
+    void apiRequest<string[]>("/products/colors")
+      .then(setColorPresets)
+      .catch(() => setColorPresets([]));
     // Шаг «Цех» скрыт (владелец проекта, 2026-09-21 — «пока цех всего один,
     // не заставлять выбирать его каждый раз»): первый цех из списка
     // выбирается автоматически и молча, шаг остаётся скрытым, пока цехов
@@ -96,18 +113,22 @@ function SpecificationWizard() {
   }, []);
 
   const loadVariantsAndSizes = (pid: string) => {
-    void apiRequest<ProductVariantResponseDto[]>(`/product-variants?productId=${pid}`).then((rows) => {
-      setVariants(rows);
-      setItems((prev) => {
-        const next: Record<string, DraftItem> = {};
-        for (const variant of rows) next[variant.id] = prev[variant.id] ?? { variant };
-        return next;
-      });
-    });
-    void apiRequest<Array<{ size: string; ratioWeight: number }>>(`/products/${pid}/sizes`).then((rows) => {
-      setHasSizes(rows.length > 0);
-      if (rows.length === 0) setQuickSizes([{ size: "", ratioWeight: 1 }]);
-    });
+    void apiRequest<ProductVariantResponseDto[]>(`/product-variants?productId=${pid}`).then(
+      (rows) => {
+        setVariants(rows);
+        setItems((prev) => {
+          const next: Record<string, DraftItem> = {};
+          for (const variant of rows) next[variant.id] = prev[variant.id] ?? { variant };
+          return next;
+        });
+      },
+    );
+    void apiRequest<Array<{ size: string; ratioWeight: number }>>(`/products/${pid}/sizes`).then(
+      (rows) => {
+        setHasSizes(rows.length > 0);
+        if (rows.length === 0) setQuickSizes([{ size: "", ratioWeight: 1 }]);
+      },
+    );
   };
 
   useEffect(() => {
@@ -180,7 +201,10 @@ function SpecificationWizard() {
     try {
       const created = await apiRequest<WorkshopResponseDto>("/workshops", {
         method: "POST",
-        body: { name: newWorkshopName.trim(), contractNumber: newWorkshopContractNumber.trim() || undefined },
+        body: {
+          name: newWorkshopName.trim(),
+          contractNumber: newWorkshopContractNumber.trim() || undefined,
+        },
       });
       setWorkshops((prev) => [...prev, created]);
       setWorkshopId(created.id);
@@ -204,7 +228,9 @@ function SpecificationWizard() {
         body: {
           productId,
           workshopId,
-          deliveryDeadline: deliveryDeadline ? deliveryDeadline.toISOString().slice(0, 10) : undefined,
+          deliveryDeadline: deliveryDeadline
+            ? deliveryDeadline.toISOString().slice(0, 10)
+            : undefined,
           items: activeItems.map((row) => ({
             productVariantId: row.variant.id,
             quantity: row.quantity,
@@ -212,7 +238,9 @@ function SpecificationWizard() {
           })),
         },
       });
-      toast.success("Черновик спецификации создан", { description: "Номер появится после утверждения." });
+      toast.success("Черновик спецификации создан", {
+        description: "Номер появится после утверждения.",
+      });
       void navigate(`/specifications/${created.id}`, { replace: true });
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "Не удалось создать спецификацию");
@@ -266,10 +294,18 @@ function SpecificationWizard() {
           ) : (
             <div className="grid gap-3 sm:grid-cols-2">
               <Field label="Название">
-                <Input value={newProductName} onChange={(e) => setNewProductName(e.target.value)} placeholder="Стеганка Гашов" />
+                <Input
+                  value={newProductName}
+                  onChange={(e) => setNewProductName(e.target.value)}
+                  placeholder="Стеганка Гашов"
+                />
               </Field>
               <Field label="Артикул">
-                <Input value={newProductCode} onChange={(e) => setNewProductCode(e.target.value)} placeholder="STEGANKA-001" />
+                <Input
+                  value={newProductCode}
+                  onChange={(e) => setNewProductCode(e.target.value)}
+                  placeholder="STEGANKA-001"
+                />
               </Field>
               <Button
                 type="button"
@@ -288,9 +324,10 @@ function SpecificationWizard() {
             <div className="rounded-[10px] border border-border bg-muted/40 p-3.5">
               <SectionLabel>Размерный ряд ещё не задан — задайте его сейчас</SectionLabel>
               <p className="t-secondary mt-1">
-                «Доля» — это пропорция размера в будущих заказах (например, 1 / 2 / 1), а не количество для этой
-                спецификации. Само количество по размерам и цветам вы укажете чуть ниже, в строках спецификации; если
-                распределение по размерам не важно, оставьте у каждого размера значение 1.
+                «Доля» — это пропорция размера в будущих заказах (например, 1 / 2 / 1), а не
+                количество для этой спецификации. Само количество по размерам и цветам вы укажете
+                чуть ниже, в строках спецификации; если распределение по размерам не важно, оставьте
+                у каждого размера значение 1.
               </p>
               <div className="mt-2 flex flex-col gap-2">
                 {quickSizes.map((row, index) => (
@@ -301,28 +338,51 @@ function SpecificationWizard() {
                           (size) => size === row.size || !quickSizes.some((r) => r.size === size),
                         ).map((size) => ({ value: size, label: size }))}
                         value={row.size}
-                        onChange={(size) => setQuickSizes((prev) => prev.map((r, i) => (i === index ? { ...r, size } : r)))}
+                        onChange={(size) =>
+                          setQuickSizes((prev) =>
+                            prev.map((r, i) => (i === index ? { ...r, size } : r)),
+                          )
+                        }
                         placeholder="Выберите размер..."
                       />
                     </Field>
                     <Field label="Доля" className="min-w-[90px] flex-1">
                       <NumberInput
                         value={row.ratioWeight}
-                        onChange={(v) => setQuickSizes((prev) => prev.map((r, i) => (i === index ? { ...r, ratioWeight: v ?? 0 } : r)))}
+                        onChange={(v) =>
+                          setQuickSizes((prev) =>
+                            prev.map((r, i) => (i === index ? { ...r, ratioWeight: v ?? 0 } : r)),
+                          )
+                        }
                         min={0}
                         decimals={2}
                       />
                     </Field>
-                    <Button type="button" variant="secondary" size="sm" onClick={() => setQuickSizes((prev) => prev.filter((_, i) => i !== index))}>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => setQuickSizes((prev) => prev.filter((_, i) => i !== index))}
+                    >
                       Убрать
                     </Button>
                   </div>
                 ))}
                 <div className="flex flex-wrap gap-2">
-                  <Button type="button" variant="secondary" size="sm" onClick={() => setQuickSizes((prev) => [...prev, { size: "", ratioWeight: 1 }])}>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => setQuickSizes((prev) => [...prev, { size: "", ratioWeight: 1 }])}
+                  >
                     + Размер
                   </Button>
-                  <Button type="button" size="sm" loading={isSavingQuickSizes} onClick={() => void saveQuickSizes()}>
+                  <Button
+                    type="button"
+                    size="sm"
+                    loading={isSavingQuickSizes}
+                    onClick={() => void saveQuickSizes()}
+                  >
                     Сохранить размерный ряд
                   </Button>
                 </div>
@@ -332,7 +392,9 @@ function SpecificationWizard() {
 
           {productId && hasSizes && (
             <div className="rounded-[10px] border border-border bg-muted/40 p-3.5">
-              <SectionLabel>Цвета модели ({new Set(variants.map((v) => v.color)).size})</SectionLabel>
+              <SectionLabel>
+                Цвета модели ({new Set(variants.map((v) => v.color)).size})
+              </SectionLabel>
               <div className="mt-2 flex flex-wrap items-end gap-2">
                 <Field label="Цвет" className="min-w-[130px] flex-1">
                   <Combobox
@@ -344,7 +406,11 @@ function SpecificationWizard() {
                   />
                 </Field>
                 <Field label="Код цвета" className="min-w-[130px] flex-1">
-                  <Input value={newColorCode} onChange={(e) => setNewColorCode(e.target.value)} placeholder="GRAFIT" />
+                  <Input
+                    value={newColorCode}
+                    onChange={(e) => setNewColorCode(e.target.value)}
+                    placeholder="GRAFIT"
+                  />
                 </Field>
                 <Button
                   type="button"
@@ -374,10 +440,25 @@ function SpecificationWizard() {
           <CardContent className="flex flex-col gap-3">
             <div className="grid gap-3 sm:grid-cols-2">
               <Field label="Название">
-                <Input value={newWorkshopName} onChange={(e) => setNewWorkshopName(e.target.value)} placeholder="Ак-Сарай Текстиль" />
+                <Input
+                  value={newWorkshopName}
+                  onChange={(e) => setNewWorkshopName(e.target.value)}
+                  placeholder="Ак-Сарай Текстиль"
+                />
               </Field>
-              <Field label="Номер договора" hint={<span className="text-muted-foreground/70">можно указать позже, в карточке цеха</span>}>
-                <Input value={newWorkshopContractNumber} onChange={(e) => setNewWorkshopContractNumber(e.target.value)} placeholder="П-22-04" />
+              <Field
+                label="Номер договора"
+                hint={
+                  <span className="text-muted-foreground/70">
+                    можно указать позже, в карточке цеха
+                  </span>
+                }
+              >
+                <Input
+                  value={newWorkshopContractNumber}
+                  onChange={(e) => setNewWorkshopContractNumber(e.target.value)}
+                  placeholder="П-22-04"
+                />
               </Field>
               <Button
                 type="button"
@@ -404,27 +485,44 @@ function SpecificationWizard() {
           </CardHeader>
           <CardContent>
             {variants.length === 0 ? (
-              <EmptyState compact title="У модели ещё нет ни одного варианта" description="Добавьте цвет в шаге 1 — размеры на него уже разложатся автоматически." />
+              <EmptyState
+                compact
+                title="У модели ещё нет ни одного варианта"
+                description="Добавьте цвет в шаге 1 — размеры на него уже разложатся автоматически."
+              />
             ) : (
               <div className="flex flex-col gap-2">
                 {variants.map((variant) => {
                   const row = items[variant.id];
                   return (
-                    <div key={variant.id} className="flex flex-wrap items-end gap-2 rounded-[10px] border border-border bg-muted/30 p-2.5">
+                    <div
+                      key={variant.id}
+                      className="flex flex-wrap items-end gap-2 rounded-[10px] border border-border bg-muted/30 p-2.5"
+                    >
                       <span className="min-w-[160px] flex-1 text-[13px] font-medium">
                         {variant.color} / {variant.size}
                       </span>
                       <Field label="Количество" className="min-w-[110px]">
                         <NumberInput
                           value={row?.quantity}
-                          onChange={(v) => setItems((prev) => ({ ...prev, [variant.id]: { ...prev[variant.id], variant, quantity: v } }))}
+                          onChange={(v) =>
+                            setItems((prev) => ({
+                              ...prev,
+                              [variant.id]: { ...prev[variant.id], variant, quantity: v },
+                            }))
+                          }
                           min={0}
                         />
                       </Field>
                       <Field label="Цена, ₽" className="min-w-[110px]">
                         <NumberInput
                           value={row?.unitPrice}
-                          onChange={(v) => setItems((prev) => ({ ...prev, [variant.id]: { ...prev[variant.id], variant, unitPrice: v } }))}
+                          onChange={(v) =>
+                            setItems((prev) => ({
+                              ...prev,
+                              [variant.id]: { ...prev[variant.id], variant, unitPrice: v },
+                            }))
+                          }
                           min={0}
                           decimals={2}
                         />
@@ -449,10 +547,19 @@ function SpecificationWizard() {
               <DatePicker value={deliveryDeadline} onChange={setDeliveryDeadline} />
             </Field>
             <p className="t-secondary">
-              Количество: <strong className="num">{formatQuantity(activeItems.reduce((s, r) => s + (r.quantity ?? 0), 0))}</strong> шт. Итоговая
-              сумма и предоплата 70% будут рассчитаны сервером и появятся сразу после создания черновика.
+              Количество:{" "}
+              <strong className="num">
+                {formatQuantity(activeItems.reduce((s, r) => s + (r.quantity ?? 0), 0))}
+              </strong>{" "}
+              шт. Итоговая сумма и предоплата 70% будут рассчитаны сервером и появятся сразу после
+              создания черновика.
             </p>
-            <Button type="button" loading={isCreatingDraft} className="self-start" onClick={() => void createDraft()}>
+            <Button
+              type="button"
+              loading={isCreatingDraft}
+              className="self-start"
+              onClick={() => void createDraft()}
+            >
               Создать черновик
             </Button>
           </CardContent>
@@ -471,14 +578,23 @@ function SpecificationView({ id }: { id: string }) {
   const [error, setError] = useState(false);
   const [isApproving, setIsApproving] = useState(false);
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
-  const [documents, setDocuments] = useState<Array<{ id: string; isCurrentVersion: boolean; title: string | null }>>([]);
+  const [documents, setDocuments] = useState<
+    Array<{ id: string; isCurrentVersion: boolean; title: string | null }>
+  >([]);
   const [showBasedOn, setShowBasedOn] = useState(false);
   // Остаток спецификации по строкам (Этап 3 «Production Master», владелец
   // проекта, 2026-09-12) — сколько ещё не размещено ни в одной
   // производственной партии; нужен для кнопки «Создать производственную
   // партию». null, пока не утверждена или ещё не загружен.
-  const [availableQuantity, setAvailableQuantity] = useState<SpecificationAvailableQuantityResponseDto | null>(null);
+  const [availableQuantity, setAvailableQuantity] =
+    useState<SpecificationAvailableQuantityResponseDto | null>(null);
   const [showCreateBatch, setShowCreateBatch] = useState(false);
+  const [linkedOrders, setLinkedOrders] = useState<ProductionOrderResponseDto[]>([]);
+  useEffect(() => {
+    void apiRequest<ProductionOrderResponseDto[]>(`/production-orders?specificationId=${id}`)
+      .then(setLinkedOrders)
+      .catch(() => setLinkedOrders([]));
+  }, [id]);
 
   // Редактирование спецификации NEW-потока (ПРОМПТ №3, раздел 2) —
   // спецификация, созданная ИЗ заказа (spec.productionOrderId задан):
@@ -488,7 +604,9 @@ function SpecificationView({ id }: { id: string }) {
   const [isEditing, setIsEditing] = useState(false);
   const [editWorkshopId, setEditWorkshopId] = useState("");
   const [editDeliveryDeadline, setEditDeliveryDeadline] = useState<Date | undefined>();
-  const [editItems, setEditItems] = useState<Record<string, { quantity: number; unitPrice: number }>>({});
+  const [editItems, setEditItems] = useState<
+    Record<string, { quantity: number; unitPrice: number }>
+  >({});
   const [allWorkshops, setAllWorkshops] = useState<WorkshopResponseDto[]>([]);
   const [isSavingEdit, setIsSavingEdit] = useState(false);
   // Отмена спецификации NEW-потока (backend: POST /specifications/:id/cancel,
@@ -511,7 +629,12 @@ function SpecificationView({ id }: { id: string }) {
 
   const applyPriceToAllRows = (value: number) => {
     setEditItems((prev) =>
-      Object.fromEntries(Object.entries(prev).map(([variantId, values]) => [variantId, { ...values, unitPrice: value }])),
+      Object.fromEntries(
+        Object.entries(prev).map(([variantId, values]) => [
+          variantId,
+          { ...values, unitPrice: value },
+        ]),
+      ),
     );
   };
 
@@ -539,15 +662,18 @@ function SpecificationView({ id }: { id: string }) {
     apiRequest<SpecificationResponseDto>(`/specifications/${id}`)
       .then(async (loaded) => {
         setSpec(loaded);
-        const [productData, workshopData, variantsData, docsData, workshopsData] = await Promise.all([
-          apiRequest<ProductResponseDto>(`/products/${loaded.productId}`),
-          apiRequest<WorkshopResponseDto>(`/workshops/${loaded.workshopId}`),
-          apiRequest<ProductVariantResponseDto[]>(`/product-variants?productId=${loaded.productId}`),
-          apiRequest<Array<{ id: string; isCurrentVersion: boolean; title: string | null }>>(
-            `/documents?entityType=specification&entityId=${loaded.id}`,
-          ),
-          apiRequest<WorkshopResponseDto[]>("/workshops"),
-        ]);
+        const [productData, workshopData, variantsData, docsData, workshopsData] =
+          await Promise.all([
+            apiRequest<ProductResponseDto>(`/products/${loaded.productId}`),
+            apiRequest<WorkshopResponseDto>(`/workshops/${loaded.workshopId}`),
+            apiRequest<ProductVariantResponseDto[]>(
+              `/product-variants?productId=${loaded.productId}`,
+            ),
+            apiRequest<Array<{ id: string; isCurrentVersion: boolean; title: string | null }>>(
+              `/documents?entityType=specification&entityId=${loaded.id}`,
+            ),
+            apiRequest<WorkshopResponseDto[]>("/workshops"),
+          ]);
         setProduct(productData);
         setWorkshop(workshopData);
         setVariants(variantsData);
@@ -571,7 +697,9 @@ function SpecificationView({ id }: { id: string }) {
     try {
       await apiRequest(`/specifications/${id}/approve`, { method: "POST" });
       load();
-      toast.success("Спецификация утверждена", { description: "Номер присвоен, данные зафиксированы навсегда." });
+      toast.success("Спецификация утверждена", {
+        description: "Номер присвоен, данные зафиксированы навсегда.",
+      });
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "Не удалось утвердить спецификацию");
     } finally {
@@ -613,7 +741,10 @@ function SpecificationView({ id }: { id: string }) {
     setEditDeliveryDeadline(spec.deliveryDeadline ? new Date(spec.deliveryDeadline) : undefined);
     setEditItems(
       Object.fromEntries(
-        spec.items.map((item) => [item.productVariantId, { quantity: Number(item.quantity), unitPrice: Number(item.unitPrice) }]),
+        spec.items.map((item) => [
+          item.productVariantId,
+          { quantity: Number(item.quantity), unitPrice: Number(item.unitPrice) },
+        ]),
       ),
     );
     setIsEditing(true);
@@ -627,7 +758,9 @@ function SpecificationView({ id }: { id: string }) {
         method: "PATCH",
         body: {
           workshopId: editWorkshopId !== spec.workshopId ? editWorkshopId : undefined,
-          deliveryDeadline: editDeliveryDeadline ? editDeliveryDeadline.toISOString().slice(0, 10) : null,
+          deliveryDeadline: editDeliveryDeadline
+            ? editDeliveryDeadline.toISOString().slice(0, 10)
+            : null,
           items: Object.entries(editItems).map(([productVariantId, values]) => ({
             productVariantId,
             quantity: values.quantity,
@@ -637,7 +770,9 @@ function SpecificationView({ id }: { id: string }) {
       });
       setIsEditing(false);
       load();
-      toast.success("Спецификация изменена", { description: "Суммы пересчитаны. Заказ пошива не изменён." });
+      toast.success("Спецификация изменена", {
+        description: "Суммы пересчитаны. Заказ пошива не изменён.",
+      });
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "Не удалось сохранить изменения");
     } finally {
@@ -658,9 +793,14 @@ function SpecificationView({ id }: { id: string }) {
   };
 
   const currentDoc = documents.find((d) => d.isCurrentVersion);
-  const remainder = spec.prepaymentAmount ? Number(spec.totalSum) - Number(spec.prepaymentAmount) : null;
-  const hasAvailableQuantity = (availableQuantity?.items ?? []).some((row) => row.availableQuantity > 0.0005);
-  const isFullyAllocated = spec.status === "approved" && availableQuantity !== null && !hasAvailableQuantity;
+  const remainder = spec.prepaymentAmount
+    ? Number(spec.totalSum) - Number(spec.prepaymentAmount)
+    : null;
+  const hasAvailableQuantity = (availableQuantity?.items ?? []).some(
+    (row) => row.availableQuantity > 0.0005,
+  );
+  const isFullyAllocated =
+    spec.status === "approved" && availableQuantity !== null && !hasAvailableQuantity;
   // NEW-поток (ПРОМПТ №3) — спецификация создана ИЗ заказа: партия уже
   // существует, "Создать партию"/"Создать на основе" здесь не имеют смысла
   // (это операции LEGACY-потока, где спецификация первична).
@@ -668,74 +808,76 @@ function SpecificationView({ id }: { id: string }) {
   const canEdit = isNewFlow && spec.status !== "cancelled";
 
   return (
-    <div className="mx-auto max-w-[1100px]">
-      <PageHeader
-        title={spec.specNumber ? `Спецификация №${spec.specNumber}` : "Спецификация (черновик)"}
-        subtitle={
-          <span className="flex items-center gap-2">
-            <span>
-              {product.name} · {workshop.name}
-            </span>
-            <StatusBadge status={spec.status} />
-          </span>
-        }
-        breadcrumbs={
-          <Breadcrumbs
-            items={[
-              { label: "GarmentOS" },
-              { label: "Спецификации", onClick: () => void navigate("/specifications") },
-              { label: spec.specNumber ? `№${spec.specNumber}` : "Черновик" },
-            ]}
-          />
-        }
-        actions={
-          isEditing ? (
-            <span className="flex flex-wrap items-center gap-2">
-              <Button size="sm" variant="secondary" onClick={() => setIsEditing(false)}>
-                Отмена
-              </Button>
-              <Button size="sm" loading={isSavingEdit} onClick={() => void saveEdit()}>
-                Сохранить
-              </Button>
-            </span>
-          ) : canEdit ? (
-            <span className="flex flex-wrap items-center gap-2">
-              <Button size="sm" variant="secondary" onClick={startEdit}>
-                Изменить
-              </Button>
-              <Button size="sm" variant="ghost" onClick={() => setShowCancelConfirm(true)}>
-                Отменить
-              </Button>
-            </span>
-          ) : spec.status === "draft" ? (
-            // LEGACY-черновик — единственный статус, где отмена этой
-            // спецификации вообще допустима backend'ом (assertIsDraft в
-            // cancelSpecification); без этой кнопки ошибочный черновик было
-            // невозможно ничем закрыть — только бросить (аудит
-            // пользовательского пути, owner, 2026-09-21).
-            <span className="flex flex-wrap items-center gap-2">
-              <Button size="sm" loading={isApproving} onClick={() => void approve()}>
-                Утвердить спецификацию
-              </Button>
-              <Button size="sm" variant="ghost" onClick={() => setShowCancelConfirm(true)}>
-                Отменить
-              </Button>
-            </span>
-          ) : spec.status === "approved" && !isNewFlow ? (
-            <span className="flex flex-wrap items-center gap-2">
-              {hasAvailableQuantity && (
-                <Button size="sm" onClick={() => setShowCreateBatch(true)}>
-                  Создать производственную партию
-                </Button>
-              )}
-              <Button size="sm" variant="secondary" onClick={() => setShowBasedOn(true)}>
-                Создать на основе
-              </Button>
-            </span>
-          ) : undefined
-        }
-      />
-
+    <div className="seller-screen space-y-4">
+      <header className="flex items-center gap-2">
+        <button
+          aria-label="Назад"
+          className="focus-ring grid h-11 w-11 shrink-0 place-items-center"
+          onClick={() =>
+            void navigate(
+              spec.productionOrderId
+                ? `/production-orders/${spec.productionOrderId}`
+                : "/specifications",
+            )
+          }
+        >
+          <ArrowLeft size={22} />
+        </button>
+        <div className="min-w-0 flex-1">
+          <h1 className="!text-xl">
+            {spec.specNumber ? `Спецификация №${spec.specNumber}` : "Спецификация"}
+          </h1>
+          <p className="mt-1 break-words text-sm text-muted-foreground">
+            {product.name} · {workshop.name}
+          </p>
+        </div>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              aria-label="Действия спецификации"
+              className="focus-ring grid h-11 w-11 shrink-0 place-items-center"
+            >
+              <MoreHorizontal size={22} />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent>
+            {canEdit && !isEditing && (
+              <DropdownMenuItem onSelect={startEdit}>Изменить документ</DropdownMenuItem>
+            )}
+            {currentDoc && (
+              <DropdownMenuItem
+                onSelect={() => void downloadDocument(currentDoc.id, currentDoc.title)}
+              >
+                Скачать спецификацию
+              </DropdownMenuItem>
+            )}
+            {spec.status === "approved" && (
+              <DropdownMenuItem disabled={isGeneratingPdf} onSelect={() => void generatePdf()}>
+                Сформировать PDF
+              </DropdownMenuItem>
+            )}
+            <DropdownMenuItem onSelect={() => void navigate(`/new-batch?productId=${product.id}`)}>
+              Новая партия этой модели
+            </DropdownMenuItem>
+            {!isNewFlow && (
+              <DropdownMenuItem onSelect={() => setShowBasedOn(true)}>
+                Копировать документ…
+              </DropdownMenuItem>
+            )}
+            {(canEdit || spec.status === "draft") && (
+              <DropdownMenuItem variant="destructive" onSelect={() => setShowCancelConfirm(true)}>
+                Отменить документ…
+              </DropdownMenuItem>
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </header>
+      <StatusBadge status={spec.status} />
+      {isEditing && (
+        <p className="rounded-lg bg-warning/10 p-3 text-sm">
+          Изменения относятся к документу. Количество и условия самой партии сохраняются.
+        </p>
+      )}
       {isEditing && (
         <Card>
           <CardHeader>
@@ -765,10 +907,16 @@ function SpecificationView({ id }: { id: string }) {
                       "rounded-[10px] border border-border bg-card px-3 py-1.5 text-[13px] font-medium text-muted-foreground transition-colors hover:border-primary/30",
                     )}
                   >
-                    {formatQuantity(Number(preset.value))} {preset.currency === "RUB" ? "руб." : preset.currency}
+                    {formatQuantity(Number(preset.value))}{" "}
+                    {preset.currency === "RUB" ? "руб." : preset.currency}
                   </button>
                 ))}
-                <NumberInput className="w-[120px]" value={customPricePreset} onChange={setCustomPricePreset} min={0} />
+                <NumberInput
+                  className="w-[120px]"
+                  value={customPricePreset}
+                  onChange={setCustomPricePreset}
+                  min={0}
+                />
                 <Button
                   type="button"
                   variant="secondary"
@@ -790,7 +938,66 @@ function SpecificationView({ id }: { id: string }) {
           <CardTitle>Строки</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="min-w-0 overflow-x-auto">
+          <div className="divide-y divide-border md:hidden">
+            {spec.items.map((item) => (
+              <article key={item.id} className="py-3">
+                <h3 className="break-words text-sm font-semibold">
+                  {variantLabel(item.productVariantId)}
+                </h3>
+                {isEditing ? (
+                  <div className="mt-3 grid grid-cols-2 gap-3">
+                    <Field label="Количество">
+                      <NumberInput
+                        aria-label={`Количество ${variantLabel(item.productVariantId)}`}
+                        value={editItems[item.productVariantId]?.quantity}
+                        min={0}
+                        onChange={(value) =>
+                          setEditItems((prev) => ({
+                            ...prev,
+                            [item.productVariantId]: {
+                              quantity: value ?? 0,
+                              unitPrice: prev[item.productVariantId]?.unitPrice ?? 0,
+                            },
+                          }))
+                        }
+                      />
+                    </Field>
+                    <Field label="Цена">
+                      <NumberInput
+                        aria-label={`Цена ${variantLabel(item.productVariantId)}`}
+                        value={editItems[item.productVariantId]?.unitPrice}
+                        min={0}
+                        onChange={(value) =>
+                          setEditItems((prev) => ({
+                            ...prev,
+                            [item.productVariantId]: {
+                              unitPrice: value ?? 0,
+                              quantity: prev[item.productVariantId]?.quantity ?? 0,
+                            },
+                          }))
+                        }
+                      />
+                    </Field>
+                  </div>
+                ) : (
+                  <p className="mt-2 text-sm text-muted-foreground">
+                    {formatQuantity(Number(item.quantity), "шт.")} ×{" "}
+                    {formatMoney(Number(item.unitPrice), currencyLabel(spec.totalSumCurrency))}
+                  </p>
+                )}
+                <p className="mt-2 break-words text-right text-base font-semibold">
+                  {formatMoney(
+                    isEditing
+                      ? (editItems[item.productVariantId]?.quantity ?? 0) *
+                          (editItems[item.productVariantId]?.unitPrice ?? 0)
+                      : Number(item.sum),
+                    currencyLabel(spec.totalSumCurrency),
+                  )}
+                </p>
+              </article>
+            ))}
+          </div>
+          <div className="hidden min-w-0 overflow-x-auto md:block">
             <DataTable
               columns={[
                 { key: "variant", label: "Модель / цвет / размер" },
@@ -812,7 +1019,11 @@ function SpecificationView({ id }: { id: string }) {
                         onChange={(value) =>
                           setEditItems((prev) => ({
                             ...prev,
-                            [item.productVariantId]: { ...prev[item.productVariantId], quantity: value ?? 0, unitPrice: prev[item.productVariantId]?.unitPrice ?? 0 },
+                            [item.productVariantId]: {
+                              ...prev[item.productVariantId],
+                              quantity: value ?? 0,
+                              unitPrice: prev[item.productVariantId]?.unitPrice ?? 0,
+                            },
                           }))
                         }
                         min={0}
@@ -825,7 +1036,11 @@ function SpecificationView({ id }: { id: string }) {
                         onChange={(value) =>
                           setEditItems((prev) => ({
                             ...prev,
-                            [item.productVariantId]: { ...prev[item.productVariantId], unitPrice: value ?? 0, quantity: prev[item.productVariantId]?.quantity ?? 0 },
+                            [item.productVariantId]: {
+                              ...prev[item.productVariantId],
+                              unitPrice: value ?? 0,
+                              quantity: prev[item.productVariantId]?.quantity ?? 0,
+                            },
                           }))
                         }
                         min={0}
@@ -833,7 +1048,8 @@ function SpecificationView({ id }: { id: string }) {
                     </Td>
                     <Td align="right" className="num text-muted-foreground">
                       {formatMoney(
-                        (editItems[item.productVariantId]?.quantity ?? 0) * (editItems[item.productVariantId]?.unitPrice ?? 0),
+                        (editItems[item.productVariantId]?.quantity ?? 0) *
+                          (editItems[item.productVariantId]?.unitPrice ?? 0),
                         currencyLabel(spec.totalSumCurrency),
                       )}
                     </Td>
@@ -859,7 +1075,8 @@ function SpecificationView({ id }: { id: string }) {
           </div>
           {isEditing && (
             <p className="t-meta mt-2">
-              Суммы пересчитаются после сохранения. Заказ пошива, из которого создана эта спецификация, не изменится.
+              Суммы пересчитаются после сохранения. Заказ пошива, из которого создана эта
+              спецификация, не изменится.
             </p>
           )}
         </CardContent>
@@ -872,19 +1089,31 @@ function SpecificationView({ id }: { id: string }) {
         <CardContent className="grid grid-cols-2 gap-4 sm:grid-cols-4">
           <div>
             <div className="t-meta">Количество</div>
-            <div className="num text-[18px] font-semibold">{formatQuantity(Math.round(Number(spec.totalQuantity)))} шт.</div>
+            <div className="num text-[18px] font-semibold">
+              {formatQuantity(Math.round(Number(spec.totalQuantity)))} шт.
+            </div>
           </div>
           <div>
             <div className="t-meta">Общая сумма</div>
-            <div className="num text-[18px] font-semibold">{formatMoney(Number(spec.totalSum), currencyLabel(spec.totalSumCurrency))}</div>
+            <div className="num text-[18px] font-semibold">
+              {formatMoney(Number(spec.totalSum), currencyLabel(spec.totalSumCurrency))}
+            </div>
           </div>
           <div>
             <div className="t-meta">Предоплата 70%</div>
-            <div className="num text-[18px] font-semibold">{spec.prepaymentAmount ? formatMoney(Number(spec.prepaymentAmount), currencyLabel(spec.totalSumCurrency)) : "—"}</div>
+            <div className="num text-[18px] font-semibold">
+              {spec.prepaymentAmount
+                ? formatMoney(Number(spec.prepaymentAmount), currencyLabel(spec.totalSumCurrency))
+                : "—"}
+            </div>
           </div>
           <div>
             <div className="t-meta">Остаток</div>
-            <div className="num text-[18px] font-semibold">{remainder !== null ? formatMoney(remainder, currencyLabel(spec.totalSumCurrency)) : "—"}</div>
+            <div className="num text-[18px] font-semibold">
+              {remainder !== null
+                ? formatMoney(remainder, currencyLabel(spec.totalSumCurrency))
+                : "—"}
+            </div>
           </div>
           {spec.deliveryDeadline && (
             <div>
@@ -895,51 +1124,83 @@ function SpecificationView({ id }: { id: string }) {
         </CardContent>
       </Card>
 
-      {spec.status === "approved" && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Документ</CardTitle>
-          </CardHeader>
-          <CardContent className="flex flex-wrap items-center gap-2">
-            {currentDoc ? (
-              <>
-                <Button type="button" size="sm" onClick={() => void downloadDocument(currentDoc.id, currentDoc.title)}>
-                  Скачать спецификацию
-                </Button>
-                <Button type="button" variant="secondary" size="sm" loading={isGeneratingPdf} onClick={() => void generatePdf()}>
-                  Сформировать заново
-                </Button>
-              </>
-            ) : (
-              <Button type="button" size="sm" loading={isGeneratingPdf} onClick={() => void generatePdf()}>
-                Сформировать спецификацию
-              </Button>
-            )}
-          </CardContent>
-        </Card>
-      )}
-
       {isFullyAllocated && (
         <Card>
           <CardContent>
             <p className="t-secondary">
-              Вся спецификация уже размещена производственными партиями — новую партию из неё создать нельзя.
+              Вся спецификация уже размещена производственными партиями — новую партию из неё
+              создать нельзя.
             </p>
           </CardContent>
         </Card>
       )}
 
-      {showCreateBatch && availableQuantity && (
-        <CreateBatchPanel
-          specificationId={spec.id}
-          product={product}
-          workshop={workshop}
-          variants={variants}
-          available={availableQuantity}
-          onClose={() => setShowCreateBatch(false)}
-          onCreated={(orderId) => void navigate(`/production-orders/${orderId}`)}
-        />
+      {!isNewFlow && linkedOrders.length > 0 && (
+        <section className="seller-card">
+          <h2 className="font-semibold">Партии этого документа</h2>
+          {linkedOrders.map((order) => (
+            <button
+              key={order.id}
+              className="focus-ring block min-h-11 text-sm text-primary"
+              onClick={() => void navigate(`/production-orders/${order.id}`)}
+            >
+              Открыть партию {order.orderNumber ? `№${order.orderNumber}` : "без номера"}
+            </button>
+          ))}
+        </section>
       )}
+      <MobileActionBar>
+        {isEditing ? (
+          <>
+            <Button variant="secondary" size="lg" onClick={() => setIsEditing(false)}>
+              Отмена
+            </Button>
+            <Button size="lg" loading={isSavingEdit} onClick={() => void saveEdit()}>
+              Сохранить
+            </Button>
+          </>
+        ) : spec.productionOrderId ? (
+          <Button
+            size="lg"
+            onClick={() => void navigate(`/production-orders/${spec.productionOrderId}`)}
+          >
+            Открыть партию
+          </Button>
+        ) : spec.status === "draft" ? (
+          <Button size="lg" loading={isApproving} onClick={() => void approve()}>
+            Утвердить спецификацию
+          </Button>
+        ) : spec.status === "approved" && hasAvailableQuantity ? (
+          <Button size="lg" onClick={() => setShowCreateBatch(true)}>
+            Создать партию
+          </Button>
+        ) : (
+          <Button size="lg" onClick={() => void navigate(`/new-batch?productId=${product.id}`)}>
+            Новая партия этой модели
+          </Button>
+        )}
+      </MobileActionBar>
+      <Dialog open={showCreateBatch} onOpenChange={setShowCreateBatch}>
+        <DialogContent className="max-w-xl max-md:inset-0 max-md:left-0 max-md:top-0 max-md:h-dvh max-md:max-h-dvh max-md:w-full max-md:translate-x-0 max-md:translate-y-0 max-md:rounded-none">
+          <DialogHeader>
+            <DialogTitle>Партия по спецификации</DialogTitle>
+            <DialogDescription>
+              Выберите количество из ещё не размещённого остатка документа.
+            </DialogDescription>
+          </DialogHeader>
+          {availableQuantity && (
+            <CreateBatchPanel
+              specificationId={spec.id}
+              product={product}
+              workshop={workshop}
+              variants={variants}
+              available={availableQuantity}
+              onClose={() => setShowCreateBatch(false)}
+              onCreated={(orderId) => void navigate(`/production-orders/${orderId}`)}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
 
       {showBasedOn && (
         <CreateFromExistingPanel
@@ -957,15 +1218,20 @@ function SpecificationView({ id }: { id: string }) {
           <DialogHeader>
             <DialogTitle>Отменить спецификацию?</DialogTitle>
             <DialogDescription>
-              Спецификация перейдёт в статус «Отменена» — это действие необратимо. PDF по ней больше нельзя будет
-              сформировать.
+              Спецификация перейдёт в статус «Отменена» — это действие необратимо. PDF по ней больше
+              нельзя будет сформировать.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button variant="secondary" size="sm" onClick={() => setShowCancelConfirm(false)}>
               Не отменять
             </Button>
-            <Button variant="destructive" size="sm" loading={isCancelling} onClick={() => void cancelSpecification()}>
+            <Button
+              variant="destructive"
+              size="sm"
+              loading={isCancelling}
+              onClick={() => void cancelSpecification()}
+            >
               Отменить спецификацию
             </Button>
           </DialogFooter>
@@ -1010,25 +1276,36 @@ function CreateBatchPanel({
   };
 
   const totalQuantity = Object.values(quantities).reduce((sum, value) => sum + (value || 0), 0);
-  const canSubmit = eligible.every((row) => (quantities[row.productVariantId] ?? 0) <= row.availableQuantity + 0.0005) && totalQuantity > 0;
+  const canSubmit =
+    eligible.every(
+      (row) => (quantities[row.productVariantId] ?? 0) <= row.availableQuantity + 0.0005,
+    ) && totalQuantity > 0;
 
   const submit = async () => {
     if (!canSubmit) return;
     setIsSubmitting(true);
     try {
       const items = eligible
-        .map((row) => ({ productVariantId: row.productVariantId, quantity: quantities[row.productVariantId] ?? 0 }))
+        .map((row) => ({
+          productVariantId: row.productVariantId,
+          quantity: quantities[row.productVariantId] ?? 0,
+        }))
         .filter((row) => row.quantity > 0.0005);
-      const order = await apiRequest<ProductionOrderResponseDto>(`/specifications/${specificationId}/production-order`, {
-        method: "POST",
-        body: { items },
-      });
+      const order = await apiRequest<ProductionOrderResponseDto>(
+        `/specifications/${specificationId}/production-order`,
+        {
+          method: "POST",
+          body: { items },
+        },
+      );
       toast.success(`Партия ${order.orderNumber ? `№${order.orderNumber}` : ""} создана`, {
         description: "Данные унаследованы из спецификации, статус — «Размещён».",
       });
       onCreated(order.id);
     } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "Не удалось создать производственную партию");
+      toast.error(
+        err instanceof ApiError ? err.message : "Не удалось создать производственную партию",
+      );
     } finally {
       setIsSubmitting(false);
     }
@@ -1041,14 +1318,21 @@ function CreateBatchPanel({
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
         <p className="t-secondary">
-          Модель, цех и цены — {product.name} / {workshop.name}, как в спецификации. По умолчанию — всё доступное
-          количество; уменьшите его, если хотите запустить партию частично.
+          Модель, цех и цены — {product.name} / {workshop.name}, как в спецификации. По умолчанию —
+          всё доступное количество; уменьшите его, если хотите запустить партию частично.
         </p>
         <div className="flex flex-col gap-2">
           {eligible.map((row) => (
-            <div key={row.productVariantId} className="flex flex-wrap items-end gap-2 rounded-[10px] border border-border bg-muted/30 p-2.5">
-              <span className="min-w-[160px] flex-1 text-[13px] font-medium">{variantLabel(row.productVariantId)}</span>
-              <span className="t-meta min-w-[100px]">Доступно: {formatQuantity(row.availableQuantity)}</span>
+            <div
+              key={row.productVariantId}
+              className="flex flex-wrap items-end gap-2 rounded-[10px] border border-border bg-muted/30 p-2.5"
+            >
+              <span className="min-w-[160px] flex-1 text-[13px] font-medium">
+                {variantLabel(row.productVariantId)}
+              </span>
+              <span className="t-meta min-w-[100px]">
+                Доступно: {formatQuantity(row.availableQuantity)}
+              </span>
               <Field label="В партию" className="min-w-[110px]">
                 <NumberInput
                   value={quantities[row.productVariantId]}
@@ -1069,7 +1353,12 @@ function CreateBatchPanel({
           Количество в партии: <strong className="num">{formatQuantity(totalQuantity)}</strong> шт.
         </p>
         <div className="flex gap-2">
-          <Button type="button" loading={isSubmitting} disabled={!canSubmit} onClick={() => void submit()}>
+          <Button
+            type="button"
+            loading={isSubmitting}
+            disabled={!canSubmit}
+            onClick={() => void submit()}
+          >
             Создать партию
           </Button>
           <Button type="button" variant="secondary" onClick={onClose}>
@@ -1100,7 +1389,11 @@ function CreateFromExistingPanel({
   onCreated: (id: string) => void;
 }) {
   const [rows, setRows] = useState(
-    source.items.map((item) => ({ productVariantId: item.productVariantId, quantity: Number(item.quantity), unitPrice: Number(item.unitPrice) })),
+    source.items.map((item) => ({
+      productVariantId: item.productVariantId,
+      quantity: Number(item.quantity),
+      unitPrice: Number(item.unitPrice),
+    })),
   );
   const [deliveryDeadline, setDeliveryDeadline] = useState<Date | undefined>(
     source.deliveryDeadline ? new Date(source.deliveryDeadline) : undefined,
@@ -1119,7 +1412,9 @@ function CreateFromExistingPanel({
         method: "POST",
         body: {
           sourceSpecificationId: source.id,
-          overrideDeliveryDeadline: deliveryDeadline ? deliveryDeadline.toISOString().slice(0, 10) : undefined,
+          overrideDeliveryDeadline: deliveryDeadline
+            ? deliveryDeadline.toISOString().slice(0, 10)
+            : undefined,
           overrideItems: rows,
         },
       });
@@ -1128,7 +1423,11 @@ function CreateFromExistingPanel({
       });
       onCreated(created.id);
     } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "Не удалось создать спецификацию на основе существующей");
+      toast.error(
+        err instanceof ApiError
+          ? err.message
+          : "Не удалось создать спецификацию на основе существующей",
+      );
     } finally {
       setIsSubmitting(false);
     }
@@ -1141,24 +1440,37 @@ function CreateFromExistingPanel({
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
         <p className="t-secondary">
-          Модель и цех — {product.name} / {workshop.name}, как в источнике. Поправьте количество и цену, если нужно —
-          спецификация №{source.specNumber} не изменится.
+          Модель и цех — {product.name} / {workshop.name}, как в источнике. Поправьте количество и
+          цену, если нужно — спецификация №{source.specNumber} не изменится.
         </p>
         <div className="flex flex-col gap-2">
           {rows.map((row, index) => (
-            <div key={row.productVariantId} className="flex flex-wrap items-end gap-2 rounded-[10px] border border-border bg-muted/30 p-2.5">
-              <span className="min-w-[160px] flex-1 text-[13px] font-medium">{variantLabel(row.productVariantId)}</span>
+            <div
+              key={row.productVariantId}
+              className="flex flex-wrap items-end gap-2 rounded-[10px] border border-border bg-muted/30 p-2.5"
+            >
+              <span className="min-w-[160px] flex-1 text-[13px] font-medium">
+                {variantLabel(row.productVariantId)}
+              </span>
               <Field label="Количество" className="min-w-[110px]">
                 <NumberInput
                   value={row.quantity}
-                  onChange={(v) => setRows((prev) => prev.map((r, i) => (i === index ? { ...r, quantity: v ?? 0 } : r)))}
+                  onChange={(v) =>
+                    setRows((prev) =>
+                      prev.map((r, i) => (i === index ? { ...r, quantity: v ?? 0 } : r)),
+                    )
+                  }
                   min={0}
                 />
               </Field>
               <Field label="Цена, ₽" className="min-w-[110px]">
                 <NumberInput
                   value={row.unitPrice}
-                  onChange={(v) => setRows((prev) => prev.map((r, i) => (i === index ? { ...r, unitPrice: v ?? 0 } : r)))}
+                  onChange={(v) =>
+                    setRows((prev) =>
+                      prev.map((r, i) => (i === index ? { ...r, unitPrice: v ?? 0 } : r)),
+                    )
+                  }
                   min={0}
                   decimals={2}
                 />

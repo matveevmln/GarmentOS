@@ -1,3 +1,4 @@
+import { MobileActionBar } from "../design-system/Blocks/MobileActionBar";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import type {
@@ -10,7 +11,6 @@ import type {
 } from "@garmentos/shared-types";
 import { apiRequest } from "../api/client";
 import { Button } from "../design-system/Button/Button";
-import { PageHeader } from "../design-system/PageHeader/PageHeader";
 import { SearchBar } from "../design-system/Search/SearchBar";
 import { EmptyState } from "../design-system/Feedback/EmptyState";
 import { ErrorState } from "../design-system/Feedback/ErrorState";
@@ -85,30 +85,20 @@ export function ProductionOrdersPage() {
     );
   });
   return (
-    <div className="mx-auto max-w-[1400px]">
-      <PageHeader
-        title="Партии"
-        subtitle="Создавайте небольшие партии и продолжайте работу с нужного шага"
-      />
-      <Button size="lg" className="mb-4 md:max-w-xs" onClick={() => void navigate("/new-batch")}>
-        + Новая партия
-      </Button>
-      <SearchBar
-        value={query}
-        onChange={setQuery}
-        placeholder="Модель, цех или номер партии"
-        className="mb-3"
-      />
-      <FilterTabs
-        value={filter}
-        onChange={setFilter}
-        options={[
-          { value: "open", label: "В работе" },
-          { value: "draft", label: "Черновики" },
-          { value: "closed", label: "Закрытые" },
-          { value: "all", label: "Все" },
-        ]}
-      />
+    <div className="seller-screen">
+      <h1 className="mb-5">Партии</h1>
+      <SearchBar value={query} onChange={setQuery} placeholder="Найти партию" className="mb-3" />
+      <div className="seller-filter">
+        <FilterTabs
+          value={filter}
+          onChange={setFilter}
+          options={[
+            { value: "open", label: "В работе" },
+            { value: "draft", label: "Черновики" },
+            { value: "closed", label: "Закрытые" },
+          ]}
+        />
+      </div>
       {loading ? (
         <SkeletonList />
       ) : error ? (
@@ -119,7 +109,7 @@ export function ProductionOrdersPage() {
           description="Создайте новую партию или выберите другой фильтр."
         />
       ) : (
-        <div className="mt-4 grid grid-cols-1 items-start gap-3 lg:grid-cols-2 2xl:grid-cols-3">
+        <div className="mt-4 grid grid-cols-1 items-start gap-3">
           {visible.map((order) => (
             <BatchCard
               key={order.id}
@@ -135,20 +125,15 @@ export function ProductionOrdersPage() {
                 new Map((variants[order.productId] ?? []).map((row) => [row.id, row])),
               )}
               onClick={() => void navigate(`/production-orders/${order.id}`)}
-              onRequestComplete={() => void navigate(`/production-orders/${order.id}`)}
-              actions={
-                <Button
-                  size="lg"
-                  variant="secondary"
-                  onClick={() => void navigate(`/production-orders/${order.id}`)}
-                >
-                  Открыть партию
-                </Button>
-              }
             />
           ))}
         </div>
       )}
+      <MobileActionBar>
+        <Button size="lg" onClick={() => void navigate("/new-batch")}>
+          + Новая партия
+        </Button>
+      </MobileActionBar>
     </div>
   );
 }

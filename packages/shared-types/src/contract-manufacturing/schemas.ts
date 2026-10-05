@@ -92,6 +92,7 @@ export type WorkshopResponseDto = z.infer<typeof workshopResponseSchema>;
 // совместимость).
 export const listProductionOrdersQuerySchema = z.object({
   productId: z.string().uuid().optional(),
+  specificationId: z.string().uuid().optional(),
 });
 export type ListProductionOrdersQueryDto = z.infer<typeof listProductionOrdersQuerySchema>;
 
@@ -456,3 +457,18 @@ export const previewProductionOrderVariantsResponseSchema = z.object({
 export type PreviewProductionOrderVariantsResponseDto = z.infer<
   typeof previewProductionOrderVariantsResponseSchema
 >;
+
+// Read-only capability snapshot; guards recheck rights on every mutation.
+export const productionOrderActionsSchema = z.object({
+  confirm: z.boolean(),
+  start: z.boolean(),
+  ready: z.boolean(),
+  ship: z.boolean(),
+  receive: z.boolean(),
+  quality: z.boolean(),
+  complete: z.boolean(),
+  cancel: z.boolean(),
+  rollback: z.boolean(),
+  documents: z.boolean(),
+});
+export type ProductionOrderActionsDto = z.infer<typeof productionOrderActionsSchema>;

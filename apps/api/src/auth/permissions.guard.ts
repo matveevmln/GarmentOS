@@ -1,4 +1,10 @@
-import { ForbiddenException, Inject, Injectable, type CanActivate, type ExecutionContext } from "@nestjs/common";
+import {
+  ForbiddenException,
+  Inject,
+  Injectable,
+  type CanActivate,
+  type ExecutionContext,
+} from "@nestjs/common";
 import { Reflector } from "@nestjs/core";
 import { listUserPermissions, type UserRoleRepository } from "@garmentos/domain-identity";
 import { USER_ROLE_REPOSITORY } from "../identity/identity.tokens";
@@ -49,17 +55,30 @@ export class PermissionsGuard implements CanActivate {
       throw new ForbiddenException("Пользователь не аутентифицирован");
     }
 
-    const granted = await listUserPermissions({ userRoles: this.userRoles }, { userId: request.user.id });
+    const granted = await listUserPermissions(
+      { userRoles: this.userRoles },
+      { userId: request.user.id },
+    );
 
     if (hasAllRequirement) {
       const missing = required.filter((permission) => !granted.includes(permission));
       if (missing.length > 0) {
-        throw new ForbiddenException(`Недостаточно прав: требуется ${missing.join(", ")}`);
+        throw new ForbiddenException({
+          code: "PERMISSION_DENIED",
+          message:
+            "Это действие недоступно для вашей роли. Проверьте права доступа у владельца компании.",
+          missingPermissions: missing,
+        });
       }
     }
 
     if (hasAnyRequirement && !requiredAny.some((permission) => granted.includes(permission))) {
-      throw new ForbiddenException(`Недостаточно прав: требуется одно из ${requiredAny.join(", ")}`);
+      throw new ForbiddenException({
+        code: "PERMISSION_DENIED",
+        message:
+          "Это действие недоступно для вашей роли. Проверьте права доступа у владельца компании.",
+        requiredAnyPermissions: requiredAny,
+      });
     }
 
     return true;

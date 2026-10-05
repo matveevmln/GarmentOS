@@ -169,7 +169,13 @@ function NavGroup({
       )}
       <ul className="space-y-0.5">
         {items.map((it) => (
-          <NavLinkItem key={it.to} item={it} collapsed={collapsed} mobile={mobile} onNavigate={onNavigate} />
+          <NavLinkItem
+            key={it.to}
+            item={it}
+            collapsed={collapsed}
+            mobile={mobile}
+            onNavigate={onNavigate}
+          />
         ))}
       </ul>
     </div>
@@ -181,8 +187,20 @@ function BrandMark() {
   return (
     <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-[9px] bg-[color-mix(in_oklab,var(--sidebar-primary)_18%,var(--sidebar))]">
       <svg width="18" height="18" viewBox="0 0 20 20" fill="none" aria-hidden="true">
-        <path d="M10 2.5v7.2" stroke="var(--sidebar-primary)" strokeWidth="1.6" strokeLinecap="round" />
-        <ellipse cx="10" cy="12.1" rx="2.5" ry="3.2" stroke="var(--sidebar-primary)" strokeWidth="1.6" />
+        <path
+          d="M10 2.5v7.2"
+          stroke="var(--sidebar-primary)"
+          strokeWidth="1.6"
+          strokeLinecap="round"
+        />
+        <ellipse
+          cx="10"
+          cy="12.1"
+          rx="2.5"
+          ry="3.2"
+          stroke="var(--sidebar-primary)"
+          strokeWidth="1.6"
+        />
         <path
           d="M4.2 17.5c1.9-1.5 3.8-1.5 5.8 0"
           stroke="var(--sidebar-foreground)"
@@ -212,7 +230,10 @@ function SidebarBody({
 }) {
   const { user, logout } = useAuth();
   return (
-    <div data-rail className="rail-ambient isolate flex h-full flex-col bg-sidebar text-sidebar-foreground">
+    <div
+      data-rail
+      className="rail-ambient isolate flex h-full flex-col bg-sidebar text-sidebar-foreground"
+    >
       <div
         className={cn(
           "flex items-center gap-2.5 px-5",
@@ -238,8 +259,20 @@ function SidebarBody({
           делали связанную систему недоступной без знания прямых ссылок.
           Общий SidebarBody обслуживает и десктоп, и мобильную панель. */}
       <nav className="flex-1 overflow-y-auto pb-4">
-        <NavGroup label="Производство" items={NAV_PRODUCTION} collapsed={collapsed} mobile={mobile} onNavigate={onNavigate} />
-        <NavGroup label="Учёт" items={NAV_OFFICE} collapsed={collapsed} mobile={mobile} onNavigate={onNavigate} />
+        <NavGroup
+          label="Производство"
+          items={NAV_PRODUCTION}
+          collapsed={collapsed}
+          mobile={mobile}
+          onNavigate={onNavigate}
+        />
+        <NavGroup
+          label="Учёт"
+          items={NAV_OFFICE}
+          collapsed={collapsed}
+          mobile={mobile}
+          onNavigate={onNavigate}
+        />
       </nav>
 
       {/* Подвал рельса. В прототипе здесь имя и название компании; названия
@@ -253,7 +286,9 @@ function SidebarBody({
           </span>
           {!collapsed && user ? (
             <span className="min-w-0 flex-1">
-              <span className="block truncate text-[13px] font-medium text-sidebar-foreground">{user.fullName}</span>
+              <span className="block truncate text-[13px] font-medium text-sidebar-foreground">
+                {user.fullName}
+              </span>
               <span className="block truncate text-[11.5px] text-sidebar-foreground/45">
                 {user.roles.join(", ") || user.email}
               </span>
@@ -283,6 +318,7 @@ function panelWidthSafe(max: number) {
 const PANEL_W = 300;
 
 export function AppShell() {
+  const { user } = useAuth();
   const [collapsed, setCollapsed] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const { pathname } = useLocation();
@@ -353,105 +389,108 @@ export function AppShell() {
     setMobileNavOpen(false);
   }, []);
 
-  const startGesture = useCallback((t: { clientX: number; clientY: number }, from: "edge" | "panel") => {
-    const w = panelWidthSafe(PANEL_W);
-    gesture.current = {
-      startX: t.clientX,
-      startY: t.clientY,
-      active: false,
-      from,
-      offset: from === "panel" ? 0 : -w,
-      lastX: t.clientX,
-      lastT: performance.now(),
-      velocity: 0,
-      width: w,
-      raf: 0,
-      pendingX: null,
-    };
+  const startGesture = useCallback(
+    (t: { clientX: number; clientY: number }, from: "edge" | "panel") => {
+      const w = panelWidthSafe(PANEL_W);
+      gesture.current = {
+        startX: t.clientX,
+        startY: t.clientY,
+        active: false,
+        from,
+        offset: from === "panel" ? 0 : -w,
+        lastX: t.clientX,
+        lastT: performance.now(),
+        velocity: 0,
+        width: w,
+        raf: 0,
+        pendingX: null,
+      };
 
-    const move = (ev: TouchEvent) => {
-      const g = gesture.current;
-      const p = ev.touches[0];
-      if (!g || !p) return;
-      const dx = p.clientX - g.startX;
-      const dy = p.clientY - g.startY;
-      if (!g.active) {
-        if (Math.abs(dx) < 1) return;
-        if (Math.abs(dy) > Math.abs(dx)) {
-          gesture.current = null;
-          window.removeEventListener("touchmove", move);
-          return;
+      const move = (ev: TouchEvent) => {
+        const g = gesture.current;
+        const p = ev.touches[0];
+        if (!g || !p) return;
+        const dx = p.clientX - g.startX;
+        const dy = p.clientY - g.startY;
+        if (!g.active) {
+          if (Math.abs(dx) < 1) return;
+          if (Math.abs(dy) > Math.abs(dx)) {
+            gesture.current = null;
+            window.removeEventListener("touchmove", move);
+            return;
+          }
+          if (g.from === "edge" && dx <= 0) return;
+          g.active = true;
+          prepareDrag();
         }
-        if (g.from === "edge" && dx <= 0) return;
-        g.active = true;
-        prepareDrag();
-      }
-      if (ev.cancelable) ev.preventDefault();
-      const now = performance.now();
-      const dt = now - g.lastT;
-      if (dt > 0) {
-        const v = (p.clientX - g.lastX) / dt;
-        // EMA-сглаживание скорости — устойчивое распознавание flick без дёрганий
-        g.velocity = g.velocity * 0.7 + v * 0.3;
-      }
-      g.lastX = p.clientX;
-      g.lastT = now;
-      const next =
-        g.from === "edge"
-          ? Math.min(0, -g.width + Math.max(0, dx))
-          : Math.max(-g.width, Math.min(0, dx));
-      g.offset = next;
-      // Батчинг через rAF: один transform-апдейт на кадр, движение без рывков
-      g.pendingX = next;
-      if (!g.raf) {
-        g.raf = requestAnimationFrame(() => {
-          const gg = gesture.current;
-          if (gg && gg.pendingX !== null) applyDrag(gg.pendingX, gg.width);
-          if (gg) gg.raf = 0;
-        });
-      }
-    };
+        if (ev.cancelable) ev.preventDefault();
+        const now = performance.now();
+        const dt = now - g.lastT;
+        if (dt > 0) {
+          const v = (p.clientX - g.lastX) / dt;
+          // EMA-сглаживание скорости — устойчивое распознавание flick без дёрганий
+          g.velocity = g.velocity * 0.7 + v * 0.3;
+        }
+        g.lastX = p.clientX;
+        g.lastT = now;
+        const next =
+          g.from === "edge"
+            ? Math.min(0, -g.width + Math.max(0, dx))
+            : Math.max(-g.width, Math.min(0, dx));
+        g.offset = next;
+        // Батчинг через rAF: один transform-апдейт на кадр, движение без рывков
+        g.pendingX = next;
+        if (!g.raf) {
+          g.raf = requestAnimationFrame(() => {
+            const gg = gesture.current;
+            if (gg && gg.pendingX !== null) applyDrag(gg.pendingX, gg.width);
+            if (gg) gg.raf = 0;
+          });
+        }
+      };
 
-    const end = () => {
-      window.removeEventListener("touchmove", move);
-      window.removeEventListener("touchend", end);
-      window.removeEventListener("touchcancel", end);
-      const g = gesture.current;
-      gesture.current = null;
-      if (!g) return;
-      if (g.raf) cancelAnimationFrame(g.raf);
-      if (!g.active) return;
-      const dist = g.offset + g.width; // сколько панели вытянуто
-      const flickOpen = g.velocity > 0.4 && dist > 40;
-      const flickClose = g.velocity < -0.4;
-      const open = flickOpen || (!flickClose && g.offset > -g.width / 2);
-      const panel = panelRef.current;
-      const backdrop = backdropRef.current;
-      const layer = layerRef.current;
-      // Длительность доводки зависит от оставшегося пути
-      const remain = open ? -g.offset : g.offset + g.width;
-      const ms = Math.round(Math.min(300, Math.max(160, 120 + (remain / g.width) * 180)));
-      const ease = "cubic-bezier(0.25, 0.46, 0.45, 0.94)";
-      if (panel) {
-        panel.style.transition = `transform ${ms}ms ${ease}`;
-        panel.style.transform = open ? "translate3d(0,0,0)" : `translate3d(${-g.width}px,0,0)`;
-      }
-      if (backdrop) {
-        backdrop.style.transition = `opacity ${ms}ms ease-out`;
-        backdrop.style.opacity = open ? "1" : "0";
-      }
-      if (layer) {
-        layer.style.pointerEvents = open ? "auto" : "none";
-        layer.style.visibility = "visible";
-      }
-      setMobileNavOpen(open);
-      window.setTimeout(clearDrag, ms + 20);
-    };
+      const end = () => {
+        window.removeEventListener("touchmove", move);
+        window.removeEventListener("touchend", end);
+        window.removeEventListener("touchcancel", end);
+        const g = gesture.current;
+        gesture.current = null;
+        if (!g) return;
+        if (g.raf) cancelAnimationFrame(g.raf);
+        if (!g.active) return;
+        const dist = g.offset + g.width; // сколько панели вытянуто
+        const flickOpen = g.velocity > 0.4 && dist > 40;
+        const flickClose = g.velocity < -0.4;
+        const open = flickOpen || (!flickClose && g.offset > -g.width / 2);
+        const panel = panelRef.current;
+        const backdrop = backdropRef.current;
+        const layer = layerRef.current;
+        // Длительность доводки зависит от оставшегося пути
+        const remain = open ? -g.offset : g.offset + g.width;
+        const ms = Math.round(Math.min(300, Math.max(160, 120 + (remain / g.width) * 180)));
+        const ease = "cubic-bezier(0.25, 0.46, 0.45, 0.94)";
+        if (panel) {
+          panel.style.transition = `transform ${ms}ms ${ease}`;
+          panel.style.transform = open ? "translate3d(0,0,0)" : `translate3d(${-g.width}px,0,0)`;
+        }
+        if (backdrop) {
+          backdrop.style.transition = `opacity ${ms}ms ease-out`;
+          backdrop.style.opacity = open ? "1" : "0";
+        }
+        if (layer) {
+          layer.style.pointerEvents = open ? "auto" : "none";
+          layer.style.visibility = "visible";
+        }
+        setMobileNavOpen(open);
+        window.setTimeout(clearDrag, ms + 20);
+      };
 
-    window.addEventListener("touchmove", move, { passive: false });
-    window.addEventListener("touchend", end);
-    window.addEventListener("touchcancel", end);
-  }, []);
+      window.addEventListener("touchmove", move, { passive: false });
+      window.addEventListener("touchend", end);
+      window.addEventListener("touchcancel", end);
+    },
+    [],
+  );
 
   // Нативный non-passive listener: перехватываем жест раньше браузерного
   // «назад». Комментарий описывал намерение, но preventDefault() вызывался
@@ -500,10 +539,43 @@ export function AppShell() {
     return () => window.removeEventListener("keydown", onKey);
   }, [mobileNavOpen, closeNav]);
 
-  const topbarTitle = ALL_NAV.find((i) => pathname === i.to || pathname.startsWith(`${i.to}/`))?.label ?? "GarmentOS";
+  const wizard = pathname === "/new-batch";
+  const partyDetail = /^\/production-orders\/[^/]+$/.test(pathname);
+  const sellerPage =
+    wizard || pathname === "/production-orders" || /^\/production-orders\/[^/]+$/.test(pathname);
+  useEffect(() => {
+    const viewport = window.visualViewport;
+    const sync = () => {
+      const inset = viewport
+        ? Math.max(0, window.innerHeight - viewport.height - viewport.offsetTop)
+        : 0;
+      document.documentElement.style.setProperty(
+        "--keyboard-inset",
+        inset > 120 ? `${inset}px` : "0px",
+      );
+      document.documentElement.style.setProperty(
+        "--mobile-nav-height",
+        wizard || inset > 120 ? "0px" : "calc(56px + env(safe-area-inset-bottom))",
+      );
+    };
+    sync();
+    viewport?.addEventListener("resize", sync);
+    viewport?.addEventListener("scroll", sync);
+    return () => {
+      viewport?.removeEventListener("resize", sync);
+      viewport?.removeEventListener("scroll", sync);
+    };
+  }, [wizard]);
+  const topbarTitle =
+    ALL_NAV.find((i) => pathname === i.to || pathname.startsWith(`${i.to}/`))?.label ?? "GarmentOS";
 
   return (
-    <div className="ambient-field isolate min-h-screen w-full bg-background text-foreground">
+    <div
+      className={cn(
+        "isolate min-h-screen w-full bg-background text-foreground",
+        !sellerPage && "ambient-field",
+      )}
+    >
       {/* Рельс — десктоп */}
       <aside
         className={cn(
@@ -519,13 +591,19 @@ export function AppShell() {
         ref={edgeRef}
         aria-hidden="true"
         style={{ touchAction: "pan-y" }}
-        className={cn("fixed left-0 top-0 bottom-[56px] z-40 w-6 md:hidden", mobileNavOpen && "hidden")}
+        className={cn(
+          "fixed left-0 top-0 bottom-[56px] z-40 w-6 md:hidden",
+          mobileNavOpen && "hidden",
+        )}
       />
 
       {/* Мобильный drawer — всегда в DOM, состояние через transform */}
       <div
         ref={layerRef}
-        className={cn("fixed inset-0 z-50 md:hidden", mobileNavOpen ? "visible" : "pointer-events-none invisible")}
+        className={cn(
+          "fixed inset-0 z-50 md:hidden",
+          mobileNavOpen ? "visible" : "pointer-events-none invisible",
+        )}
         onTouchStart={mobileNavOpen ? onPanelStart : undefined}
       >
         <div
@@ -562,54 +640,88 @@ export function AppShell() {
           collapsed ? "md:pl-[64px]" : "md:pl-[260px]",
         )}
       >
-        <header className="glass-bar sticky top-0 z-20 flex h-[60px] items-center gap-2 border-b px-3 shadow-[0_1px_0_0_color-mix(in_oklab,var(--foreground)_4%,transparent),0_10px_24px_-22px_color-mix(in_oklab,var(--foreground)_45%,transparent)] md:px-8">
-          <IconButton label="Меню" className="md:hidden" onClick={() => setMobileNavOpen((v) => !v)}>
-            <IconMenu size={18} />
-          </IconButton>
-          <IconButton
-            label={collapsed ? "Развернуть навигацию" : "Свернуть навигацию"}
-            className="hidden md:inline-flex"
-            onClick={() => setCollapsed((c) => !c)}
+        {!wizard && (
+          <header
+            className={cn(
+              partyDetail ? "hidden md:flex" : "flex",
+              "glass-bar sticky top-0 z-20 h-[60px] items-center gap-2 border-b px-3 shadow-[0_1px_0_0_color-mix(in_oklab,var(--foreground)_4%,transparent),0_10px_24px_-22px_color-mix(in_oklab,var(--foreground)_45%,transparent)] md:px-8",
+            )}
           >
-            <IconPanel size={16} />
-          </IconButton>
-          <span className="truncate font-display text-[13.5px] font-medium tracking-[-0.01em]">{topbarTitle}</span>
-          <span className="ml-auto flex items-center gap-2 text-[11px] text-muted-foreground">
-            <button
-              type="button"
-              onClick={openCommandPalette}
-              className="interactive focus-ring hidden h-9 items-center gap-2 rounded-full border border-border bg-card px-3 text-[12px] text-muted-foreground hover:border-primary/25 hover:bg-muted hover:text-foreground lg:inline-flex"
+            <IconButton
+              label="Меню"
+              className={sellerPage ? "hidden" : "md:hidden"}
+              onClick={() => setMobileNavOpen((v) => !v)}
             >
-              <IconSearch size={14} />
-              Быстрый переход
-              <kbd className="micro rounded-[4px] border border-border px-1.5 py-1">⌘K</kbd>
-            </button>
-            <IconButton label="Быстрый переход" className="lg:hidden" onClick={openCommandPalette}>
-              <IconSearch size={16} />
+              <IconMenu size={18} />
             </IconButton>
-          </span>
-        </header>
+            <IconButton
+              label={collapsed ? "Развернуть навигацию" : "Свернуть навигацию"}
+              className="hidden md:inline-flex"
+              onClick={() => setCollapsed((c) => !c)}
+            >
+              <IconPanel size={16} />
+            </IconButton>
+            <span className="truncate text-lg font-bold tracking-tight">
+              {sellerPage ? (
+                <>
+                  Garment<span className="text-[var(--seller-accent)]">OS</span>
+                </>
+              ) : (
+                topbarTitle
+              )}
+            </span>
+            <span className="ml-auto flex items-center gap-2 text-[11px] text-muted-foreground">
+              <button
+                type="button"
+                onClick={openCommandPalette}
+                className="interactive focus-ring hidden h-9 items-center gap-2 rounded-full border border-border bg-card px-3 text-[12px] text-muted-foreground hover:border-primary/25 hover:bg-muted hover:text-foreground lg:inline-flex"
+              >
+                <IconSearch size={14} />
+                Быстрый переход
+                <kbd className="micro rounded-[4px] border border-border px-1.5 py-1">⌘K</kbd>
+              </button>
+              <IconButton
+                label="Быстрый переход"
+                className={sellerPage ? "hidden" : "lg:hidden"}
+                onClick={openCommandPalette}
+              >
+                <IconSearch size={16} />
+              </IconButton>
+              {sellerPage && (
+                <button
+                  aria-label="Меню аккаунта"
+                  className="focus-ring grid h-10 w-10 place-items-center rounded-full bg-muted text-xs font-semibold md:hidden"
+                  onClick={() => setMobileNavOpen(true)}
+                >
+                  {initials(user?.fullName ?? "")}
+                </button>
+              )}
+            </span>
+          </header>
+        )}
 
         {/* Предела 760px больше нет: до 1440px, как в прототипе. */}
-        <main className="mx-auto w-full max-w-[1440px] flex-1 px-3 py-5 pb-24 md:px-8 md:py-7 md:pb-10">
+        <main className="mx-auto w-full max-w-[1440px] flex-1 px-4 py-5 pb-24 md:px-8 md:py-7 md:pb-10">
           <Outlet />
         </main>
       </div>
 
       {/* Нижняя навигация — мобильный */}
-      <nav className="glass-bar fixed inset-x-0 bottom-0 z-30 grid grid-cols-4 border-t pb-[env(safe-area-inset-bottom)] shadow-[0_-2px_18px_color-mix(in_oklab,var(--foreground)_8%,transparent)] md:hidden">
-        {MOBILE_NAV.map((it) => (
-          <BottomNavItem key={it.to} item={it} />
-        ))}
-        <button
-          type="button"
-          onClick={() => setMobileNavOpen(true)}
-          className="interactive focus-ring flex min-h-[56px] flex-col items-center justify-center gap-1 text-[11px] text-muted-foreground"
-        >
-          <IconMenu size={18} />
-          Ещё
-        </button>
-      </nav>
+      {!wizard && (
+        <nav className="glass-bar fixed inset-x-0 bottom-0 z-30 grid grid-cols-4 border-t pb-[env(safe-area-inset-bottom)] shadow-[0_-2px_18px_color-mix(in_oklab,var(--foreground)_8%,transparent)] md:hidden">
+          {MOBILE_NAV.map((it) => (
+            <BottomNavItem key={it.to} item={it} />
+          ))}
+          <button
+            type="button"
+            onClick={() => setMobileNavOpen(true)}
+            className="interactive focus-ring flex min-h-[56px] flex-col items-center justify-center gap-1 text-[11px] text-muted-foreground"
+          >
+            <IconMenu size={18} />
+            Ещё
+          </button>
+        </nav>
+      )}
     </div>
   );
 }

@@ -17,6 +17,7 @@ export {
   assertSourceOrderIsNotSelf,
   assertSourceOrderExists,
   assertCanComplete,
+  assertCanReceive,
   assertCanRollbackStatus,
   assertCanCancel,
 } from "./domain/production-order";
@@ -31,8 +32,16 @@ export type {
   WorkshopPatch,
   WorkshopRepository,
 } from "./application/ports";
-export { createWorkshop, type CreateWorkshopDeps, type CreateWorkshopInput } from "./application/create-workshop";
-export { updateWorkshop, type UpdateWorkshopDeps, type UpdateWorkshopInput } from "./application/update-workshop";
+export {
+  createWorkshop,
+  type CreateWorkshopDeps,
+  type CreateWorkshopInput,
+} from "./application/create-workshop";
+export {
+  updateWorkshop,
+  type UpdateWorkshopDeps,
+  type UpdateWorkshopInput,
+} from "./application/update-workshop";
 export {
   createProductionOrderDraft,
   type CreateProductionOrderDeps,

@@ -27,11 +27,11 @@ export const STATUS_MAP: Record<string, StatusMeta> = {
   // production_order_status — жизненный цикл партии
   draft: { label: "Черновик", tone: "neutral" },
   placed: { label: "Размещён", tone: "info" },
-  in_progress: { label: "В производстве", tone: "accent" },
+  in_progress: { label: "В пошиве", tone: "warning" },
   // ПРОМПТ №2.1/№3 — отдельные явные стадии между "в работе" и "готово к
   // отгрузке"/"принято", каждая проставляется явным действием пользователя.
   sewing_completed: { label: "Пошив завершён", tone: "accent" },
-  ready_for_pickup: { label: "Готово к отгрузке", tone: "success" },
+  ready_for_pickup: { label: "Готова к приёмке", tone: "success" },
   shipped_to_fulfillment: { label: "На фулфилменте", tone: "info" },
   received: { label: "Принято", tone: "success" },
   completed: { label: "Завершена", tone: "success" },

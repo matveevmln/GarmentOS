@@ -1,7 +1,18 @@
-import { Body, Controller, Get, HttpStatus, NotFoundException, Param, Post, Query } from "@nestjs/common";
+import {
+  Body,
+  Controller,
+  Get,
+  HttpStatus,
+  NotFoundException,
+  Param,
+  Post,
+  Query,
+} from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
 import { createZodDto } from "nestjs-zod";
 import {
+  productionOrderActionsSchema,
+  type ProductionOrderActionsDto,
   createProductionOrderFromQuantitySchema,
   createProductionOrderSchema,
   listProductionOrdersQuerySchema,
@@ -21,9 +32,13 @@ import { RequirePermissions } from "../auth/require-permissions.decorator";
 import { ContractManufacturingService } from "./contract-manufacturing.service";
 
 class CreateProductionOrderDto extends createZodDto(createProductionOrderSchema) {}
-class CreateProductionOrderFromQuantityDto extends createZodDto(createProductionOrderFromQuantitySchema) {}
+class CreateProductionOrderFromQuantityDto extends createZodDto(
+  createProductionOrderFromQuantitySchema,
+) {}
 class ReceiveProductionOrderDto extends createZodDto(receiveProductionOrderSchema) {}
-class PreviewProductionOrderVariantsDto extends createZodDto(previewProductionOrderVariantsSchema) {}
+class PreviewProductionOrderVariantsDto extends createZodDto(
+  previewProductionOrderVariantsSchema,
+) {}
 class UpdateProductionOrderStatusDto extends createZodDto(updateProductionOrderStatusSchema) {}
 class RollbackProductionOrderStatusDto extends createZodDto(rollbackProductionOrderStatusSchema) {}
 class ListProductionOrdersQueryDto extends createZodDto(listProductionOrdersQuerySchema) {}
@@ -32,6 +47,17 @@ class ListProductionOrdersQueryDto extends createZodDto(listProductionOrdersQuer
 @Controller("production-orders")
 export class ProductionOrdersController {
   constructor(private readonly contractManufacturingService: ContractManufacturingService) {}
+
+  @RequirePermissions("contract_manufacturing.read")
+  @Get(":id/actions")
+  async actions(
+    @Param("id") id: string,
+    @CurrentUser() currentUser: AuthenticatedRequestUser,
+  ): Promise<ProductionOrderActionsDto> {
+    return productionOrderActionsSchema.parse(
+      await this.contractManufacturingService.getProductionOrderActions(currentUser, id),
+    );
+  }
 
   @RequirePermissions("contract_manufacturing.write")
   @Post()
@@ -72,10 +98,11 @@ export class ProductionOrdersController {
     @Body() body: CreateProductionOrderFromQuantityDto,
     @CurrentUser() currentUser: AuthenticatedRequestUser,
   ): Promise<ProductionOrderResponseDto> {
-    const productionOrder = await this.contractManufacturingService.createProductionOrderDraftFromTotalQuantity(
-      currentUser.companyId,
-      body,
-    );
+    const productionOrder =
+      await this.contractManufacturingService.createProductionOrderDraftFromTotalQuantity(
+        currentUser.companyId,
+        body,
+      );
     return productionOrderResponseSchema.parse(productionOrder);
   }
 
@@ -105,6 +132,7 @@ export class ProductionOrdersController {
       currentUser.companyId,
       id,
       body.status,
+      currentUser,
     );
     return productionOrderResponseSchema.parse(productionOrder);
   }
@@ -120,7 +148,11 @@ export class ProductionOrdersController {
     @Body() body: RollbackProductionOrderStatusDto,
     @CurrentUser() currentUser: AuthenticatedRequestUser,
   ): Promise<RollbackProductionOrderStatusResponseDto> {
-    const result = await this.contractManufacturingService.rollbackProductionOrderStatus(currentUser, id, body.reason);
+    const result = await this.contractManufacturingService.rollbackProductionOrderStatus(
+      currentUser,
+      id,
+      body.reason,
+    );
     return rollbackProductionOrderStatusResponseSchema.parse(result);
   }
 
@@ -154,7 +186,10 @@ export class ProductionOrdersController {
     @Param("id") id: string,
     @CurrentUser() currentUser: AuthenticatedRequestUser,
   ): Promise<ProductionOrderResponseDto> {
-    const productionOrder = await this.contractManufacturingService.completeProductionOrder(currentUser, id);
+    const productionOrder = await this.contractManufacturingService.completeProductionOrder(
+      currentUser,
+      id,
+    );
     return productionOrderResponseSchema.parse(productionOrder);
   }
 
@@ -168,8 +203,16 @@ export class ProductionOrdersController {
     @CurrentUser() currentUser: AuthenticatedRequestUser,
   ): Promise<ProductionOrderResponseDto[]> {
     const productionOrders = query.productId
-      ? await this.contractManufacturingService.listProductionOrdersByProduct(currentUser.companyId, query.productId)
-      : await this.contractManufacturingService.listProductionOrders(currentUser.companyId);
+      ? await this.contractManufacturingService.listProductionOrdersByProduct(
+          currentUser.companyId,
+          query.productId,
+        )
+      : query.specificationId
+        ? await this.contractManufacturingService.listProductionOrdersBySpecification(
+            currentUser.companyId,
+            query.specificationId,
+          )
+        : await this.contractManufacturingService.listProductionOrders(currentUser.companyId);
     return productionOrders.map((order) => productionOrderResponseSchema.parse(order));
   }
 

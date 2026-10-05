@@ -43,7 +43,11 @@ import { and, eq } from "drizzle-orm";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { AppModule } from "../app.module";
-import { addUserToCompany, authHeader, setupAuthenticatedCompany } from "../test-support/auth-test-helper";
+import {
+  addUserToCompany,
+  authHeader,
+  setupAuthenticatedCompany,
+} from "../test-support/auth-test-helper";
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) {
@@ -95,7 +99,12 @@ describe("Отмена заказа пошива — POST /production-orders/:id
       await request(httpServer)
         .post("/v1/product-variants")
         .set(...authHeader(ownerToken))
-        .send({ productId: product.id, size: "ONE SIZE", color: "Чёрный", skuCode: `CANCEL-${suffix}-BLACK` })
+        .send({
+          productId: product.id,
+          size: "ONE SIZE",
+          color: "Чёрный",
+          skuCode: `CANCEL-${suffix}-BLACK`,
+        })
         .expect(201)
     ).body as ProductVariantResponseDto;
     workshop = (
@@ -110,28 +119,53 @@ describe("Отмена заказа пошива — POST /production-orders/:id
   afterAll(async () => {
     const [company] = await db.select().from(companies).where(eq(companies.name, companyName));
     if (company) {
-      const companySpecs = await db.select().from(specifications).where(eq(specifications.companyId, company.id));
+      const companySpecs = await db
+        .select()
+        .from(specifications)
+        .where(eq(specifications.companyId, company.id));
       for (const spec of companySpecs) {
         await db.delete(specificationItems).where(eq(specificationItems.specificationId, spec.id));
       }
       await db.delete(specifications).where(eq(specifications.companyId, company.id));
-      const companyOrders = await db.select().from(productionOrders).where(eq(productionOrders.companyId, company.id));
+      const companyOrders = await db
+        .select()
+        .from(productionOrders)
+        .where(eq(productionOrders.companyId, company.id));
       for (const order of companyOrders) {
-        const orderCuttingOrders = await db.select().from(cuttingOrders).where(eq(cuttingOrders.productionOrderId, order.id));
+        const orderCuttingOrders = await db
+          .select()
+          .from(cuttingOrders)
+          .where(eq(cuttingOrders.productionOrderId, order.id));
         for (const cuttingOrder of orderCuttingOrders) {
-          await db.delete(cuttingOrderMaterials).where(eq(cuttingOrderMaterials.cuttingOrderId, cuttingOrder.id));
-          await db.delete(cuttingOrderResults).where(eq(cuttingOrderResults.cuttingOrderId, cuttingOrder.id));
+          await db
+            .delete(cuttingOrderMaterials)
+            .where(eq(cuttingOrderMaterials.cuttingOrderId, cuttingOrder.id));
+          await db
+            .delete(cuttingOrderResults)
+            .where(eq(cuttingOrderResults.cuttingOrderId, cuttingOrder.id));
         }
         await db.delete(cuttingOrders).where(eq(cuttingOrders.productionOrderId, order.id));
-        await db.delete(productionOrderVariants).where(eq(productionOrderVariants.productionOrderId, order.id));
-        await db.delete(productionOrderDefects).where(eq(productionOrderDefects.productionOrderId, order.id));
-        await db.delete(productionOrderQcResults).where(eq(productionOrderQcResults.productionOrderId, order.id));
+        await db
+          .delete(productionOrderVariants)
+          .where(eq(productionOrderVariants.productionOrderId, order.id));
+        await db
+          .delete(productionOrderDefects)
+          .where(eq(productionOrderDefects.productionOrderId, order.id));
+        await db
+          .delete(productionOrderQcResults)
+          .where(eq(productionOrderQcResults.productionOrderId, order.id));
       }
       await db.delete(productionOrders).where(eq(productionOrders.companyId, company.id));
       await db.delete(workshops).where(eq(workshops.companyId, company.id));
-      const companyWarehouses = await db.select().from(warehouses).where(eq(warehouses.companyId, company.id));
+      const companyWarehouses = await db
+        .select()
+        .from(warehouses)
+        .where(eq(warehouses.companyId, company.id));
       for (const warehouse of companyWarehouses) {
-        const items = await db.select().from(stockItems).where(eq(stockItems.warehouseId, warehouse.id));
+        const items = await db
+          .select()
+          .from(stockItems)
+          .where(eq(stockItems.warehouseId, warehouse.id));
         for (const item of items) {
           await db.delete(stockMovements).where(eq(stockMovements.stockItemId, item.id));
         }
@@ -143,7 +177,10 @@ describe("Отмена заказа пошива — POST /production-orders/:id
         await db.delete(bomItems).where(eq(bomItems.bomId, bom.id));
       }
       await db.delete(boms).where(eq(boms.companyId, company.id));
-      const companyProducts = await db.select().from(products).where(eq(products.companyId, company.id));
+      const companyProducts = await db
+        .select()
+        .from(products)
+        .where(eq(products.companyId, company.id));
       for (const p of companyProducts) {
         await db.delete(productVariants).where(eq(productVariants.productId, p.id));
       }
@@ -181,7 +218,12 @@ describe("Отмена заказа пошива — POST /production-orders/:id
       .post(`/v1/production-orders/${orderId}/confirm`)
       .set(...authHeader(ownerToken))
       .expect(201);
-    for (const status of ["in_progress", "sewing_completed", "ready_for_pickup", "shipped_to_fulfillment"] as const) {
+    for (const status of [
+      "in_progress",
+      "sewing_completed",
+      "ready_for_pickup",
+      "shipped_to_fulfillment",
+    ] as const) {
       await request(httpServer)
         .post(`/v1/production-orders/${orderId}/status`)
         .set(...authHeader(ownerToken))
@@ -209,9 +251,13 @@ describe("Отмена заказа пошива — POST /production-orders/:id
     const auditEntries = await db
       .select()
       .from(auditLog)
-      .where(and(eq(auditLog.entityId, order.id), eq(auditLog.action, "production_order.cancelled")));
+      .where(
+        and(eq(auditLog.entityId, order.id), eq(auditLog.action, "production_order.cancelled")),
+      );
     expect(auditEntries).toHaveLength(1);
-    expect((auditEntries[0]?.afterJson as { reason?: string } | null)?.reason).toBe("Заказ создан по ошибке");
+    expect((auditEntries[0]?.afterJson as { reason?: string } | null)?.reason).toBe(
+      "Заказ создан по ошибке",
+    );
   });
 
   it("placed с эксклюзивной NEW-поток спецификацией и раскройным заданием (draft) — отмена каскадно закрывает обе сущности", async () => {
@@ -275,7 +321,10 @@ describe("Отмена заказа пошива — POST /production-orders/:id
     // Тот же приём, что и в тесте отката статуса (received без факта
     // приёмки достижим сегодня только легаси-переходом в обход /receive) —
     // db.update напрямую, receivedQuantity у вариантов остаётся null.
-    await db.update(productionOrders).set({ status: "received" }).where(eq(productionOrders.id, order.id));
+    await db
+      .update(productionOrders)
+      .set({ status: "received" })
+      .where(eq(productionOrders.id, order.id));
 
     const cancelResponse = await request(httpServer)
       .post(`/v1/production-orders/${order.id}/cancel`)
@@ -307,7 +356,9 @@ describe("Отмена заказа пошива — POST /production-orders/:id
       .set(...authHeader(ownerToken))
       .send({ reason: "тест" })
       .expect(409);
-    expect((cancelResponse.body as { code: string }).code).toBe("PRODUCTION_ORDER_CANCEL_RECEIVED_FACTS_EXIST");
+    expect((cancelResponse.body as { code: string }).code).toBe(
+      "PRODUCTION_ORDER_CANCEL_RECEIVED_FACTS_EXIST",
+    );
 
     const reloaded = await request(httpServer)
       .get(`/v1/production-orders/${order.id}`)
@@ -343,7 +394,9 @@ describe("Отмена заказа пошива — POST /production-orders/:id
       .set(...authHeader(ownerToken))
       .send({ reason: "тест" })
       .expect(409);
-    expect((cancelResponse.body as { code: string }).code).toBe("PRODUCTION_ORDER_CANCEL_QC_EXISTS");
+    expect((cancelResponse.body as { code: string }).code).toBe(
+      "PRODUCTION_ORDER_CANCEL_QC_EXISTS",
+    );
   });
 
   it("completed: отмена заблокирована (правило — нельзя отменить completed)", async () => {
@@ -372,7 +425,9 @@ describe("Отмена заказа пошива — POST /production-orders/:id
       .set(...authHeader(ownerToken))
       .send({ reason: "тест" })
       .expect(409);
-    expect((cancelResponse.body as { code: string }).code).toBe("PRODUCTION_ORDER_CANCEL_FROM_COMPLETED");
+    expect((cancelResponse.body as { code: string }).code).toBe(
+      "PRODUCTION_ORDER_CANCEL_FROM_COMPLETED",
+    );
   });
 
   it("cancelled: повторная отмена уже отменённого заказа заблокирована (идемпотентный отказ)", async () => {
@@ -388,7 +443,9 @@ describe("Отмена заказа пошива — POST /production-orders/:id
       .set(...authHeader(ownerToken))
       .send({ reason: "Вторая попытка" })
       .expect(409);
-    expect((secondAttempt.body as { code: string }).code).toBe("PRODUCTION_ORDER_ALREADY_CANCELLED");
+    expect((secondAttempt.body as { code: string }).code).toBe(
+      "PRODUCTION_ORDER_ALREADY_CANCELLED",
+    );
   });
 
   it("пустая причина отклоняется на уровне схемы — 400", async () => {
@@ -414,7 +471,25 @@ describe("Отмена заказа пошива — POST /production-orders/:id
     // и подтверждать заказы), но не contract_manufacturing.cancel (миграция
     // 0034, только owner/director) — именно это должна проверять RBAC-защита
     // отмены, а не просто "нет вообще никаких прав".
-    const procurementManager = await addUserToCompany(db, httpServer, companyId, "procurement_manager");
+    const procurementManager = await addUserToCompany(
+      db,
+      httpServer,
+      companyId,
+      "procurement_manager",
+    );
+
+    const actions = await request(httpServer)
+      .get(`/v1/production-orders/${order.id}/actions`)
+      .set(...authHeader(procurementManager.accessToken))
+      .expect(200);
+    expect((actions.body as { cancel: boolean }).cancel).toBe(false);
+    expect((actions.body as { confirm: boolean }).confirm).toBe(true);
+    const ownerActions = await request(httpServer)
+      .get(`/v1/production-orders/${order.id}/actions`)
+      .set(...authHeader(ownerToken))
+      .expect(200);
+    expect((ownerActions.body as { cancel: boolean }).cancel).toBe(true);
+    expect((ownerActions.body as { receive: boolean }).receive).toBe(false);
 
     await request(httpServer)
       .post(`/v1/production-orders/${order.id}/cancel`)
