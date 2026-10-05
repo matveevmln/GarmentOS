@@ -160,6 +160,7 @@ export class AttentionService {
     const rows = await this.db
       .select({
         id: invoices.id,
+        productionOrderId: invoices.productionOrderId,
         amount: invoices.amount,
         status: invoices.status,
         dueDate: invoices.dueDate,
@@ -191,6 +192,7 @@ export class AttentionService {
       return {
         id: row.id,
         amount: Number(row.amount),
+        productionOrderId: row.productionOrderId,
         dueDate: row.dueDate,
         referenceLabel,
         daysOverdue: row.dueDate ? daysBetween(new Date(row.dueDate), today) : null,

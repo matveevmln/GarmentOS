@@ -17,6 +17,7 @@ import {
   cuttingOrders,
   documentLinks,
   documents,
+  invoices,
   materials,
   materialStockItems,
   materialStockMovements,
@@ -41,6 +42,8 @@ import {
 } from "@garmentos/db-schema";
 import type {
   BomResponseDto,
+  AttentionResponseDto,
+  InvoiceResponseDto,
   DocumentResponseDto,
   MaterialResponseDto,
   ProductProductionResponseDto,
@@ -105,6 +108,7 @@ describe("GET /products/:id/production (Model-first, e2e)", () => {
         }
       }
 
+      await db.delete(invoices).where(eq(invoices.companyId, company.id));
       const companyOrders = await db.select().from(productionOrders).where(eq(productionOrders.companyId, company.id));
       for (const order of companyOrders) {
         const orderCuttingOrders = await db.select().from(cuttingOrders).where(eq(cuttingOrders.productionOrderId, order.id));
@@ -322,6 +326,58 @@ describe("GET /products/:id/production (Model-first, e2e)", () => {
       .expect(201);
     return approvedResponse.body as SpecificationResponseDto;
   }
+
+  it("внимание связывает неоплаченный счёт с точной партией и не раскрывает его другой компании", async () => {
+    const { accessToken } = await createCompanyWithRoleToken(
+      `E2E Attention Links ${Date.now()}`,
+      "owner",
+    );
+    const { product, workshop, variants } = await setupApprovedProduct(
+      accessToken,
+      "AttentionLinks",
+    );
+    const spec = await createApprovedSpecification(accessToken, workshop.id, product.id, [
+      { productVariantId: variants[0].id, quantity: 10, unitPrice: 900 },
+    ]);
+    const orderResponse = await request(httpServer)
+      .post(`/v1/specifications/${spec.id}/production-order`)
+      .set(...authHeader(accessToken))
+      .send({})
+      .expect(201);
+    const order = orderResponse.body as ProductionOrderResponseDto;
+    const invoiceResponse = await request(httpServer)
+      .post("/v1/invoices")
+      .set(...authHeader(accessToken))
+      .send({ productionOrderId: order.id, amount: 1250, dueDate: "2020-01-01" })
+      .expect(201);
+    const invoice = invoiceResponse.body as InvoiceResponseDto;
+    await request(httpServer)
+      .post(`/v1/invoices/${invoice.id}/issue`)
+      .set(...authHeader(accessToken))
+      .expect(201);
+    const response = await request(httpServer)
+      .get("/v1/attention")
+      .set(...authHeader(accessToken))
+      .expect(200);
+    expect((response.body as AttentionResponseDto).overdueInvoices).toEqual([
+      expect.objectContaining({ id: invoice.id, productionOrderId: order.id, amount: 1250 }),
+    ]);
+    const other = await createCompanyWithRoleToken(`E2E Attention Other ${Date.now()}`, "owner");
+    const foreign = await request(httpServer)
+      .get("/v1/attention")
+      .set(...authHeader(other.accessToken))
+      .expect(200);
+    expect((foreign.body as AttentionResponseDto).overdueInvoices).toEqual([]);
+    await request(httpServer)
+      .post(`/v1/invoices/${invoice.id}/cancel`)
+      .set(...authHeader(accessToken))
+      .expect(201);
+    const after = await request(httpServer)
+      .get("/v1/attention")
+      .set(...authHeader(accessToken))
+      .expect(200);
+    expect((after.body as AttentionResponseDto).overdueInvoices).toEqual([]);
+  });
 
   it("история пуста для модели без единой партии (aggregates нулевые, batches — пустой массив)", async () => {
     const companyName = `E2E ProdHistory Empty ${Date.now()}`;

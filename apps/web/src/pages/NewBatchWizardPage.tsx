@@ -80,27 +80,32 @@ function fresh(productId = ""): Draft {
   };
 }
 
-export function NewBatchWizardPage() {
+export function NewBatchWizardPage({ onClose }: { onClose?: () => void }) {
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const { user } = useAuth();
   const key = `garmentos.batch-draft:${user?.companyId}:${user?.id}`;
-  const [restored] = useState(() => {
-    try {
-      return draftSchema.safeParse(JSON.parse(localStorage.getItem(key) ?? "null")).success;
-    } catch {
-      return false;
-    }
-  });
-  const [draft, setDraft] = useState<Draft>(() => {
+  const requestedProductId = params.get("productId") ?? "";
+  const [initial] = useState(() => {
     try {
       const parsed = draftSchema.safeParse(JSON.parse(localStorage.getItem(key) ?? "null"));
-      if (parsed.success) return parsed.data;
+      if (parsed.success) {
+        // Не менять состав запроса, ответ на который ещё не подтверждён.
+        if (!requestedProductId || parsed.data.productId === requestedProductId || parsed.data.pending || parsed.data.modelPending)
+          return { draft: parsed.data, restored: true };
+      }
+      if (requestedProductId) {
+        const modelDraft = draftSchema.safeParse(JSON.parse(localStorage.getItem(`${key}:model:${requestedProductId}`) ?? "null"));
+        if (modelDraft.success && modelDraft.data.productId === requestedProductId)
+          return { draft: modelDraft.data, restored: true };
+      }
     } catch {
       /* Повреждённый кеш не мешает начать заново. */
     }
-    return fresh(params.get("productId") ?? "");
+    return { draft: fresh(requestedProductId), restored: false };
   });
+  const restored = initial.restored;
+  const [draft, setDraft] = useState<Draft>(initial.draft);
   const [products, setProducts] = useState<ProductResponseDto[]>([]);
   const [workshops, setWorkshops] = useState<WorkshopResponseDto[]>([]);
   const [photoDocumentId, setPhotoDocumentId] = useState<string | null>(null);
@@ -117,6 +122,15 @@ export function NewBatchWizardPage() {
   };
   useEffect(() => {
     try {
+      let previousDraft: Draft | null = null;
+      try {
+        const previous = draftSchema.safeParse(JSON.parse(localStorage.getItem(key) ?? "null"));
+        if (previous.success) previousDraft = previous.data;
+      } catch { /* Повреждённое значение можно заменить новым вводом. */ }
+      if (previousDraft?.productId && previousDraft.productId !== draft.productId)
+        localStorage.setItem(`${key}:model:${previousDraft.productId}`, JSON.stringify(previousDraft));
+      if (draft.productId)
+        localStorage.setItem(`${key}:model:${draft.productId}`, JSON.stringify(draft));
       localStorage.setItem(key, JSON.stringify(draft));
       setStorageError(false);
     } catch {
@@ -362,6 +376,7 @@ export function NewBatchWizardPage() {
         body: payload,
       });
       localStorage.removeItem(key);
+      localStorage.removeItem(`${key}:model:${draft.productId}`);
       void navigate(`/production-orders/${order.id}`, { replace: true });
     } catch (err) {
       if (err instanceof ApiError && [400, 403, 404, 422].includes(err.status))
@@ -385,7 +400,7 @@ export function NewBatchWizardPage() {
         <button
           className="focus-ring grid h-11 w-11 place-items-center"
           aria-label="Назад к партиям"
-          onClick={() => void navigate("/production-orders")}
+          onClick={onClose ?? (() => void navigate("/production-orders"))}
         >
           <ArrowLeft size={22} />
         </button>
@@ -393,7 +408,7 @@ export function NewBatchWizardPage() {
         <button
           className="focus-ring grid h-11 w-11 place-items-center"
           aria-label="Закрыть мастер"
-          onClick={() => void navigate("/production-orders")}
+          onClick={onClose ?? (() => void navigate("/production-orders"))}
         >
           <X size={22} />
         </button>
@@ -404,6 +419,11 @@ export function NewBatchWizardPage() {
       {restored && (
         <p className="mb-3 text-sm text-muted-foreground">
           Восстановлено то, что вы заполняли на этом устройстве.
+        </p>
+      )}
+      {requestedProductId && requestedProductId !== draft.productId && (draft.pending || draft.modelPending) && (
+        <p role="alert" className="mb-3 text-sm text-warning">
+          Сначала подтвердите предыдущее сохранение. Затем можно создать партию выбранной модели.
         </p>
       )}
       {storageError && (

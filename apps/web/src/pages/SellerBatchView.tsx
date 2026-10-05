@@ -1,5 +1,6 @@
+import { useNewBatch } from "../lib/new-batch";
 import { useState, type ReactNode } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { ArrowLeft, MoreHorizontal, Scissors, Check } from "lucide-react";
 import type { BatchPassportResponseDto, ProductionOrderActionsDto } from "@garmentos/shared-types";
 import { StatusBadge } from "../design-system/StatusBadge/StatusBadge";
@@ -13,7 +14,7 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
 } from "../design-system/DropdownMenu/DropdownMenu";
-import { formatDate, formatMoney, formatQuantity } from "../lib/format";
+import { formatBatchNumber, formatDate, formatMoney, formatQuantity } from "../lib/format";
 import { computeProductionOrderBatchSum } from "../lib/production-order-pricing";
 
 interface Props {
@@ -50,13 +51,20 @@ export function SellerBatchView({
   onDownload,
 }: Props) {
   const navigate = useNavigate();
-  const [tab, setTab] = useState<"colors" | "docs" | "history">("colors");
-  const phase =
-    p.status === "draft"
-      ? 0
-      : ["placed", "in_progress", "sewing_completed"].includes(p.status)
-        ? 1
-        : 2;
+  const openNewBatch = useNewBatch();
+  const [params] = useSearchParams();
+  const [tab, setTab] = useState<"colors" | "docs" | "history">(
+    params.get("tab") === "docs" ? "docs" : "colors",
+  );
+  const phase = ["draft", "placed"].includes(p.status)
+    ? 0
+    : ["in_progress", "sewing_completed"].includes(p.status)
+      ? 1
+      : ["ready_for_pickup", "shipped_to_fulfillment"].includes(p.status)
+        ? 2
+        : p.status === "received"
+          ? 3
+          : 4;
   const closed = p.status === "completed" || p.status === "cancelled";
   const messages: Record<string, [string, string]> = {
     draft: [
@@ -106,11 +114,19 @@ export function SellerBatchView({
                 size={36}
                 className="seller-hero-thumb"
               />
-              <h1 className="!text-xl min-w-0 break-words">{p.product.name}</h1>
+              <h1 className="!text-xl min-w-0 break-words">
+                <Link
+                  to={`/products/${p.product.id}`}
+                  className="focus-ring seller-model-link"
+                  aria-label={`Открыть модель ${p.product.name}`}
+                >
+                  {p.product.name}
+                </Link>
+              </h1>
             </div>
             <p className="seller-hero-meta mt-2 text-xs">
               {p.orderNumber
-                ? `Партия №${String(p.orderNumber).padStart(4, "0")}`
+                ? formatBatchNumber(p.orderNumber, p.createdAt)
                 : p.status === "draft"
                   ? "Черновик партии"
                   : "Партия без номера"}{" "}
@@ -127,9 +143,7 @@ export function SellerBatchView({
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent>
-              <DropdownMenuItem
-                onSelect={() => void navigate(`/new-batch?productId=${p.product.id}`)}
-              >
+              <DropdownMenuItem onSelect={() => openNewBatch(p.product.id)}>
                 Новая партия этой модели
               </DropdownMenuItem>
               {p.specification && (
@@ -199,7 +213,7 @@ export function SellerBatchView({
       )}
       {p.status !== "cancelled" && (
         <ol className="seller-progress" aria-label="Ход партии">
-          {["Заказ", "Пошив", "Приёмка"].map((label, index) => (
+          {["Заказ", "Пошив", "Готовность", "Приёмка", "Закрытие"].map((label, index) => (
             <li
               key={label}
               data-done={index < phase || p.status === "completed"}

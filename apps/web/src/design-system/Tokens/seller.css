@@ -81,13 +81,13 @@
 }
 .seller-progress {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   margin-block: 22px;
 }
 .seller-progress li {
   position: relative;
   text-align: center;
-  font-size: 13px;
+  font-size: 11px;
 }
 .seller-progress li::before {
   content: "";
@@ -264,5 +264,62 @@
   .seller-party-hero button,
   .seller-wizard-heading button {
     transition: none;
+  }
+}
+
+/* Один мастер: нижний лист на телефоне, боковая панель на компьютере. */
+.seller-wizard-sheet {
+  height: min(92dvh, 900px);
+  max-height: 92dvh;
+  overflow: hidden;
+  background: var(--batch-paper);
+}
+.seller-wizard-sheet .seller-screen {
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 16px 16px 108px;
+}
+.seller-wizard-sheet .seller-action-bar {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  width: 100%;
+}
+.seller-wizard-sheet .seller-action-inner {
+  width: 100%;
+  max-width: none;
+  margin: 0;
+}
+.seller-model-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  text-decoration: underline;
+  text-decoration-color: color-mix(in oklab, var(--batch-copper) 70%, transparent);
+  text-underline-offset: 5px;
+  overflow-wrap: anywhere;
+}
+.seller-batch-card .batch-breakdown {
+  background: var(--batch-paper);
+  border-top: 1px solid var(--border);
+}
+.seller-batch-card .breakdown-color {
+  padding: 12px 16px;
+}
+.seller-color-summary {
+  border-top: 1px solid var(--border);
+  background: var(--batch-paper);
+}
+@media (min-width: 640px) {
+  .seller-wizard-sheet {
+    height: 100dvh;
+    max-height: 100dvh;
+    width: 520px;
+    max-width: 90vw;
   }
 }

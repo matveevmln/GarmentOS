@@ -39,6 +39,8 @@ export type LowStockMaterialDto = z.infer<typeof lowStockMaterialSchema>;
 
 export const overdueInvoiceSchema = z.object({
   id: z.string().uuid(),
+  // Прямая связь для перехода из внимания в паспорт, без дополнительного запроса счетов.
+  productionOrderId: z.string().uuid().nullable().optional(),
   amount: z.number(),
   dueDate: z.string().nullable(),
   referenceLabel: z.string(),

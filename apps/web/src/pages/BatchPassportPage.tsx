@@ -1,3 +1,4 @@
+import { useNewBatch } from "../lib/new-batch";
 import { SellerBatchView } from "./SellerBatchView";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
@@ -137,6 +138,7 @@ const TABS: { key: TabKey; label: string }[] = [
 export function BatchPassportPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const openNewBatch = useNewBatch();
   const [passport, setPassport] = useState<BatchPassportResponseDto | null>(null);
   const [error, setError] = useState(false);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
@@ -1875,7 +1877,7 @@ export function BatchPassportPage() {
               : passport.status === "completed"
                 ? {
                     label: "+ Новая партия этой модели",
-                    run: () => void navigate(`/new-batch?productId=${passport.product.id}`),
+                    run: () => openNewBatch(passport.product.id),
                     busy: false,
                   }
                 : null;
