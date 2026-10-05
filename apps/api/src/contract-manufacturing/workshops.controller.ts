@@ -1,4 +1,15 @@
-import { Body, Controller, Get, HttpStatus, NotFoundException, Param, Patch, Post } from "@nestjs/common";
+import {
+  Body,
+  Controller,
+  Get,
+  HttpStatus,
+  NotFoundException,
+  Param,
+  Patch,
+  Post,
+  Query,
+  ParseBoolPipe,
+} from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
 import { createZodDto } from "nestjs-zod";
 import {
@@ -29,12 +40,8 @@ export class WorkshopsController {
     return workshopResponseSchema.parse(workshop);
   }
 
-  // Правка карточки цеха (Pilot v1, этап 1). Договорные реквизиты
-  // (номер/дата договора, условия оплаты, способ доставки, подписанты) до
-  // этого задавались только при создании — а подтверждение заказа пошива
-  // требует номер договора и отсылает пользователя «заполнить его в карточке
-  // цеха». Уже подтверждённые заказы правка не затрагивает: их реквизиты
-  // зафиксированы в Snapshot партии.
+  // Реквизиты необязательны для партии (ADR 0004). Архив исключает цех
+  // из новых заказов, но сохраняет историю и возможность восстановления.
   @RequirePermissions("contract_manufacturing.write")
   @Patch(":id")
   async update(
@@ -51,8 +58,14 @@ export class WorkshopsController {
   // будущий сценарий, не Итерация 11).
   @RequirePermissions("contract_manufacturing.read")
   @Get()
-  async list(@CurrentUser() currentUser: AuthenticatedRequestUser): Promise<WorkshopResponseDto[]> {
-    const workshops = await this.contractManufacturingService.listActiveWorkshops(currentUser.companyId);
+  async list(
+    @CurrentUser() currentUser: AuthenticatedRequestUser,
+    @Query("includeArchived", new ParseBoolPipe({ optional: true })) includeArchived?: boolean,
+  ): Promise<WorkshopResponseDto[]> {
+    const workshops = await this.contractManufacturingService.listActiveWorkshops(
+      currentUser.companyId,
+      includeArchived,
+    );
     return workshops.map((workshop) => workshopResponseSchema.parse(workshop));
   }
 
