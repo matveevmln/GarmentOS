@@ -315,6 +315,13 @@
   border-top: 1px solid var(--border);
   background: var(--batch-paper);
 }
+@media (max-width: 639px) {
+  .seller-wizard-sheet {
+    bottom: var(--keyboard-inset);
+    height: calc(92dvh - var(--keyboard-inset));
+    max-height: calc(92dvh - var(--keyboard-inset));
+  }
+}
 @media (min-width: 640px) {
   .seller-wizard-sheet {
     height: 100dvh;
