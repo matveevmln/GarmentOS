@@ -106,7 +106,7 @@ export function SellerBatchView({
                 size={36}
                 className="seller-hero-thumb"
               />
-              <h1 className="!text-xl break-words">{p.product.name}</h1>
+              <h1 className="!text-xl min-w-0 break-words">{p.product.name}</h1>
             </div>
             <p className="seller-hero-meta mt-2 text-xs">
               {p.orderNumber
