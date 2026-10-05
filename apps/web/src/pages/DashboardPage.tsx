@@ -1,3 +1,4 @@
+import { useNewBatch } from "../lib/new-batch";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import type {
@@ -17,6 +18,7 @@ import { SkeletonList } from "../design-system/Feedback/Skeleton";
 import { ErrorState } from "../design-system/Feedback/ErrorState";
 import { EmptyState } from "../design-system/Feedback/EmptyState";
 import { Button } from "../design-system/Button/Button";
+import { MobileActionBar } from "../design-system/Blocks/MobileActionBar";
 import { AttentionList, BatchCard, type AttentionItem } from "../design-system/Blocks";
 import { buildBatchCardFromOrder } from "../lib/batch-card";
 import { currencyLabel, formatDate, formatMoney, formatQuantity } from "../lib/format";
@@ -39,6 +41,7 @@ const MAX_RECENT_SPECS = 5;
 
 export function DashboardPage() {
   const navigate = useNavigate();
+  const openNewBatch = useNewBatch();
   const [attention, setAttention] = useState<AttentionResponseDto | null>(null);
   const [orders, setOrders] = useState<ProductionOrderResponseDto[] | null>(null);
   const [specs, setSpecs] = useState<SpecificationResponseDto[] | null>(null);
@@ -114,27 +117,33 @@ export function DashboardPage() {
   // занижалось бы при более чем 6 активных партиях.
   const activeModelsCount = new Set(activeAllOrders.map((o) => o.productId)).size;
 
-  const attentionItems: AttentionItem[] = attention.overdueProductionOrders.map((row) => ({
+  const overdueItems: AttentionItem[] = attention.overdueProductionOrders.map((row) => ({
     id: row.id,
     tone: "danger",
     title: row.productName,
     sub: `${row.workshopName} · срок был ${formatDate(row.dueDate)}`,
     meta: `на ${row.daysOverdue} дн.`,
   }));
+  const invoiceItems: AttentionItem[] = attention.overdueInvoices
+    .filter((row) => row.productionOrderId)
+    .map((row) => ({
+      id: `invoice:${row.id}`,
+      tone: "warning",
+      title: "Неоплаченный счёт за пошив",
+      sub: row.referenceLabel,
+      // Счета в действующем контракте Finance учитываются в сомах.
+      meta: formatMoney(row.amount, "сом"),
+    }));
+  const attentionItems = [...invoiceItems, ...overdueItems];
 
   const recentSpecs = (specs ?? []).slice(0, MAX_RECENT_SPECS);
 
   return (
-    <div className="mx-auto max-w-[1400px]">
+    <div className="mx-auto max-w-[1400px] pb-24">
       <PageHeader
         title="Главная"
         subtitle="Что происходит сейчас"
         breadcrumbs={<Breadcrumbs items={[{ label: "GarmentOS" }, { label: "Главная" }]} />}
-        actions={
-          <Button size="sm" onClick={() => void navigate("/new-batch")}>
-            + Новая партия
-          </Button>
-        }
       />
 
       {/* Тёмный hero главного показателя — перенесено дословно из
@@ -173,8 +182,8 @@ export function DashboardPage() {
             </div>
             <div className="bg-sidebar-accent px-4 py-3">
               <span className="micro text-sidebar-foreground/40">Просрочено</span>
-              <strong className={cn("num mt-2 block text-[22px]", attentionItems.length > 0 && "text-danger")}>
-                {attentionItems.length}
+              <strong className={cn("num mt-2 block text-[22px]", overdueItems.length > 0 && "text-danger")}>
+                {overdueItems.length}
               </strong>
             </div>
           </div>
@@ -187,11 +196,17 @@ export function DashboardPage() {
             <div className="flex items-center justify-between gap-3 bg-sidebar bg-[radial-gradient(120%_180%_at_0%_0%,color-mix(in_oklab,var(--sidebar-primary)_26%,transparent)_0%,transparent_62%)] px-4 py-4 text-sidebar-foreground md:px-5">
               <div className="flex items-baseline gap-2.5">
                 <h2 className="font-display text-[16px] font-semibold tracking-[-0.018em]">Требует внимания</h2>
-                <span className="t-meta text-sidebar-foreground/55">{formatQuantity(attentionItems.length, "партий")}</span>
+                <span className="t-meta text-sidebar-foreground/55">{formatQuantity(attentionItems.length, "задач")}</span>
               </div>
             </div>
             <div className="px-4 md:px-5">
-              <AttentionList items={attentionItems} onSelect={() => void navigate("/production-orders")} />
+              <AttentionList items={attentionItems} onSelect={(id) => {
+                const invoice = id.startsWith("invoice:")
+                  ? attention.overdueInvoices.find((row) => `invoice:${row.id}` === id)
+                  : null;
+                const orderId = invoice?.productionOrderId ?? id;
+                void navigate(`/production-orders/${orderId}${invoice ? "?tab=docs" : ""}`);
+              }} />
             </div>
           </Card>
         </div>
@@ -204,7 +219,7 @@ export function DashboardPage() {
             <span className="t-meta">{formatQuantity(activeOrders.length)}</span>
           </div>
           {activeOrders.length === 0 ? (
-            <EmptyState compact title="Сейчас нет партий в работе" description="Новая партия создаётся из утверждённой спецификации." />
+            <EmptyState compact title="Сейчас нет партий в работе" description="Выберите модель и количество — спецификация сохранится вместе с партией." />
           ) : (
             // 2 колонки — с lg (1024px), не с md (768px, ПРОМПТ №08.3): на
             // 768-1023px рельс навигации сжимает вторую колонку сильнее, чем
@@ -237,7 +252,7 @@ export function DashboardPage() {
           </div>
           {recentSpecs.length === 0 ? (
             <div className="p-4 md:p-5">
-              <EmptyState compact title="Пока нет спецификаций" description="Первый шаг производства — спецификация." />
+              <EmptyState compact title="Пока нет спецификаций" description="Создайте партию: её спецификация появится здесь автоматически." />
             </div>
           ) : (
             <ul className="mt-1 divide-y divide-border px-4 pb-2 md:px-5">
@@ -263,6 +278,9 @@ export function DashboardPage() {
           )}
         </Card>
       </div>
+      <MobileActionBar>
+        <Button size="lg" onClick={() => openNewBatch()}>+ Новая партия</Button>
+      </MobileActionBar>
     </div>
   );
 }

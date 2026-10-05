@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { NavLink, Outlet, useLocation, useMatch } from "react-router-dom";
+import { NavLink, Outlet, useLocation, useMatch, type Location } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 import { cn } from "../design-system/utils";
 import { IconButton } from "../design-system/Button/Button";
@@ -107,7 +107,9 @@ function NavLinkItem({
   mobile: boolean;
   onNavigate: () => void;
 }) {
-  const { pathname } = useLocation();
+  const location = useLocation();
+  const background = (location.state as { batchBackground?: Location } | null)?.batchBackground;
+  const pathname = background?.pathname ?? location.pathname;
   const isActive = useNavActive(item, pathname);
   const Icon = item.icon;
   return (
@@ -321,7 +323,9 @@ export function AppShell() {
   const { user } = useAuth();
   const [collapsed, setCollapsed] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
-  const { pathname } = useLocation();
+  const location = useLocation();
+  const background = (location.state as { batchBackground?: Location } | null)?.batchBackground;
+  const pathname = background?.pathname ?? location.pathname;
 
   const gesture = useRef<{
     startX: number;
@@ -724,7 +728,9 @@ export function AppShell() {
 }
 
 function BottomNavItem({ item }: { item: NavItem }) {
-  const { pathname } = useLocation();
+  const location = useLocation();
+  const background = (location.state as { batchBackground?: Location } | null)?.batchBackground;
+  const pathname = background?.pathname ?? location.pathname;
   const isActive = useNavActive(item, pathname);
   const Icon = item.icon;
   return (

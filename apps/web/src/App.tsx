@@ -1,4 +1,4 @@
-import { Navigate, Route, Routes } from "react-router-dom";
+import { Navigate, Route, Routes, useLocation, type Location } from "react-router-dom";
 import { AuthProvider } from "./auth/AuthContext";
 import { LoginPage } from "./auth/LoginPage";
 import { RequireAuth } from "./auth/RequireAuth";
@@ -9,6 +9,7 @@ import { TooltipProvider } from "./design-system/Tooltip/Tooltip";
 import { CommandPalette } from "./design-system/CommandPalette/CommandPalette";
 import { DashboardPage } from "./pages/DashboardPage";
 import { NewBatchWizardPage } from "./pages/NewBatchWizardPage";
+import { NewBatchSheet } from "./pages/NewBatchSheet";
 import { WorkshopsPage } from "./pages/WorkshopsPage";
 import { SuppliersPage } from "./pages/SuppliersPage";
 import { MaterialsPage } from "./pages/MaterialsPage";
@@ -27,13 +28,16 @@ import { DocumentIntelligencePage } from "./pages/DocumentIntelligencePage";
 import { DesignSystemPage } from "./pages/DesignSystemPage";
 
 export function App() {
+  const location = useLocation();
+  const background = (location.state as { batchBackground?: Location } | null)?.batchBackground;
+  const sheet = location.pathname === "/new-batch" && background;
   return (
     <AuthProvider>
       <TooltipProvider delayDuration={300}>
         <IconSpriteDefs />
         <Toaster />
         <CommandPalette />
-        <Routes>
+        <Routes location={sheet ? background : location}>
           <Route path="/login" element={<LoginPage />} />
           <Route path="/design-system" element={<DesignSystemPage />} />
           <Route element={<RequireAuth />}>
@@ -59,6 +63,13 @@ export function App() {
             </Route>
           </Route>
         </Routes>
+        {sheet && (
+          <Routes>
+            <Route element={<RequireAuth />}>
+              <Route path="/new-batch" element={<NewBatchSheet />} />
+            </Route>
+          </Routes>
+        )}
       </TooltipProvider>
     </AuthProvider>
   );

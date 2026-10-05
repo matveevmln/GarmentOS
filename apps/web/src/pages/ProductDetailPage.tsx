@@ -1,3 +1,4 @@
+import { useNewBatch } from "../lib/new-batch";
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useForm } from "react-hook-form";
@@ -85,6 +86,7 @@ function historyActionLabel(action: string): string {
 // "Загрузка…", неотличимом от нормальной загрузки (UX_PRINCIPLES.md §5).
 export function ProductDetailPage() {
   const navigate = useNavigate();
+  const openNewBatch = useNewBatch();
   const { id } = useParams<{ id: string }>();
   const [product, setProduct] = useState<ProductResponseDto | null>(null);
   const [productError, setProductError] = useState(false);
@@ -540,7 +542,7 @@ export function ProductDetailPage() {
           <Button
             size="lg"
             className="md:w-auto"
-            onClick={() => void navigate(`/new-batch?productId=${id}`)}
+            onClick={() => openNewBatch(id)}
           >
             + Новая партия
           </Button>
@@ -638,7 +640,7 @@ export function ProductDetailPage() {
                       title="Пока нет ни одной спецификации"
                       description="Создайте партию: спецификация сохранится вместе с ней."
                       action={
-                        <Button size="sm" onClick={() => void navigate(`/new-batch?productId=${id}`)}>
+                        <Button size="sm" onClick={() => openNewBatch(id)}>
                           + Новая партия
                         </Button>
                       }
@@ -663,7 +665,7 @@ export function ProductDetailPage() {
                           </li>
                         ))}
                       </ul>
-                      <Button size="sm" variant="secondary" className="self-start" onClick={() => void navigate(`/new-batch?productId=${id}`)}>
+                      <Button size="sm" variant="secondary" className="self-start" onClick={() => openNewBatch(id)}>
                         + Новая партия
                       </Button>
                     </>

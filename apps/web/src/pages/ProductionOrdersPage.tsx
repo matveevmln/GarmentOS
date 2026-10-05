@@ -1,3 +1,4 @@
+import { useNewBatch } from "../lib/new-batch";
 import { MobileActionBar } from "../design-system/Blocks/MobileActionBar";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -18,9 +19,11 @@ import { SkeletonList } from "../design-system/Feedback/Skeleton";
 import { FilterTabs } from "../design-system/Tabs/FilterTabs";
 import { BatchCard } from "../design-system/Blocks";
 import { buildBatchCardFromOrder } from "../lib/batch-card";
+import { formatBatchNumber } from "../lib/format";
 
 export function ProductionOrdersPage() {
   const navigate = useNavigate();
+  const openNewBatch = useNewBatch();
   const [orders, setOrders] = useState<ProductionOrderResponseDto[]>([]);
   const [products, setProducts] = useState<ProductResponseDto[]>([]);
   const [workshops, setWorkshops] = useState<WorkshopResponseDto[]>([]);
@@ -79,7 +82,7 @@ export function ProductionOrdersPage() {
           : !["completed", "cancelled", "draft"].includes(row.status));
     return (
       matchesStatus &&
-      `${modelName(row.productId)} ${workshopName(row.workshopId)} ${row.orderNumber ?? ""}`
+      `${modelName(row.productId)} ${workshopName(row.workshopId)} ${row.orderNumber ?? ""} ${row.orderNumber ? formatBatchNumber(row.orderNumber, row.createdAt) : ""}`
         .toLowerCase()
         .includes(query.trim().toLowerCase())
     );
@@ -130,7 +133,7 @@ export function ProductionOrdersPage() {
         </div>
       )}
       <MobileActionBar>
-        <Button size="lg" onClick={() => void navigate("/new-batch")}>
+        <Button size="lg" onClick={() => openNewBatch()}>
           + Новая партия
         </Button>
       </MobileActionBar>

@@ -37,7 +37,7 @@ export function SizePill({ size, quantity }: { size: string; quantity: number })
     <span className="size-pill inline-grid h-[38px] grid-cols-[auto_auto] overflow-hidden rounded-[7px] border border-border bg-card text-[13px]">
       <span className="grid min-w-[54px] place-items-center px-2.5 font-medium">{size}</span>
       <span className="num grid min-w-[48px] place-items-center px-2.5 font-semibold text-foreground">
-        {quantity}
+        {formatQuantity(quantity, "шт.")}
       </span>
     </span>
   );

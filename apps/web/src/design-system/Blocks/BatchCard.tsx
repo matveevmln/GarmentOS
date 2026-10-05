@@ -1,10 +1,20 @@
-import { Shirt } from "lucide-react";
+import { Shirt, ChevronRight, X } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import type { BatchCardDto } from "@garmentos/shared-types";
 import { apiDownload } from "../../api/client";
-import { formatDate, formatQuantity } from "../../lib/format";
+import { formatBatchNumber, formatDate, formatQuantity } from "../../lib/format";
 import { StatusBadge } from "../StatusBadge/StatusBadge";
 import { cn } from "../utils";
+import { ColorBreakdown } from "./Breakdown";
+import {
+  Drawer,
+  DrawerBody,
+  DrawerContent,
+  DrawerDescription,
+  DrawerHeader,
+  DrawerTitle,
+  DrawerClose,
+} from "../Drawer/Drawer";
 
 // Компактная структура утверждённого макета, фирменная тёмная шапка и светлое тело из Lovable.
 
@@ -193,6 +203,7 @@ export interface BatchCardProps {
 }
 
 export function BatchCard({ data, onClick, actions, className }: BatchCardProps) {
+  const [colorsOpen, setColorsOpen] = useState(false);
   const colorNames = data.breakdown.map((row) => row.color).join(" · ");
   const late = overdueDays(data.dueDate, data.status);
   return (
@@ -206,15 +217,68 @@ export function BatchCard({ data, onClick, actions, className }: BatchCardProps)
         />
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <h3 className="min-w-0 break-words text-base font-semibold">{data.productName}</h3>
+            <h3 className="min-w-0 break-words text-base font-semibold">
+              {onClick ? (
+                <button type="button" onClick={onClick} className="focus-ring min-h-11 text-left">
+                  {data.productName}
+                </button>
+              ) : (
+                data.productName
+              )}
+            </h3>
             <StatusBadge status={data.status} className="batch-status-badge" />
           </div>
           <p className="seller-hero-meta mt-2 break-words text-xs">
-            {data.orderNumber !== null ? `№${String(data.orderNumber).padStart(4, "0")} · ` : ""}
-            {colorNames || data.workshopName}
+            {data.orderNumber !== null
+              ? formatBatchNumber(data.orderNumber, data.createdAt)
+              : "Черновик без номера"}
           </p>
+          <p className="seller-hero-meta mt-1 break-words text-xs">{data.workshopName}</p>
         </div>
       </div>
+      {data.breakdown.length > 0 &&
+        (data.breakdown.length <= 2 ? (
+          <ColorBreakdown breakdown={data.breakdown} />
+        ) : (
+          <>
+            <button
+              type="button"
+              className="seller-color-summary focus-ring flex w-full items-center justify-between gap-3 px-4 py-3 text-left"
+              onClick={() => setColorsOpen(true)}
+            >
+              <span className="min-w-0">
+                <span className="block text-sm font-semibold">
+                  {colorCountLabel(data.breakdown.length)} · размеры и количество
+                </span>
+                <span className="mt-1 block truncate text-xs text-muted-foreground">
+                  {colorNames}
+                </span>
+              </span>
+              <ChevronRight size={18} className="shrink-0" />
+            </button>
+            <Drawer open={colorsOpen} onOpenChange={setColorsOpen}>
+              <DrawerContent>
+                <DrawerHeader>
+                  <div className="flex items-center justify-between gap-3">
+                    <DrawerTitle>{data.productName} · цвета и размеры</DrawerTitle>
+                    <DrawerClose
+                      aria-label="Закрыть цвета и размеры"
+                      className="focus-ring grid h-11 w-11 shrink-0 place-items-center"
+                    >
+                      <X size={20} />
+                    </DrawerClose>
+                  </div>
+                  <DrawerDescription>
+                    План партии · {formatQuantity(Number(data.plannedQuantity), "изделий")}
+                  </DrawerDescription>
+                </DrawerHeader>
+                <DrawerBody className="!p-0">
+                  <ColorBreakdown breakdown={data.breakdown} />
+                </DrawerBody>
+              </DrawerContent>
+            </Drawer>
+          </>
+        ))}
       <div className="seller-batch-footer flex items-center justify-between gap-3">
         <p className={cn("min-w-0 text-xs", late ? "text-danger" : "text-muted-foreground")}>
           <span className="seller-batch-total">
