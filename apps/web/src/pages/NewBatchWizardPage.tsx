@@ -111,7 +111,10 @@ export function NewBatchWizardPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [storageError, setStorageError] = useState(false);
-  const update = (patch: Partial<Draft>) => setDraft((prev) => ({ ...prev, ...patch }));
+  const update = (patch: Partial<Draft>) => {
+    setError("");
+    setDraft((prev) => ({ ...prev, ...patch }));
+  };
   useEffect(() => {
     try {
       localStorage.setItem(key, JSON.stringify(draft));
