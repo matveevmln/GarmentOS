@@ -1,6 +1,8 @@
+import { SellerBatchView } from "./SellerBatchView";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import type {
+  ProductionOrderActionsDto,
   BatchPassportResponseDto,
   CuttingFactResponseDto,
   CuttingOrderResponseDto,
@@ -16,24 +18,14 @@ import { apiRequest, apiUpload, ApiError } from "../api/client";
 import { Card, CardTitle, SectionLabel } from "../design-system/Card/Card";
 import { StatusBadge } from "../design-system/StatusBadge/StatusBadge";
 import { Button } from "../design-system/Button/Button";
-import { PageHeader, Breadcrumbs } from "../design-system/PageHeader/PageHeader";
 import { SkeletonList } from "../design-system/Feedback/Skeleton";
 import { ErrorState } from "../design-system/Feedback/ErrorState";
 import { EmptyState } from "../design-system/Feedback/EmptyState";
-import { IconAlert } from "../design-system/Icons/icons";
 import {
   Accordion,
-  colorCountLabel,
-  ColorDot,
   CostBreakdown,
   DocumentRow,
-  HeroModelThumb,
-  MoneyBlock,
-  PRODUCTION_STAGES,
-  ProductionStepper,
   Timeline,
-  type CuttingStageState,
-  isProductionStage,
   type CostRow,
 } from "../design-system/Blocks";
 import {
@@ -49,11 +41,23 @@ import { Field } from "../design-system/Form/Field";
 import { Input } from "../design-system/Input/Input";
 import { MoneyInput, NumberInput } from "../design-system/Input/NumberInput";
 import { DatePicker } from "../design-system/Form/DatePicker";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../design-system/Select/Select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "../design-system/Select/Select";
 import { statusMeta } from "../lib/status";
-import { formatBatchNumber, formatDate, formatMoney, formatQuantity, materialTypeLabel, unitLabel } from "../lib/format";
-import { computeProductionOrderBatchSum, computeTotalReceivedQuantity } from "../lib/production-order-pricing";
-import { NEXT_STATUS, ORDER_STATUS_LABELS, type ManualOrderStatus } from "../lib/production-order-status-labels";
+import {
+  formatDate,
+  formatMoney,
+  formatQuantity,
+  materialTypeLabel,
+  unitLabel,
+} from "../lib/format";
+import { computeTotalReceivedQuantity } from "../lib/production-order-pricing";
+import { ORDER_STATUS_LABELS, type ManualOrderStatus } from "../lib/production-order-status-labels";
 import { splitDocumentVersions } from "../lib/document-versions";
 import { openDocumentFile } from "../lib/open-document";
 import { cn } from "../design-system/utils";
@@ -130,7 +134,6 @@ const TABS: { key: TabKey; label: string }[] = [
   { key: "history", label: "История" },
 ];
 
-
 export function BatchPassportPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -151,7 +154,9 @@ export function BatchPassportPage() {
   const [isCompleting, setIsCompleting] = useState(false);
   const [confirmCompleteWithoutQc, setConfirmCompleteWithoutQc] = useState(false);
   const [confirmRegenerate, setConfirmRegenerate] = useState(false);
-  const [tab, setTab] = useState<TabKey>("cost");
+  const [actions, setActions] = useState<ProductionOrderActionsDto | null>(null);
+  const [showQuality, setShowQuality] = useState(false);
+  const [showDetails, setShowDetails] = useState(false);
   const [uploadFiles, setUploadFiles] = useState<File[]>([]);
   const [uploadDocType, setUploadDocType] = useState<string>("specification_signed");
   const [uploadTitle, setUploadTitle] = useState("");
@@ -206,9 +211,13 @@ export function BatchPassportPage() {
   // с результатом ОТК. Компенсация — единственное действие, требующее
   // явного подтверждения пользователем ("Добавить компенсацию").
   const [defects, setDefects] = useState<ProductionOrderDefectResponseDto[]>([]);
-  const [defectSummary, setDefectSummary] = useState<ProductionOrderDefectSummaryResponseDto | null>(null);
-  const [compensationDefect, setCompensationDefect] = useState<ProductionOrderDefectResponseDto | null>(null);
-  const [compensationCandidates, setCompensationCandidates] = useState<ProductionOrderResponseDto[]>([]);
+  const [defectSummary, setDefectSummary] =
+    useState<ProductionOrderDefectSummaryResponseDto | null>(null);
+  const [compensationDefect, setCompensationDefect] =
+    useState<ProductionOrderDefectResponseDto | null>(null);
+  const [compensationCandidates, setCompensationCandidates] = useState<
+    ProductionOrderResponseDto[]
+  >([]);
   const [compensationOrderId, setCompensationOrderId] = useState("");
   const [compensationVariantId, setCompensationVariantId] = useState("");
   const [compensationQuantity, setCompensationQuantity] = useState<number | undefined>(undefined);
@@ -226,13 +235,23 @@ export function BatchPassportPage() {
     Array<{ productVariantId: string; quantity: number; variantType: "new" | "rework" }>
   >([]);
   const [nextOrderPendingVariantId, setNextOrderPendingVariantId] = useState("");
-  const [nextOrderPendingQuantity, setNextOrderPendingQuantity] = useState<number | undefined>(undefined);
+  const [nextOrderPendingQuantity, setNextOrderPendingQuantity] = useState<number | undefined>(
+    undefined,
+  );
   const [nextOrderPendingType, setNextOrderPendingType] = useState<"new" | "rework">("rework");
   const [nextOrderUnitPrice, setNextOrderUnitPrice] = useState<number | undefined>(undefined);
   const [nextOrderDueDate, setNextOrderDueDate] = useState<Date | undefined>(undefined);
   const [isSubmittingNextOrder, setIsSubmittingNextOrder] = useState(false);
 
+  const loadActions = () => {
+    if (!id) return;
+    setActions(null);
+    void apiRequest<ProductionOrderActionsDto>(`/production-orders/${id}/actions`)
+      .then(setActions)
+      .catch(() => toast.error("Не удалось проверить доступные действия. Обновите страницу."));
+  };
   const load = () => {
+    loadActions();
     if (!id) return;
     setError(false);
     apiRequest<BatchPassportResponseDto>(`/production-orders/${id}/passport`)
@@ -252,6 +271,8 @@ export function BatchPassportPage() {
     void apiRequest<QcResultResponseDto>(`/production-orders/${id}/qc`)
       .then((result) => {
         setQcResult(result);
+        setShowQuality(false);
+        loadActions();
         loadDefects();
       })
       .catch(() => setQcResult(null))
@@ -265,7 +286,9 @@ export function BatchPassportPage() {
     void apiRequest<ProductionOrderDefectResponseDto[]>(`/production-orders/${id}/defects`)
       .then(setDefects)
       .catch(() => setDefects([]));
-    void apiRequest<ProductionOrderDefectSummaryResponseDto>(`/production-orders/${id}/defect-summary`)
+    void apiRequest<ProductionOrderDefectSummaryResponseDto>(
+      `/production-orders/${id}/defect-summary`,
+    )
       .then(setDefectSummary)
       .catch(() => setDefectSummary(null));
   };
@@ -294,6 +317,8 @@ export function BatchPassportPage() {
         },
       });
       setQcResult(result);
+      setShowQuality(false);
+      loadActions();
       loadDefects();
       toast.success("Результат ОТК зафиксирован");
     } catch (err) {
@@ -317,17 +342,24 @@ export function BatchPassportPage() {
     setCompensationQuantity(defect.remainingQuantity);
     try {
       const [orders, variantRows] = await Promise.all([
-        apiRequest<ProductionOrderResponseDto[]>(`/production-orders?productId=${passport.product.id}`),
-        apiRequest<ProductVariantResponseDto[]>(`/product-variants?productId=${passport.product.id}`),
+        apiRequest<ProductionOrderResponseDto[]>(
+          `/production-orders?productId=${passport.product.id}`,
+        ),
+        apiRequest<ProductVariantResponseDto[]>(
+          `/product-variants?productId=${passport.product.id}`,
+        ),
       ]);
-      setCompensationCandidates(orders.filter((order) => order.sourceProductionOrderId === passport.id));
+      setCompensationCandidates(
+        orders.filter((order) => order.sourceProductionOrderId === passport.id),
+      );
       setNextOrderVariants(variantRows);
     } catch {
       setCompensationCandidates([]);
     }
   };
 
-  const compensationOrder = compensationCandidates.find((order) => order.id === compensationOrderId) ?? null;
+  const compensationOrder =
+    compensationCandidates.find((order) => order.id === compensationOrderId) ?? null;
   const compensationReworkVariants = (compensationOrder?.variants ?? []).filter(
     (variant) => variant.variantType === "rework",
   );
@@ -367,7 +399,9 @@ export function BatchPassportPage() {
       // ответе) — берём из самого заказа, эндпоинт уже существует.
       const [order, variantRows] = await Promise.all([
         apiRequest<ProductionOrderResponseDto>(`/production-orders/${passport.id}`),
-        apiRequest<ProductVariantResponseDto[]>(`/product-variants?productId=${passport.product.id}`),
+        apiRequest<ProductVariantResponseDto[]>(
+          `/product-variants?productId=${passport.product.id}`,
+        ),
       ]);
       setNextOrderBomId(order.bomId);
       setNextOrderVariants(variantRows);
@@ -379,7 +413,9 @@ export function BatchPassportPage() {
       setNextOrderDueDate(undefined);
       setNextOrderOpen(true);
     } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "Не удалось загрузить данные для нового заказа");
+      toast.error(
+        err instanceof ApiError ? err.message : "Не удалось загрузить данные для нового заказа",
+      );
     }
   };
 
@@ -387,7 +423,11 @@ export function BatchPassportPage() {
     if (!nextOrderPendingVariantId || !nextOrderPendingQuantity) return;
     setNextOrderLines((prev) => [
       ...prev,
-      { productVariantId: nextOrderPendingVariantId, quantity: nextOrderPendingQuantity, variantType: nextOrderPendingType },
+      {
+        productVariantId: nextOrderPendingVariantId,
+        quantity: nextOrderPendingQuantity,
+        variantType: nextOrderPendingType,
+      },
     ]);
     setNextOrderPendingVariantId("");
     setNextOrderPendingQuantity(undefined);
@@ -406,7 +446,8 @@ export function BatchPassportPage() {
   // Та же формула по строкам, что и в computeProductionOrderBatchSum — здесь
   // считается по ещё не сохранённым строкам формы, а не по ответу сервера.
   const nextOrderBatchSum = nextOrderLines.reduce(
-    (sum, line) => sum + (line.variantType === "rework" ? 0 : line.quantity * (nextOrderUnitPrice ?? 0)),
+    (sum, line) =>
+      sum + (line.variantType === "rework" ? 0 : line.quantity * (nextOrderUnitPrice ?? 0)),
     0,
   );
 
@@ -512,7 +553,10 @@ export function BatchPassportPage() {
     }
   };
 
-  const issueCutting = async (cuttingId: string, materials: CuttingOrderResponseDto["materials"]) => {
+  const issueCutting = async (
+    cuttingId: string,
+    materials: CuttingOrderResponseDto["materials"],
+  ) => {
     setCuttingBusy(true);
     try {
       await apiRequest(`/cutting-orders/${cuttingId}/issue`, {
@@ -555,7 +599,9 @@ export function BatchPassportPage() {
             })),
             results: order.results.map((row) => ({
               productVariantId: row.productVariantId,
-              actualQuantity: Math.round(actuals[row.productVariantId] ?? row.actualQuantity ?? row.plannedQuantity),
+              actualQuantity: Math.round(
+                actuals[row.productVariantId] ?? row.actualQuantity ?? row.plannedQuantity,
+              ),
             })),
           },
         },
@@ -563,7 +609,9 @@ export function BatchPassportPage() {
       setShortages(response.shortages);
       loadCutting();
       toast.success(correction ? "Факт исправлен" : "Факт кроя внесён", {
-        description: correction ? "Разница проведена корректировкой склада" : "Фактический расход списан со склада",
+        description: correction
+          ? "Разница проведена корректировкой склада"
+          : "Фактический расход списан со склада",
       });
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "Не удалось сохранить факт кроя");
@@ -577,7 +625,9 @@ export function BatchPassportPage() {
     try {
       await apiRequest(`/cutting-orders/${cuttingId}/generate-document`, { method: "POST" });
       load();
-      toast.success("Раскройное задание сформировано", { description: "Файл — во вкладке «Документы»" });
+      toast.success("Раскройное задание сформировано", {
+        description: "Файл — во вкладке «Документы»",
+      });
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "Не удалось сформировать документ");
     } finally {
@@ -599,9 +649,12 @@ export function BatchPassportPage() {
     if (!id) return;
     setIsGenerating(true);
     try {
-      const document = await apiRequest<DocumentResponseDto>(`/production-orders/${id}/generate-specification`, {
-        method: "POST",
-      });
+      const document = await apiRequest<DocumentResponseDto>(
+        `/production-orders/${id}/generate-specification`,
+        {
+          method: "POST",
+        },
+      );
       load();
       toast.success(`Спецификация сформирована`, { description: document.title ?? undefined });
     } catch (err) {
@@ -623,9 +676,12 @@ export function BatchPassportPage() {
     if (!id) return;
     setIsGeneratingAct(true);
     try {
-      const document = await apiRequest<DocumentResponseDto>(`/production-orders/${id}/generate-act`, {
-        method: "POST",
-      });
+      const document = await apiRequest<DocumentResponseDto>(
+        `/production-orders/${id}/generate-act`,
+        {
+          method: "POST",
+        },
+      );
       load();
       toast.success("Акт сформирован", { description: document.title ?? undefined });
     } catch (err) {
@@ -645,7 +701,9 @@ export function BatchPassportPage() {
     if (!id) return;
     setIsCreatingSpecFromOrder(true);
     try {
-      const spec = await apiRequest<{ id: string }>(`/production-orders/${id}/specification`, { method: "POST" });
+      const spec = await apiRequest<{ id: string }>(`/production-orders/${id}/specification`, {
+        method: "POST",
+      });
       toast.success("Спецификация создана");
       void navigate(`/specifications/${spec.id}`);
     } catch (err) {
@@ -707,7 +765,8 @@ export function BatchPassportPage() {
   const openReceiveDialog = () => {
     if (!passport) return;
     const quantities: Record<string, number> = {};
-    for (const variant of passport.variants) quantities[variant.productVariantId] = Number(variant.quantity);
+    for (const variant of passport.variants)
+      quantities[variant.productVariantId] = Number(variant.quantity);
     setReceiveQuantities(quantities);
     setReceiveWarehouseId(warehouses.length === 1 && warehouses[0] ? warehouses[0].id : "");
     setReceiveChecked(false);
@@ -715,20 +774,37 @@ export function BatchPassportPage() {
   };
 
   const saveReceivePlace = async () => {
-    if (!receivePlaceName.trim()) { toast.error("Укажите, где принимаете изделия"); return; }
+    if (!receivePlaceName.trim()) {
+      toast.error("Укажите, где принимаете изделия");
+      return;
+    }
     setPlaceBusy(true);
     try {
-      const place = await apiRequest<WarehouseResponseDto>("/warehouses", { method: "POST", body: { name: receivePlaceName.trim(), type: "own" } });
-      setWarehouses(prev => [...prev, place]); setReceiveWarehouseId(place.id);
-    } catch (err) { toast.error(err instanceof Error ? err.message : "Не удалось сохранить место приёмки"); }
-    finally { setPlaceBusy(false); }
+      const place = await apiRequest<WarehouseResponseDto>("/warehouses", {
+        method: "POST",
+        body: { name: receivePlaceName.trim(), type: "own" },
+      });
+      setWarehouses((prev) => [...prev, place]);
+      setReceiveWarehouseId(place.id);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Не удалось сохранить место приёмки");
+    } finally {
+      setPlaceBusy(false);
+    }
   };
 
-  const receivePlannedTotal = passport?.variants.reduce((sum, v) => sum + Number(v.quantity), 0) ?? 0;
-  const receiveActualTotal = Object.values(receiveQuantities).reduce((sum, value) => sum + (value || 0), 0);
+  const receivePlannedTotal =
+    passport?.variants.reduce((sum, v) => sum + Number(v.quantity), 0) ?? 0;
+  const receiveActualTotal = Object.values(receiveQuantities).reduce(
+    (sum, value) => sum + (value || 0),
+    0,
+  );
 
   const submitReceiveFromPassport = async () => {
-    if (!receiveChecked) { toast.error("Проверьте фактические количества и подтвердите приёмку"); return; }
+    if (!receiveChecked) {
+      toast.error("Проверьте фактические количества и подтвердите приёмку");
+      return;
+    }
     if (!id || !passport || !receiveWarehouseId) {
       toast.error("Выберите склад для приёмки");
       return;
@@ -765,7 +841,10 @@ export function BatchPassportPage() {
     if (!id || !rollbackReason.trim()) return;
     setIsRollingBack(true);
     try {
-      await apiRequest(`/production-orders/${id}/rollback-status`, { method: "POST", body: { reason: rollbackReason.trim() } });
+      await apiRequest(`/production-orders/${id}/rollback-status`, {
+        method: "POST",
+        body: { reason: rollbackReason.trim() },
+      });
       load();
       toast.success("Статус заказа откачен на один шаг назад");
       setShowRollbackDialog(false);
@@ -791,7 +870,10 @@ export function BatchPassportPage() {
     if (!id || !cancelReason.trim()) return;
     setIsCancellingOrder(true);
     try {
-      await apiRequest(`/production-orders/${id}/cancel`, { method: "POST", body: { reason: cancelReason.trim() } });
+      await apiRequest(`/production-orders/${id}/cancel`, {
+        method: "POST",
+        body: { reason: cancelReason.trim() },
+      });
       load();
       toast.success("Заказ отменён");
       setShowCancelDialog(false);
@@ -899,7 +981,9 @@ export function BatchPassportPage() {
   // "Предыдущая редакция". Логика — в общем месте (../lib/document-versions),
   // тот же принцип теперь применяется и в DocumentsPage.tsx (владелец
   // проекта, 2026-09-22 — там был тот же баг «первый по дате»).
-  const { current: currentDocs, previous: previousDocs } = splitDocumentVersions(passport.documents);
+  const { current: currentDocs, previous: previousDocs } = splitDocumentVersions(
+    passport.documents,
+  );
   // Кнопка «Скачать спецификацию» в шапке и диалог перегенерации — именно
   // про спецификацию, не про «какой угодно текущий документ» (с появлением
   // акта в currentDocs может быть больше одного элемента).
@@ -913,31 +997,6 @@ export function BatchPassportPage() {
   // src/domain/production-order.ts) на уже загруженных данных страницы —
   // см. комментарий у самой кнопки ниже про происхождение и границы этого
   // условия (почему "placed" остаётся исключением).
-  const hasReceivedFacts = passport.variants.some((variant) => variant.receivedQuantity !== null);
-  const canRollbackStatus =
-    passport.status !== "draft" &&
-    passport.status !== "placed" &&
-    passport.status !== "completed" &&
-    passport.status !== "cancelled" &&
-    !qcResult &&
-    !(passport.status === "received" && hasReceivedFacts);
-
-  // Зеркалит assertCanCancel (тот же файл в домене) — то же "физический
-  // факт уже есть" ограничение, что и у canRollbackStatus выше, но без
-  // исключения "placed" (отмена, в отличие от отката, не подвержена
-  // проблеме с costSnapshot: cancelProductionOrder не подтверждает заказ
-  // повторно). Условие видимости, не сама проверка допустимости — backend
-  // проверяет её ещё раз (assertCanCancel), это только чтобы не показывать
-  // кнопку там, где нажатие гарантированно вернёт 409.
-  const canCancelOrder =
-    passport.status !== "completed" &&
-    passport.status !== "cancelled" &&
-    !qcResult &&
-    !(passport.status === "received" && hasReceivedFacts);
-
-  // Матрица размер×цвет — союз всех размеров/цветов в порядке первого
-  // появления (не предполагаем, что у каждого цвета один и тот же набор
-  // размеров — реальные данные могут быть неравномерными).
   const colors: string[] = [];
   const sizes: string[] = [];
   for (const variant of passport.variants) {
@@ -947,10 +1006,6 @@ export function BatchPassportPage() {
   // Компактная раскладка по цвету для paper-зоны hero (тот же приём, что и
   // компактная строка цветов в BatchCard — полная раскладка по размерам
   // остаётся во вкладке «Размеры и цвета», здесь только итог по цвету).
-  const colorBreakdown = colors.map((color) => ({
-    color,
-    quantity: passport.variants.filter((row) => row.color === color).reduce((sum, row) => sum + Number(row.quantity), 0),
-  }));
   const quantityFor = (color: string, size: string): number | null => {
     const variant = passport.variants.find((row) => row.color === color && row.size === size);
     return variant ? Math.round(Number(variant.quantity)) : null;
@@ -976,27 +1031,6 @@ export function BatchPassportPage() {
   // specificationPricePerUnit (цена за вычетом 175); владелец проекта не
   // подтвердил смысл этого вычета, поэтому построенные на нём показатели из
   // интерфейса убраны, а не показаны «примерно верными».
-  const agreedUnitPrice = Number(passport.agreedUnitPrice);
-  const batchSum = computeProductionOrderBatchSum(passport);
-
-  // Состояние шага «Раскрой» на шкале выводится из раскройных заданий, а не из
-  // статуса заказа: статус описывает отношения с цехом, раскрой — нашу работу.
-  const cuttingStage: CuttingStageState =
-    cuttingOrders.length === 0
-      ? "none"
-      : cuttingOrders.some((order) => order.status === "draft" || order.status === "issued")
-        ? "in_progress"
-        : "done";
-
-  // Потребность в материалах по этой партии — из норм, замороженных при
-  // подтверждении заказа. Стоимости разных валютных контуров (ткань в USD,
-  // фурнитура в сомах) не складываются в одно число: итог считается отдельно
-  // по каждой валюте (docs/PRINCIPLES.md, принцип 21).
-  // Псевдо-этапы «Спецификация»/«Ткань» (Этап 3) — показываются только когда
-  // есть данные: старые партии без специи/норм не получают выдуманных шагов.
-  const hasSpecificationStage = passport.specification !== null;
-  const hasMaterialsStage = passport.materialRequirement.length > 0;
-
   const requirement = passport.materialRequirement;
   const requirementTotals = new Map<string, number>();
   for (const row of requirement) {
@@ -1024,7 +1058,10 @@ export function BatchPassportPage() {
           { label: "Фурнитура", unitCost: snapshot.trimCostPerUnit },
           { label: "Упаковка", unitCost: snapshot.packagingCostPerUnit },
           { label: "Прочее", unitCost: snapshot.otherCostPerUnit },
-        ].filter((row): row is { label: string; unitCost: number } => row.unitCost !== null && row.unitCost > 0)
+        ].filter(
+          (row): row is { label: string; unitCost: number } =>
+            row.unitCost !== null && row.unitCost > 0,
+        )
       : [];
   const costUnitTotal = rawCost.reduce((sum, row) => sum + row.unitCost, 0);
   const costRows: CostRow[] = rawCost.map((row) => ({
@@ -1113,7 +1150,8 @@ export function BatchPassportPage() {
       return (
         <div>
           <div className="num mb-3 text-[11px] text-muted-foreground">
-            Данные партии зафиксированы {formatDate(snapshot.capturedAt)} · больше не пересчитываются
+            Данные партии зафиксированы {formatDate(snapshot.capturedAt)} · больше не
+            пересчитываются
           </div>
           {costRows.length > 0 ? (
             <CostBreakdown
@@ -1149,9 +1187,14 @@ export function BatchPassportPage() {
           {snapshot.materialCostsByCurrency && snapshot.materialCostsByCurrency.length > 0 ? (
             <ul className="mt-3 divide-y divide-border rounded-[10px] border border-border px-3">
               {snapshot.materialCostsByCurrency.map((row) => (
-                <li key={row.currency} className="flex items-center justify-between gap-3 py-2.5 text-[13px]">
+                <li
+                  key={row.currency}
+                  className="flex items-center justify-between gap-3 py-2.5 text-[13px]"
+                >
                   <span className="text-muted-foreground">Материалы, {row.currency} за ед.</span>
-                  <span className="num font-medium">{formatMoney(row.amountPerUnit, row.currency, 2)}</span>
+                  <span className="num font-medium">
+                    {formatMoney(row.amountPerUnit, row.currency, 2)}
+                  </span>
                 </li>
               ))}
             </ul>
@@ -1172,10 +1215,14 @@ export function BatchPassportPage() {
               <ul className="mt-2 divide-y divide-border rounded-[10px] border border-border px-3">
                 {passport.invoices.map((invoice) => (
                   <li key={invoice.id} className="flex items-center justify-between gap-3 py-2.5">
-                    <span className="num text-[13px] font-medium">{formatMoney(invoice.amount, "сом", 2)}</span>
+                    <span className="num text-[13px] font-medium">
+                      {formatMoney(invoice.amount, "сом", 2)}
+                    </span>
                     <span className="flex items-center gap-2">
                       {invoice.dueDate ? (
-                        <span className="num text-[11px] text-muted-foreground">до {formatDate(invoice.dueDate)}</span>
+                        <span className="num text-[11px] text-muted-foreground">
+                          до {formatDate(invoice.dueDate)}
+                        </span>
                       ) : null}
                       <StatusBadge status={invoice.status} />
                     </span>
@@ -1209,9 +1256,13 @@ export function BatchPassportPage() {
       return (
         <div>
           <div className="num mb-3 text-[11px] text-muted-foreground">
-            {snapshot ? `Зафиксированы ${formatDate(snapshot.capturedAt)}` : "Зафиксированы при подтверждении"}
-            {snapshot?.materialNormsVersion ? ` · нормы модели, редакция №${snapshot.materialNormsVersion}` : ""} · на{" "}
-            {formatQuantity(plannedQuantity, "изделий")}
+            {snapshot
+              ? `Зафиксированы ${formatDate(snapshot.capturedAt)}`
+              : "Зафиксированы при подтверждении"}
+            {snapshot?.materialNormsVersion
+              ? ` · нормы модели, редакция №${snapshot.materialNormsVersion}`
+              : ""}{" "}
+            · на {formatQuantity(plannedQuantity, "изделий")}
           </div>
 
           <div className="divide-y divide-border rounded-[10px] border border-border">
@@ -1252,7 +1303,9 @@ export function BatchPassportPage() {
                     создание партии, ни создание раскроя. */}
                 <div className="mt-2 flex flex-wrap items-baseline gap-x-6 gap-y-1">
                   <span>
-                    <span className="eyebrow text-[10px]">На складе (по всем складам компании)</span>
+                    <span className="eyebrow text-[10px]">
+                      На складе (по всем складам компании)
+                    </span>
                     <span className="num ml-2 text-[13px] font-medium">
                       {formatQuantity(row.onHand, unitLabel(row.unit), 2)}
                     </span>
@@ -1280,7 +1333,9 @@ export function BatchPassportPage() {
                 {[...requirementTotals.entries()].map(([currency, total]) => (
                   <li key={currency} className="flex items-center justify-between gap-3 py-2.5">
                     <span className="t-secondary">Итого в валюте {currency}</span>
-                    <span className="num text-[13px] font-medium">{formatMoney(total, currency, 2)}</span>
+                    <span className="num text-[13px] font-medium">
+                      {formatMoney(total, currency, 2)}
+                    </span>
                   </li>
                 ))}
               </ul>
@@ -1295,7 +1350,8 @@ export function BatchPassportPage() {
           {requirementWithoutPrice.length > 0 ? (
             <p className="mt-4 rounded-[10px] border border-warning/30 bg-warning/[0.06] px-3 py-2 text-[12px] font-medium text-warning">
               Без закупочной цены на момент подтверждения:{" "}
-              {requirementWithoutPrice.map((row) => row.materialName).join(", ")} — потребность посчитана, стоимость нет.
+              {requirementWithoutPrice.map((row) => row.materialName).join(", ")} — потребность
+              посчитана, стоимость нет.
             </p>
           ) : null}
         </div>
@@ -1345,16 +1401,30 @@ export function BatchPassportPage() {
                 : " · кроим сами"}
             </span>
             <span className="flex flex-wrap gap-2">
-              <Button variant="secondary" size="sm" loading={cuttingBusy} onClick={() => void generateCuttingDocument(active.id)}>
+              <Button
+                variant="secondary"
+                size="sm"
+                loading={cuttingBusy}
+                onClick={() => void generateCuttingDocument(active.id)}
+              >
                 Сформировать задание
               </Button>
               {cuttingOrders.length > 0 && isCompleted && (
-                <Button variant="secondary" size="sm" loading={cuttingBusy} onClick={() => void createCuttingOrder()}>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  loading={cuttingBusy}
+                  onClick={() => void createCuttingOrder()}
+                >
                   Добавить докрой
                 </Button>
               )}
               {(isDraft || isIssued) && (
-                <Button variant="ghost" size="sm" onClick={() => setCancelCuttingOrderId(active.id)}>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setCancelCuttingOrderId(active.id)}
+                >
                   Отменить задание
                 </Button>
               )}
@@ -1368,7 +1438,10 @@ export function BatchPassportPage() {
                 <tr>
                   <th className="border border-border px-2 py-1.5 text-left font-medium">Размер</th>
                   {colors.map((color) => (
-                    <th key={color} className="border border-border px-2 py-1.5 text-right font-medium">
+                    <th
+                      key={color}
+                      className="border border-border px-2 py-1.5 text-right font-medium"
+                    >
                       {color}
                     </th>
                   ))}
@@ -1380,12 +1453,24 @@ export function BatchPassportPage() {
                     <td className="border border-border px-2 py-1 font-medium">{size}</td>
                     {colors.map((color) => {
                       const row = cell(size, color);
-                      if (!row) return <td key={color} className="border border-border px-2 py-1 text-right text-muted-foreground">—</td>;
+                      if (!row)
+                        return (
+                          <td
+                            key={color}
+                            className="border border-border px-2 py-1 text-right text-muted-foreground"
+                          >
+                            —
+                          </td>
+                        );
                       return (
                         <td key={color} className="border border-border px-2 py-1 text-right">
                           {isIssued ? (
                             <NumberInput
-                              value={actuals[row.productVariantId] ?? row.actualQuantity ?? row.plannedQuantity}
+                              value={
+                                actuals[row.productVariantId] ??
+                                row.actualQuantity ??
+                                row.plannedQuantity
+                              }
                               onChange={(value) =>
                                 setActuals((prev) => ({ ...prev, [row.productVariantId]: value }))
                               }
@@ -1394,8 +1479,11 @@ export function BatchPassportPage() {
                           ) : (
                             <span className="num">
                               {formatQuantity(row.plannedQuantity)}
-                              {row.actualQuantity !== null && row.actualQuantity !== row.plannedQuantity ? (
-                                <span className="ml-1 text-warning">→ {formatQuantity(row.actualQuantity)}</span>
+                              {row.actualQuantity !== null &&
+                              row.actualQuantity !== row.plannedQuantity ? (
+                                <span className="ml-1 text-warning">
+                                  → {formatQuantity(row.actualQuantity)}
+                                </span>
                               ) : null}
                             </span>
                           )}
@@ -1407,9 +1495,15 @@ export function BatchPassportPage() {
                 <tr>
                   <td className="border border-border px-2 py-1.5 font-semibold">Итого</td>
                   {colors.map((color) => (
-                    <td key={color} className="num border border-border px-2 py-1.5 text-right font-semibold">
+                    <td
+                      key={color}
+                      className="num border border-border px-2 py-1.5 text-right font-semibold"
+                    >
                       {formatQuantity(
-                        sizes.reduce((sum, size) => sum + (cell(size, color)?.plannedQuantity ?? 0), 0),
+                        sizes.reduce(
+                          (sum, size) => sum + (cell(size, color)?.plannedQuantity ?? 0),
+                          0,
+                        ),
                       )}
                     </td>
                   ))}
@@ -1426,13 +1520,16 @@ export function BatchPassportPage() {
                   <div className="text-[13px] font-medium">{material.materialName}</div>
                   <div className="mt-2 flex flex-wrap items-end gap-3">
                     <span className="num text-[12px] text-muted-foreground">
-                      Требуется {formatQuantity(material.requiredQuantity, unitLabel(material.unit), 2)}
+                      Требуется{" "}
+                      {formatQuantity(material.requiredQuantity, unitLabel(material.unit), 2)}
                     </span>
                     {isDraft ? (
                       <Field label="Выделено" className="min-w-[120px]">
                         <NumberInput
                           value={allocations[material.materialId] ?? material.requiredQuantity}
-                          onChange={(value) => setAllocations((prev) => ({ ...prev, [material.materialId]: value }))}
+                          onChange={(value) =>
+                            setAllocations((prev) => ({ ...prev, [material.materialId]: value }))
+                          }
                           min={0}
                           decimals={2}
                         />
@@ -1448,8 +1545,12 @@ export function BatchPassportPage() {
                     {isIssued || isCompleted ? (
                       <Field label="Использовано" className="min-w-[130px]">
                         <NumberInput
-                          value={consumed[material.materialId] ?? material.consumedQuantity ?? undefined}
-                          onChange={(value) => setConsumed((prev) => ({ ...prev, [material.materialId]: value }))}
+                          value={
+                            consumed[material.materialId] ?? material.consumedQuantity ?? undefined
+                          }
+                          onChange={(value) =>
+                            setConsumed((prev) => ({ ...prev, [material.materialId]: value }))
+                          }
                           min={0}
                           decimals={2}
                         />
@@ -1458,8 +1559,12 @@ export function BatchPassportPage() {
                     {isIssued || isCompleted ? (
                       <Field label="Возврат на склад" className="min-w-[130px]">
                         <NumberInput
-                          value={returned[material.materialId] ?? material.returnedQuantity ?? undefined}
-                          onChange={(value) => setReturned((prev) => ({ ...prev, [material.materialId]: value }))}
+                          value={
+                            returned[material.materialId] ?? material.returnedQuantity ?? undefined
+                          }
+                          onChange={(value) =>
+                            setReturned((prev) => ({ ...prev, [material.materialId]: value }))
+                          }
                           min={0}
                           decimals={2}
                         />
@@ -1468,14 +1573,21 @@ export function BatchPassportPage() {
                     {material.consumedQuantity !== null && material.allocatedQuantity !== null ? (
                       <span className="num text-[12px] text-muted-foreground">
                         Остаток{" "}
-                        {formatQuantity(material.allocatedQuantity - material.consumedQuantity, unitLabel(material.unit), 2)}
+                        {formatQuantity(
+                          material.allocatedQuantity - material.consumedQuantity,
+                          unitLabel(material.unit),
+                          2,
+                        )}
                       </span>
                     ) : null}
                     <Field label="Рулоны" className="min-w-[150px] flex-1">
                       <Input
                         value={rollNotes[material.materialId] ?? material.rollNote ?? ""}
                         onChange={(event) =>
-                          setRollNotes((prev) => ({ ...prev, [material.materialId]: event.target.value }))
+                          setRollNotes((prev) => ({
+                            ...prev,
+                            [material.materialId]: event.target.value,
+                          }))
                         }
                         placeholder="например: 700 + 600"
                       />
@@ -1490,7 +1602,10 @@ export function BatchPassportPage() {
             <p className="rounded-[10px] border border-warning/30 bg-warning/[0.06] px-3 py-2 text-[12px] font-medium text-warning">
               Расхождение со складом:{" "}
               {shortages
-                .map((row) => `${row.materialName} — не хватало ${formatQuantity(row.shortage, "", 2)}`)
+                .map(
+                  (row) =>
+                    `${row.materialName} — не хватало ${formatQuantity(row.shortage, "", 2)}`,
+                )
                 .join("; ")}
               . Факт кроя сохранён; оприходуйте недостающий приход.
             </p>
@@ -1514,17 +1629,30 @@ export function BatchPassportPage() {
               </Field>
             )}
             {isDraft && (
-              <Button size="sm" loading={cuttingBusy} onClick={() => void issueCutting(active.id, active.materials)}>
+              <Button
+                size="sm"
+                loading={cuttingBusy}
+                onClick={() => void issueCutting(active.id, active.materials)}
+              >
                 Выдать в крой
               </Button>
             )}
             {isIssued && (
-              <Button size="sm" loading={cuttingBusy} onClick={() => void submitFact(active, false)}>
+              <Button
+                size="sm"
+                loading={cuttingBusy}
+                onClick={() => void submitFact(active, false)}
+              >
                 Внести факт кроя
               </Button>
             )}
             {isCompleted && (
-              <Button variant="secondary" size="sm" loading={cuttingBusy} onClick={() => void submitFact(active, true)}>
+              <Button
+                variant="secondary"
+                size="sm"
+                loading={cuttingBusy}
+                onClick={() => void submitFact(active, true)}
+              >
                 Исправить факт
               </Button>
             )}
@@ -1555,11 +1683,20 @@ export function BatchPassportPage() {
               action={
                 canGenerate ? (
                   <div className="flex flex-wrap justify-center gap-2">
-                    <Button size="sm" loading={isGenerating} onClick={() => void generateSpecification()}>
+                    <Button
+                      size="sm"
+                      loading={isGenerating}
+                      onClick={() => void generateSpecification()}
+                    >
                       Сформировать спецификацию
                     </Button>
                     {passport.status === "received" || passport.status === "completed" ? (
-                      <Button size="sm" variant="secondary" loading={isGeneratingAct} onClick={() => void generateAct()}>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        loading={isGeneratingAct}
+                        onClick={() => void generateAct()}
+                      >
                         Сформировать акт
                       </Button>
                     ) : null}
@@ -1605,8 +1742,15 @@ export function BatchPassportPage() {
                 оплаты цеху. Перегенерация не расходует номер (использует
                 номер заказа) — отдельного подтверждения не требует. */}
             {passport.status === "received" || passport.status === "completed" ? (
-              <Button variant="secondary" size="sm" loading={isGeneratingAct} onClick={() => void generateAct()}>
-                {currentDocs.some((doc) => doc.docType === "act") ? "Сформировать акт заново" : "Сформировать акт"}
+              <Button
+                variant="secondary"
+                size="sm"
+                loading={isGeneratingAct}
+                onClick={() => void generateAct()}
+              >
+                {currentDocs.some((doc) => doc.docType === "act")
+                  ? "Сформировать акт заново"
+                  : "Сформировать акт"}
               </Button>
             ) : null}
           </div>
@@ -1618,7 +1762,11 @@ export function BatchPassportPage() {
     if (key === "colors") {
       if (colors.length === 0 || sizes.length === 0) {
         return (
-          <EmptyState compact title="Размеры не заданы" description="В заказе нет ни одного варианта модели с размером и цветом." />
+          <EmptyState
+            compact
+            title="Размеры не заданы"
+            description="В заказе нет ни одного варианта модели с размером и цветом."
+          />
         );
       }
       return (
@@ -1632,13 +1780,19 @@ export function BatchPassportPage() {
                 {sizes.map((size) => {
                   const planned = quantityFor(color, size);
                   const received = receivedQuantityFor(color, size);
-                  const hasDeviation = received !== null && planned !== null && received !== planned;
+                  const hasDeviation =
+                    received !== null && planned !== null && received !== planned;
                   return (
                     <div key={size} className="bg-card px-3 py-2.5 text-center">
                       <div className="num text-[11px] text-muted-foreground">{size}</div>
                       <div className="num mt-1 text-[16px] font-semibold">{planned ?? "—"}</div>
                       {received !== null ? (
-                        <div className={cn("num mt-0.5 text-[12px]", hasDeviation ? "text-warning" : "text-muted-foreground")}>
+                        <div
+                          className={cn(
+                            "num mt-0.5 text-[12px]",
+                            hasDeviation ? "text-warning" : "text-muted-foreground",
+                          )}
+                        >
                           факт {received}
                         </div>
                       ) : null}
@@ -1690,94 +1844,84 @@ export function BatchPassportPage() {
         }))}
       />
     ) : (
-      <EmptyState compact title="Событий пока нет" description="История заказа наполняется по мере его прохождения." />
+      <EmptyState
+        compact
+        title="Событий пока нет"
+        description="История заказа наполняется по мере его прохождения."
+      />
     );
   };
 
+  const primary = actions?.confirm
+    ? { label: "Подтвердить партию", run: () => void confirmOrder(), busy: isConfirming }
+    : actions?.start
+      ? {
+          label: "Начали шить",
+          run: () => void changeOrderStatus("in_progress"),
+          busy: isChangingStatus,
+        }
+      : actions?.ready
+        ? {
+            label: "Изделия готовы",
+            run: () => void changeOrderStatus("ready_for_pickup"),
+            busy: isChangingStatus,
+          }
+        : actions?.receive
+          ? { label: "Принять партию", run: openReceiveDialog, busy: isReceiving }
+          : actions?.quality && qcLoaded && !qcResult
+            ? { label: "Проверить качество", run: () => setShowQuality(true), busy: false }
+            : actions?.complete && qcLoaded && qcResult
+              ? { label: "Завершить партию", run: requestCompleteOrder, busy: isCompleting }
+              : passport.status === "completed"
+                ? {
+                    label: "+ Новая партия этой модели",
+                    run: () => void navigate(`/new-batch?productId=${passport.product.id}`),
+                    busy: false,
+                  }
+                : null;
   return (
-    <div className="mx-auto max-w-[1400px]">
-      <PageHeader
-        breadcrumbs={
-          <Breadcrumbs
-            items={[
-              { label: "GarmentOS" },
-              { label: "Заказы пошива", onClick: () => void navigate("/production-orders") },
-              { label: passport.product.name },
-            ]}
-          />
-        }
-        title={passport.orderNumber ? formatBatchNumber(passport.orderNumber, passport.createdAt) : passport.product.name}
-        subtitle={
-          <span className="num">
-            {passport.orderNumber ? `${passport.product.name} · ` : ""}
-            {passport.workshop.name} · {formatQuantity(plannedQuantity, "изделий")} · срок{" "}
-            {formatDate(passport.dueDate)}
-            {passport.specification && (
-              <>
-                {" · "}
-                <button
-                  type="button"
-                  className="underline decoration-dotted underline-offset-2 hover:text-primary"
-                  onClick={() => void navigate(`/specifications/${passport.specification!.id}`)}
-                >
-                  Спецификация {passport.specification.specNumber ? `№${passport.specification.specNumber}` : ""}
-                </button>
-              </>
-            )}
-          </span>
-        }
-        actions={
-          <>
-            <Button variant="secondary" size="sm" onClick={() => void navigate("/production-orders")}>
-              К списку
-            </Button>
-            {/* Спецификация создаётся из подтверждённого заказа (ПРОМПТ №3,
-                раздел 1/2 — NEW-поток, основной путь нового UI): реквизиты
-                договора и себестоимость фиксируются в момент подтверждения,
-                у черновика их ещё нет. Legacy-путь (generateSpecification,
-                снимок старого потока) в новом UI не показывается — см.
-                CLAUDE.md, «новый UI не использует старый flow». */}
-            {canGenerate && !passport.specification ? (
-              <Button size="sm" loading={isCreatingSpecFromOrder} onClick={() => void createSpecificationFromOrder()}>
-                Создать спецификацию
-              </Button>
-            ) : null}
-            {/* В шапке — не больше двух действий: на 390px третья кнопка
-                выталкивала страницу за пределы экрана (поймано проверкой
-                адаптива). Повторное формирование живёт во вкладке
-                «Документы», рядом с самими документами. */}
-            {currentSpecDoc ? (
-              <Button
-                size="sm"
-                loading={downloadingId === currentSpecDoc.id}
-                onClick={() => void openDocument(currentSpecDoc.id, currentSpecDoc.title ?? "Спецификация")}
-              >
-                Скачать спецификацию
-              </Button>
-            ) : null}
-          </>
+    <div className="seller-screen">
+      <SellerBatchView
+        passport={passport}
+        actions={actions}
+        hasQuality={Boolean(qcResult)}
+        primary={primary}
+        renderTab={renderTab}
+        onDetails={() => setShowDetails(true)}
+        onQuality={() => setShowQuality(true)}
+        onCancel={() => setShowCancelDialog(true)}
+        onRollback={() => setShowRollbackDialog(true)}
+        onShip={() => void changeOrderStatus("shipped_to_fulfillment")}
+        onComplete={requestCompleteOrder}
+        onCreateSpecification={() => {
+          if (!isCreatingSpecFromOrder) void createSpecificationFromOrder();
+        }}
+        onRework={() => void openNextOrderDialog()}
+        onDownload={
+          !downloadingId && currentSpecDoc
+            ? () => void openDocument(currentSpecDoc.id, currentSpecDoc.title ?? "Спецификация")
+            : null
         }
       />
-
-      <Card className="mb-4 p-4 md:p-5" aria-label="Следующий шаг партии">
-        <CardTitle className="mb-2">Следующий шаг</CardTitle>
-        {passport.status === "draft" ? <Button size="lg" loading={isConfirming} onClick={() => void confirmOrder()}>Подтвердить партию</Button>
-          : passport.status === "ready_for_pickup" || passport.status === "shipped_to_fulfillment" ? <>
-            <p className="mb-3 text-sm text-muted-foreground">Когда получите изделия, сверяйте фактические количества при приёмке.</p>
-            <Button size="lg" onClick={openReceiveDialog}>Принять партию</Button>
-            {passport.status === "ready_for_pickup" && <Button size="lg" variant="ghost" loading={isChangingStatus} onClick={() => void changeOrderStatus("shipped_to_fulfillment")}>Цех отправил изделия</Button>}
-          </> : NEXT_STATUS[passport.status] ? <>
-            <p className="mb-3 text-sm text-muted-foreground">Отметьте следующий этап, когда цех сообщит о нём.</p>
-            <Button size="lg" loading={isChangingStatus} onClick={() => void changeOrderStatus(NEXT_STATUS[passport.status])}>{ORDER_STATUS_LABELS[NEXT_STATUS[passport.status]]}</Button>
-          </> : passport.status === "received" ? <>
-            <p className="mb-3 text-sm text-muted-foreground">Изделия приняты. {qcResult ? "Результат проверки качества сохранён." : "Проверьте качество и укажите годные изделия и брак."}</p>
-            {qcResult ? <Button size="lg" loading={isCompleting} onClick={requestCompleteOrder}>Завершить партию</Button>
-              : <Button size="lg" onClick={() => document.getElementById("party-quality")?.scrollIntoView({ behavior: "smooth", block: "start" })}>Проверить качество</Button>}
-          </> : passport.status === "completed" ? <>
-            <p className="mb-3 text-sm text-muted-foreground">Партия закрыта. Размеры и цвета можно использовать снова.</p>
-            <Button size="lg" onClick={() => void navigate(`/new-batch?productId=${passport.product.id}`)}>+ Новая партия этой модели</Button>
-          </> : <p className="text-sm">Партия отменена. История сохранена.</p>}
-      </Card>
+      <Dialog open={showDetails} onOpenChange={setShowDetails}>
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>Дополнительные данные партии</DialogTitle>
+            <DialogDescription>
+              Условия, себестоимость и производственные подробности.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            {TABS.filter((item) => !["colors", "docs", "history"].includes(item.key)).map(
+              (item) => (
+                <Accordion key={item.key} title={item.label}>
+                  {renderTab(item.key)}
+                </Accordion>
+              ),
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Повторное формирование расходует номер спецификации по договору
           цеха и делает прежнюю редакцию неактуальной — поэтому оно требует
@@ -1788,7 +1932,9 @@ export function BatchPassportPage() {
             <DialogTitle>Сформировать спецификацию заново?</DialogTitle>
             <DialogDescription>
               Будет создана новая редакция со следующим номером по договору цеха.
-              {currentSpecDoc?.title ? ` Текущая — «${currentSpecDoc.title}» — ` : " Текущая редакция "}
+              {currentSpecDoc?.title
+                ? ` Текущая — «${currentSpecDoc.title}» — `
+                : " Текущая редакция "}
               станет неактуальной, но останется в документах партии.
             </DialogDescription>
           </DialogHeader>
@@ -1803,212 +1949,22 @@ export function BatchPassportPage() {
         </DialogContent>
       </Dialog>
 
-      {/* 1. Production Hero + Paper Summary (UI GAP AUDIT, владелец проекта,
-          2026-09-15) — тот же визуальный язык, что и утверждённый BatchCard
-          (design-system/Blocks/BatchCard.tsx, ПРОМПТ №08.2): тёмная шапка
-          (фото/номер/статус) поверх светлого тела (объём/срок/цвета), те же
-          .batch-* классы и токены (--batch-ink/--batch-paper/--batch-copper),
-          без новой визуальной системы. BatchCard — компактное представление
-          партии в списках, этот блок — подробное представление ТОЙ ЖЕ
-          партии на её собственной странице. */}
-      <div className="batch-card overflow-hidden rounded-[16px]">
-        <div className="batch-hero relative overflow-hidden p-4 pb-5 md:p-6 md:pb-7">
-          <div className="relative z-[1] flex items-start justify-between gap-3">
-            <div className="min-w-0">
-              <span className="batch-kicker">Производственная партия</span>
-              <strong className="num mt-1.5 block truncate text-[22px] font-semibold text-sidebar-foreground md:text-[28px]">
-                {passport.orderNumber ? formatBatchNumber(passport.orderNumber, passport.createdAt) : "Партия без номера"}
-              </strong>
-            </div>
-            <StatusBadge status={passport.status} className="batch-status-badge shrink-0" />
-          </div>
-
-          <div className="relative z-[1] mt-5 grid grid-cols-[68px_minmax(0,1fr)] items-end gap-3 md:mt-6">
-            <HeroModelThumb photoDocumentId={passport.product.photoDocumentId} productName={passport.product.name} />
-            <div className="min-w-0">
-              <h2 className="truncate text-[19px] font-semibold leading-tight text-sidebar-foreground md:text-[22px]">
-                {passport.product.name}
-              </h2>
-              <p className="mt-1.5 truncate text-[11px] text-sidebar-foreground/55">
-                {passport.specification ? (
-                  <>
-                    <button
-                      type="button"
-                      onClick={() => void navigate(`/specifications/${passport.specification!.id}`)}
-                      className="interactive focus-ring rounded-[3px] underline-offset-2 hover:underline"
-                    >
-                      Спецификация {passport.specification.specNumber ? `№${passport.specification.specNumber}` : ""}
-                    </button>
-                    {" · "}
-                  </>
-                ) : null}
-                {passport.workshop.name}
-              </p>
-            </div>
-          </div>
-        </div>
-
-        <div className="batch-body p-4 md:p-6">
-          <div className="grid grid-cols-[minmax(0,1fr)_auto] items-end gap-4">
-            <div>
-              <span className="batch-label">Объём партии</span>
-              <div className="mt-1 flex items-end gap-2">
-                <strong className="num batch-quantity">{formatQuantity(plannedQuantity)}</strong>
-                <span className="pb-1.5 text-[11px] font-medium text-muted-foreground">изделий</span>
-              </div>
-            </div>
-            <div className="pb-1 text-right">
-              <span className="batch-label">Срок</span>
-              <strong className={cn("num mt-1.5 block text-[13px]", passport.daysOverdue !== null && "text-danger")}>
-                {passport.dueDate ? formatDate(passport.dueDate) : "не назначен"}
-              </strong>
-            </div>
-          </div>
-
-          {colorBreakdown.length > 0 ? (
-            <div className="mt-4 flex items-center justify-between border-t border-border pt-3">
-              <div className="flex min-w-0 items-center gap-2.5">
-                <div className="flex -space-x-1.5">
-                  {colorBreakdown.map((row) => (
-                    <ColorDot key={row.color} color={row.color} className="batch-swatch h-[18px] w-[18px] border-2 border-card" />
-                  ))}
-                </div>
-                <span className="truncate text-[11px] text-muted-foreground">
-                  {colorBreakdown.map((row) => row.color).join(" · ")}
-                </span>
-              </div>
-              <span className="num ml-3 shrink-0 text-[11px] font-semibold">{colorCountLabel(colorBreakdown.length)}</span>
-            </div>
-          ) : null}
-        </div>
-      </div>
-
-      {/* 3. Production Workflow (UI GAP AUDIT, владелец проекта, 2026-09-15) —
-          «где партия сейчас → что происходит → одно главное действие»,
-          объединяет прежние отдельные карточки «Производство» / «Завершение
-          партии» / «Следующий заказ» в один поток. Правила видимости и
-          переходов ниже НЕ изменены ни на строку (те же условия, те же
-          обработчики) — поменялась только визуальная композиция. */}
-      <Card className="mt-4 overflow-hidden p-0">
-        <div className="flex items-center justify-between gap-3 border-b border-border bg-muted/20 px-4 py-3 md:px-5">
-          <CardTitle className="text-[16px]">Производство</CardTitle>
-          <span className="t-meta shrink-0">
-            {PRODUCTION_STAGES.length + 1 + (hasSpecificationStage ? 1 : 0) + (hasMaterialsStage ? 1 : 0)} этапов
-          </span>
-        </div>
-        <div className="p-4 md:p-5">
-          {isProductionStage(passport.status) ? (
-            <Accordion title="Подробные этапы производства">
-              <ProductionStepper
-                current={passport.status}
-                cutting={cuttingStage}
-                hasSpecification={hasSpecificationStage}
-                materialsChecked={hasMaterialsStage}
-              />
-            </Accordion>
-          ) : (
-            <p className="t-secondary">Заказ отменён — партия вышла из производственной шкалы.</p>
-          )}
-
-          {/* Откат статуса на шаг назад — вынесено в отдельный, независимый
-              от "Цех сообщил" блок (найдено владельцем проекта, 2026-09-22):
-              кнопка раньше рендерилась внутри блока, гейт которого
-              (NEXT_STATUS[status] || ready_for_pickup || shipped_to_fulfillment)
-              не имеет отношения к допустимости отката — для status === "received"
-              он давал false, и кнопка пропадала целиком, хотя backend
-              (assertCanRollbackStatus, packages/domain/contract-manufacturing/
-              src/domain/production-order.ts) такой откат разрешает, когда по
-              заказу ещё нет ни результата ОТК, ни фактически принятого
-              количества. Условие ниже — то же самое правило, посчитанное на
-              уже загруженных данных страницы (qcResult, passport.variants),
-              а не изобретённое заново: backend не выставляет отдельный
-              эндпоинт "какие переходы сейчас допустимы", поэтому дублирование
-              предиката на фронте — единственный способ не завести новый
-              эндпоинт ради одной кнопки. `placed` намеренно остаётся
-              исключением, как и раньше: assertCanRollbackStatus технически
-              разрешает placed → draft, но confirmOrder не сбрасывает
-              costSnapshot заказа при повторном подтверждении черновика, и это
-              привело бы к отдельной, не связанной с этой правкой поломке
-              (COST_SNAPSHOT_ALREADY_SET) — вне рамок точечной правки, заведено
-              отдельным пунктом в отчёте. */}
-          {canRollbackStatus || canCancelOrder ? (
-            <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-border pt-4">
-              {canRollbackStatus ? (
-                <Button type="button" size="sm" variant="ghost" onClick={() => setShowRollbackDialog(true)}>
-                  Откатить на шаг назад
-                </Button>
-              ) : null}
-              {/* Отмена заказа (владелец проекта, 2026-09-22) — отдельная
-                  кнопка от отката: откат корректирует один шаг, отмена
-                  закрывает заказ целиком и каскадно отменяет спецификацию/
-                  раскрой. destructive — то же визуальное решение, что и у
-                  кнопки отмены раскройного задания ниже (необратимое
-                  действие с последствиями для связанных сущностей). */}
-              {canCancelOrder ? (
-                <Button type="button" size="sm" variant="destructive" onClick={() => setShowCancelDialog(true)}>
-                  Отменить заказ
-                </Button>
-              ) : null}
-            </div>
-          ) : null}
-
-          {/* Завершение партии + Следующий заказ (ПРОМПТ №10.1/10.2 и P5-2) —
-              то же условие видимости (status === "received"), те же
-              обработчики (requestCompleteOrder/openNextOrderDialog), тот же
-              подтверждающий диалог ниже. «Завершить партию» — главное
-              действие этой стадии (default-кнопка), «Следующий заказ» —
-              second­ary continuation, а не равноправная альтернатива. */}
-          {passport.status === "received" ? (
-            <div className="mt-4 border-t border-border pt-4">
-              <p className="t-secondary">
-                Партия принята на склад, но ещё не закрыта. Завершите её, когда убедитесь, что по ней больше не
-                нужно действий (включая ОТК, если он нужен для этой партии).
-              </p>
-              <div className="mt-3 flex flex-wrap items-center gap-2">
-                <Button type="button" size="sm" loading={isCompleting} onClick={requestCompleteOrder}>
-                  Завершить партию
-                </Button>
-                <Button type="button" size="sm" variant="ghost" onClick={() => void openNextOrderDialog()}>
-                  Создать следующий заказ
-                </Button>
-              </div>
-            </div>
-          ) : null}
-
-          {/* Обратная ссылка на Фулфилмент (аудит пользовательского пути,
-              owner, 2026-09-21) — экран /fulfillment уже вёл сюда через список
-              партий, обратной ссылки отсюда не было ни на одной стадии после
-              отправки. */}
-          {passport.status === "shipped_to_fulfillment" || passport.status === "received" || passport.status === "completed" ? (
-            <div className="mt-4 border-t border-border pt-4">
-              <Button type="button" size="sm" variant="secondary" onClick={() => void navigate("/fulfillment")}>
-                Открыть в Фулфилменте
-              </Button>
-            </div>
-          ) : null}
-
-          <div className="mt-4">
-            <EmptyState
-              compact
-              title="Детальный ход пошива появится здесь"
-              description="Проценты готовности, комментарии и фото от цеха — разделы 19-20 «Баланса производственной партии», ждёт реализации. Раскрой уже ведётся во вкладке «Раскрой»."
-            />
-          </div>
-        </div>
-      </Card>
-
       <Dialog open={confirmCompleteWithoutQc} onOpenChange={setConfirmCompleteWithoutQc}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Завершить партию без результата ОТК?</DialogTitle>
             <DialogDescription>
-              По этой партии ещё не зафиксирован результат ОТК. Завершение партии не запрещает и не заменяет
-              контроль качества — если он нужен для этой партии, лучше сначала внести результат в карточке «ОТК и
-              брак» ниже.
+              По этой партии ещё не зафиксирован результат ОТК. Завершение партии не запрещает и не
+              заменяет контроль качества — если он нужен для этой партии, лучше сначала внести
+              результат в карточке «ОТК и брак» ниже.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="secondary" size="sm" onClick={() => setConfirmCompleteWithoutQc(false)}>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => setConfirmCompleteWithoutQc(false)}
+            >
               Отмена
             </Button>
             <Button size="sm" loading={isCompleting} onClick={() => void completeOrder()}>
@@ -2026,8 +1982,8 @@ export function BatchPassportPage() {
           <DialogHeader>
             <DialogTitle>Откатить статус на один шаг назад?</DialogTitle>
             <DialogDescription>
-              Заказ вернётся к предыдущему статусу производственной шкалы. Действие логируется — укажите причину
-              отката.
+              Заказ вернётся к предыдущему статусу производственной шкалы. Действие логируется —
+              укажите причину отката.
             </DialogDescription>
           </DialogHeader>
           <Field label="Причина отката (обязательно)">
@@ -2041,7 +1997,12 @@ export function BatchPassportPage() {
             <Button variant="secondary" size="sm" onClick={() => setShowRollbackDialog(false)}>
               Отмена
             </Button>
-            <Button size="sm" loading={isRollingBack} disabled={!rollbackReason.trim()} onClick={() => void rollbackStatus()}>
+            <Button
+              size="sm"
+              loading={isRollingBack}
+              disabled={!rollbackReason.trim()}
+              onClick={() => void rollbackStatus()}
+            >
               Откатить
             </Button>
           </DialogFooter>
@@ -2055,10 +2016,11 @@ export function BatchPassportPage() {
       <Dialog open={showCancelDialog} onOpenChange={setShowCancelDialog}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Отменить заказ пошива?</DialogTitle>
+            <DialogTitle>Отменить партию?</DialogTitle>
             <DialogDescription>
-              Заказ будет закрыт как отменённый. Если по нему уже есть спецификация или раскройное задание — они
-              тоже будут отменены. Отменить это действие нельзя. Действие логируется — укажите причину.
+              Заказ будет закрыт как отменённый. Если по нему уже есть спецификация или раскройное
+              задание — они тоже будут отменены. Отменить это действие нельзя. Действие логируется —
+              укажите причину.
             </DialogDescription>
           </DialogHeader>
           <Field label="Причина отмены (обязательно)">
@@ -2079,7 +2041,7 @@ export function BatchPassportPage() {
               disabled={!cancelReason.trim()}
               onClick={() => void cancelOrder()}
             >
-              Отменить заказ
+              Отменить партию
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -2087,21 +2049,29 @@ export function BatchPassportPage() {
 
       {/* Отмена раскройного задания — разрушительно для цеха (задание
           физически прекращается), обязательное явное подтверждение. */}
-      <Dialog open={cancelCuttingOrderId !== null} onOpenChange={(open) => (!open ? setCancelCuttingOrderId(null) : undefined)}>
+      <Dialog
+        open={cancelCuttingOrderId !== null}
+        onOpenChange={(open) => (!open ? setCancelCuttingOrderId(null) : undefined)}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Отменить раскройное задание?</DialogTitle>
             <DialogDescription>
-              Задание перестанет быть активным. Если материал уже выдан в крой (статус «Выдано»), убедитесь, что цех
-              предупреждён — крой по этому заданию прекращается. Отменить обратно нельзя, но можно создать новое
-              задание.
+              Задание перестанет быть активным. Если материал уже выдан в крой (статус «Выдано»),
+              убедитесь, что цех предупреждён — крой по этому заданию прекращается. Отменить обратно
+              нельзя, но можно создать новое задание.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button variant="secondary" size="sm" onClick={() => setCancelCuttingOrderId(null)}>
               Не отменять
             </Button>
-            <Button variant="destructive" size="sm" loading={cuttingBusy} onClick={() => void cancelActiveCuttingOrder()}>
+            <Button
+              variant="destructive"
+              size="sm"
+              loading={cuttingBusy}
+              onClick={() => void cancelActiveCuttingOrder()}
+            >
               Отменить задание
             </Button>
           </DialogFooter>
@@ -2116,11 +2086,30 @@ export function BatchPassportPage() {
           </DialogHeader>
           <div className="space-y-4">
             <div>
-              {!warehouses.length && <div className="mb-4 flex flex-col gap-2">
-                <Field label="Где принимаете изделия?"><Input aria-label="Где принимаете изделия?" className="min-h-11 text-base" placeholder="Например, мой офис" value={receivePlaceName} onChange={event => setReceivePlaceName(event.target.value)} /></Field>
-                <Button size="lg" variant="secondary" loading={placeBusy} onClick={() => void saveReceivePlace()}>Сохранить место приёмки</Button>
-                <p className="text-sm text-muted-foreground">Достаточно указать один раз. В следующих партиях оно подставится само.</p>
-              </div>}
+              {!warehouses.length && (
+                <div className="mb-4 flex flex-col gap-2">
+                  <Field label="Где принимаете изделия?">
+                    <Input
+                      aria-label="Где принимаете изделия?"
+                      className="min-h-11 text-base"
+                      placeholder="Например, мой офис"
+                      value={receivePlaceName}
+                      onChange={(event) => setReceivePlaceName(event.target.value)}
+                    />
+                  </Field>
+                  <Button
+                    size="lg"
+                    variant="secondary"
+                    loading={placeBusy}
+                    onClick={() => void saveReceivePlace()}
+                  >
+                    Сохранить место приёмки
+                  </Button>
+                  <p className="text-sm text-muted-foreground">
+                    Достаточно указать один раз. В следующих партиях оно подставится само.
+                  </p>
+                </div>
+              )}
               <label className="t-meta mb-1.5 block">Место приёмки</label>
               <Select value={receiveWarehouseId} onValueChange={setReceiveWarehouseId}>
                 <SelectTrigger className="w-full">
@@ -2143,17 +2132,25 @@ export function BatchPassportPage() {
                 <span className="text-right">Факт</span>
               </div>
               {passport.variants.map((variant) => (
-                <div key={variant.productVariantId} className="grid grid-cols-[1fr_90px_90px] items-center gap-2">
+                <div
+                  key={variant.productVariantId}
+                  className="grid grid-cols-[1fr_90px_90px] items-center gap-2"
+                >
                   <span className="text-[13px]">
                     {variant.size} / {variant.color}
                   </span>
-                  <span className="num text-right text-[13px] text-muted-foreground">{formatQuantity(Number(variant.quantity))}</span>
+                  <span className="num text-right text-[13px] text-muted-foreground">
+                    {formatQuantity(Number(variant.quantity))}
+                  </span>
                   <NumberInput
                     className="text-right"
                     min={0}
                     value={receiveQuantities[variant.productVariantId]}
                     onChange={(value) =>
-                      setReceiveQuantities((prev) => ({ ...prev, [variant.productVariantId]: value ?? 0 }))
+                      setReceiveQuantities((prev) => ({
+                        ...prev,
+                        [variant.productVariantId]: value ?? 0,
+                      }))
                     }
                   />
                 </div>
@@ -2166,19 +2163,35 @@ export function BatchPassportPage() {
               <span className="num text-right">{formatQuantity(receiveActualTotal)}</span>
             </div>
             {receiveActualTotal !== receivePlannedTotal ? (
-              <p className="t-meta text-warning">Отклонение от плана: {formatQuantity(receiveActualTotal - receivePlannedTotal)} шт.</p>
+              <p className="t-meta text-warning">
+                Отклонение от плана: {formatQuantity(receiveActualTotal - receivePlannedTotal)} шт.
+              </p>
             ) : null}
           </div>
-          <p className="my-3 text-sm text-muted-foreground">Факт заполнен по заказу. Сверьте его с полученными изделиями и исправьте расхождения. Проверка качества — следующий отдельный шаг.</p>
+          <p className="my-3 text-sm text-muted-foreground">
+            Факт заполнен по заказу. Сверьте его с полученными изделиями и исправьте расхождения.
+            Проверка качества — следующий отдельный шаг.
+          </p>
           <label className="my-3 flex min-h-11 items-center gap-3 text-base">
-            <input type="checkbox" className="h-5 w-5" checked={receiveChecked} onChange={event => setReceiveChecked(event.target.checked)} />
+            <input
+              type="checkbox"
+              className="h-5 w-5"
+              checked={receiveChecked}
+              onChange={(event) => setReceiveChecked(event.target.checked)}
+            />
             Проверил фактические количества
           </label>
           <DialogFooter>
             <Button type="button" variant="secondary" onClick={() => setShowReceiveDialog(false)}>
               Отмена
             </Button>
-            <Button type="button" loading={isReceiving} size="lg" disabled={!receiveWarehouseId || !receiveChecked} onClick={() => void submitReceiveFromPassport()}>
+            <Button
+              type="button"
+              loading={isReceiving}
+              size="lg"
+              disabled={!receiveWarehouseId || !receiveChecked}
+              onClick={() => void submitReceiveFromPassport()}
+            >
               Принять партию
             </Button>
           </DialogFooter>
@@ -2192,12 +2205,20 @@ export function BatchPassportPage() {
           получено/годных/брак/произведено/компенсировано/осталось,
           деталировка дефектов, «Добавить компенсацию» и «Компенсировано
           полностью» показаны здесь ровно так же, как раньше. */}
-      <Card id="party-quality" className="mt-4 scroll-mt-20 overflow-hidden p-0">
-        <div className="border-b border-border bg-muted/20 px-4 py-3 md:px-5">
-          <CardTitle className="text-[16px]">ОТК и брак</CardTitle>
-        </div>
-        <div className="p-4 md:p-5">
-          {/* Уже зафиксированный результат ОТК остаётся видимым и после
+      <Dialog open={showQuality} onOpenChange={setShowQuality}>
+        <DialogContent className="max-w-xl max-md:inset-0 max-md:left-0 max-md:top-0 max-md:h-dvh max-md:max-h-dvh max-md:w-full max-md:translate-x-0 max-md:translate-y-0 max-md:rounded-none">
+          <DialogHeader>
+            <DialogTitle>Проверка качества</DialogTitle>
+            <DialogDescription>
+              Укажите результат проверки фактически принятых изделий.
+            </DialogDescription>
+          </DialogHeader>
+          <Card id="party-quality" className="mt-4 scroll-mt-20 overflow-hidden p-0">
+            <div className="border-b border-border bg-muted/20 px-4 py-3 md:px-5">
+              <CardTitle className="text-[16px]">ОТК и брак</CardTitle>
+            </div>
+            <div className="p-4 md:p-5">
+              {/* Уже зафиксированный результат ОТК остаётся видимым и после
               завершения партии (UI GAP AUDIT, QA-баг, владелец проекта,
               2026-09-15) — «completed» не отменяет и не скрывает факт,
               записанный ранее в статусе «received». Проверяется первым,
@@ -2206,264 +2227,206 @@ export function BatchPassportPage() {
               ведёт в исходную ветку "status !== received" — эта форма ввода
               ОТК как была доступна только в статусе "received", так и
               осталась (submitQc/API этапа B не менялись). */}
-          {qcResult && (passport.status === "received" || passport.status === "completed") ? (
-            <dl className="num grid grid-cols-1 gap-px bg-border sm:grid-cols-3">
-              <div className="bg-card p-3">
-                <dt className="eyebrow text-muted-foreground">Получено</dt>
-                <dd className="mt-1 text-[18px] font-medium">{formatQuantity(qcResult.receivedQuantity, "шт")}</dd>
-              </div>
-              <div className="bg-card p-3">
-                <dt className="eyebrow text-muted-foreground">Годных</dt>
-                <dd className="mt-1 text-[18px] font-medium text-success">{formatQuantity(qcResult.goodQuantity, "шт")}</dd>
-              </div>
-              <div className="bg-card p-3">
-                <dt className="eyebrow text-muted-foreground">Брак</dt>
-                <dd className={cn("mt-1 text-[18px] font-medium", qcResult.defectQuantity > 0 && "text-danger")}>
-                  {formatQuantity(qcResult.defectQuantity, "шт")}
-                </dd>
-              </div>
-              {qcResult.comment ? (
-                <div className="col-span-full bg-card p-3">
-                  <dt className="eyebrow text-muted-foreground">Комментарий</dt>
-                  <dd className="mt-1 text-[13px]">{qcResult.comment}</dd>
-                </div>
-              ) : null}
-            </dl>
-          ) : passport.status !== "received" ? (
-            <EmptyState
-              compact
-              title="Результат ОТК появится после приёмки партии"
-              description="Внести получено/годных/брак можно, когда заказ перейдёт в статус «Принято»."
-            />
-          ) : !qcLoaded ? (
-            <SkeletonList rows={1} />
-          ) : qcReceivedFact === null ? (
-            // Заказ уже "Принято", но факт приёмки по вариантам неизвестен —
-            // например, партия принята до появления учёта факта (P0-1). Вводить
-            // ОТК по плану вместо факта запрещено (P1, hardening перед
-            // «Стеганкой», владелец проекта, 2026-09-07: "ordered ≠ received"),
-            // поэтому форма не показывается вовсе, а не подставляет план молча.
-            <EmptyState
-              compact
-              title="Факт приёмки для этого заказа не сохранён"
-              description="Заказ принят до появления учёта фактического количества — ввод ОТК недоступен, чтобы не подставить план вместо факта."
-            />
-          ) : (
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-              {/* Получено — только факт приёмки (P0-1), никогда не редактируется
+              {qcResult && (passport.status === "received" || passport.status === "completed") ? (
+                <dl className="num grid grid-cols-1 gap-px bg-border sm:grid-cols-3">
+                  <div className="bg-card p-3">
+                    <dt className="eyebrow text-muted-foreground">Получено</dt>
+                    <dd className="mt-1 text-[18px] font-medium">
+                      {formatQuantity(qcResult.receivedQuantity, "шт")}
+                    </dd>
+                  </div>
+                  <div className="bg-card p-3">
+                    <dt className="eyebrow text-muted-foreground">Годных</dt>
+                    <dd className="mt-1 text-[18px] font-medium text-success">
+                      {formatQuantity(qcResult.goodQuantity, "шт")}
+                    </dd>
+                  </div>
+                  <div className="bg-card p-3">
+                    <dt className="eyebrow text-muted-foreground">Брак</dt>
+                    <dd
+                      className={cn(
+                        "mt-1 text-[18px] font-medium",
+                        qcResult.defectQuantity > 0 && "text-danger",
+                      )}
+                    >
+                      {formatQuantity(qcResult.defectQuantity, "шт")}
+                    </dd>
+                  </div>
+                  {qcResult.comment ? (
+                    <div className="col-span-full bg-card p-3">
+                      <dt className="eyebrow text-muted-foreground">Комментарий</dt>
+                      <dd className="mt-1 text-[13px]">{qcResult.comment}</dd>
+                    </div>
+                  ) : null}
+                </dl>
+              ) : passport.status !== "received" ? (
+                <EmptyState
+                  compact
+                  title="Результат ОТК появится после приёмки партии"
+                  description="Внести получено/годных/брак можно, когда заказ перейдёт в статус «Принято»."
+                />
+              ) : !qcLoaded ? (
+                <SkeletonList rows={1} />
+              ) : qcReceivedFact === null ? (
+                // Заказ уже "Принято", но факт приёмки по вариантам неизвестен —
+                // например, партия принята до появления учёта факта (P0-1). Вводить
+                // ОТК по плану вместо факта запрещено (P1, hardening перед
+                // «Стеганкой», владелец проекта, 2026-09-07: "ordered ≠ received"),
+                // поэтому форма не показывается вовсе, а не подставляет план молча.
+                <EmptyState
+                  compact
+                  title="Факт приёмки для этого заказа не сохранён"
+                  description="Заказ принят до появления учёта фактического количества — ввод ОТК недоступен, чтобы не подставить план вместо факта."
+                />
+              ) : (
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                  {/* Получено — только факт приёмки (P0-1), никогда не редактируется
                   вручную здесь: раньше оператор мог случайно ввести план вместо
                   факта (P1, hardening перед «Стеганкой», владелец проекта,
                   2026-09-07). */}
-              <Field label="Получено по приёмке, шт">
-                <NumberInput value={qcReceivedFact ?? undefined} onChange={() => undefined} disabled />
-              </Field>
-              <Field label="Годных, шт">
-                <NumberInput className="min-h-11 text-base" aria-label="Годных, шт" value={qcGood} onChange={setQcGood} min={0} />
-              </Field>
-              <Field label="Брак, шт">
-                <NumberInput className="min-h-11 text-base" aria-label="Брак, шт" value={qcDefect} onChange={setQcDefect} min={0} />
-              </Field>
-              {qcDefect !== undefined && qcDefect > 0 ? (
-                <Field label="Причина брака" className="sm:col-span-3">
-                  <Input
-                    value={qcDefectReason}
-                    onChange={(event) => setQcDefectReason(event.target.value)}
-                    placeholder="Например: шов разошёлся, пятно на ткани"
-                  />
-                </Field>
-              ) : null}
-              <Field label="Комментарий" className="sm:col-span-3">
-                <Input value={qcComment} onChange={(event) => setQcComment(event.target.value)} placeholder="Необязательно" />
-              </Field>
-              <div className="sm:col-span-3">
-                <Button
-                  type="button"
-                  size="lg"
-                  loading={isSubmittingQc}
-                  disabled={qcGood === undefined || qcDefect === undefined}
-                  onClick={() => void submitQc()}
-                >
-                  Зафиксировать результат ОТК
-                </Button>
-              </div>
-            </div>
-          )}
-
-          {qcResult ? (
-            <div className="mt-5 border-t border-border pt-5">
-              {!defectSummary || defectSummary.defectQuantity === 0 ? (
-                <EmptyState compact title="Брак не выявлен" description="Компенсация не требуется." />
-              ) : (
-                <>
-                  <dl className="num grid grid-cols-2 gap-px bg-border sm:grid-cols-4">
-                    <div className="bg-card p-3">
-                      <dt className="eyebrow text-muted-foreground">Произведено</dt>
-                      <dd className="mt-1 text-[18px] font-medium">{formatQuantity(defectSummary.producedQuantity, "шт")}</dd>
-                    </div>
-                    <div className="bg-card p-3">
-                      <dt className="eyebrow text-muted-foreground">Брак</dt>
-                      <dd className="mt-1 text-[18px] font-medium text-danger">{formatQuantity(defectSummary.defectQuantity, "шт")}</dd>
-                    </div>
-                    <div className="bg-card p-3">
-                      <dt className="eyebrow text-muted-foreground">Компенсировано</dt>
-                      <dd className="mt-1 text-[18px] font-medium text-success">
-                        {formatQuantity(defectSummary.compensatedQuantity, "шт")}
-                      </dd>
-                    </div>
-                    <div className="bg-card p-3">
-                      <dt className="eyebrow text-muted-foreground">Осталось</dt>
-                      <dd
-                        className={cn(
-                          "mt-1 text-[18px] font-medium",
-                          defectSummary.remainingToCompensate > 0 && "text-danger",
-                        )}
-                      >
-                        {formatQuantity(defectSummary.remainingToCompensate, "шт")}
-                      </dd>
-                    </div>
-                  </dl>
-                  <div className="mt-4 space-y-2">
-                    {defects.map((defect) => (
-                      <div
-                        key={defect.id}
-                        className="flex flex-wrap items-center justify-between gap-3 border border-border p-3"
-                      >
-                        <div>
-                          <p className="t-secondary">{defectVariantLabel(defect.productVariantId)}</p>
-                          <p className="num mt-0.5 text-[14px]">
-                            Брак {formatQuantity(defect.quantity, "шт")} · компенсировано{" "}
-                            {formatQuantity(defect.compensatedQuantity, "шт")}
-                            {defect.reason ? ` · ${defect.reason}` : ""}
-                          </p>
-                        </div>
-                        {defect.remainingQuantity > 0 ? (
-                          <Button type="button" size="sm" variant="secondary" onClick={() => void openCompensationDialog(defect)}>
-                            Добавить компенсацию
-                          </Button>
-                        ) : (
-                          <span className="t-meta text-success">Компенсировано полностью</span>
-                        )}
-                      </div>
-                    ))}
+                  <Field label="Получено по приёмке, шт">
+                    <NumberInput
+                      value={qcReceivedFact ?? undefined}
+                      onChange={() => undefined}
+                      disabled
+                    />
+                  </Field>
+                  <Field label="Годных, шт">
+                    <NumberInput
+                      className="min-h-11 text-base"
+                      aria-label="Годных, шт"
+                      value={qcGood}
+                      onChange={setQcGood}
+                      min={0}
+                    />
+                  </Field>
+                  <Field label="Брак, шт">
+                    <NumberInput
+                      className="min-h-11 text-base"
+                      aria-label="Брак, шт"
+                      value={qcDefect}
+                      onChange={setQcDefect}
+                      min={0}
+                    />
+                  </Field>
+                  {qcDefect !== undefined && qcDefect > 0 ? (
+                    <Field label="Причина брака" className="sm:col-span-3">
+                      <Input
+                        value={qcDefectReason}
+                        onChange={(event) => setQcDefectReason(event.target.value)}
+                        placeholder="Например: шов разошёлся, пятно на ткани"
+                      />
+                    </Field>
+                  ) : null}
+                  <Field label="Комментарий" className="sm:col-span-3">
+                    <Input
+                      value={qcComment}
+                      onChange={(event) => setQcComment(event.target.value)}
+                      placeholder="Необязательно"
+                    />
+                  </Field>
+                  <div className="sm:col-span-3">
+                    <Button
+                      type="button"
+                      size="lg"
+                      loading={isSubmittingQc}
+                      disabled={qcGood === undefined || qcDefect === undefined}
+                      onClick={() => void submitQc()}
+                    >
+                      Зафиксировать результат ОТК
+                    </Button>
                   </div>
-                </>
+                </div>
               )}
-            </div>
-          ) : null}
-        </div>
-      </Card>
 
-      {/* 5. Деньги + Требует внимания — второстепенная информация, ниже
-          production workflow и ОТК/брака. */}
-      <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
-        <Card className="overflow-hidden">
-          <div className="px-4 pt-4 md:px-5">
-            <div className="flex items-center justify-between gap-3">
-              <CardTitle className="text-[16px]">Деньги</CardTitle>
-              <span className="t-meta shrink-0">по партии</span>
-            </div>
-          </div>
-          {snapshot ? (
-            <div className="mt-2 grid grid-cols-1 gap-px bg-border sm:grid-cols-2 xl:grid-cols-3">
-              <div className="bg-card">
-                <MoneyBlock
-                  label="Сумма партии"
-                  value={batchSum}
-                  currency="руб"
-                  decimals={2}
-                  sub={`по спецификации, ${formatQuantity(plannedQuantity, "изделий")}`}
-                />
-              </div>
-              <div className="bg-card">
-                <MoneyBlock
-                  label="Цена за изделие"
-                  value={agreedUnitPrice}
-                  currency="руб"
-                  decimals={2}
-                  sub="согласована с цехом"
-                />
-              </div>
-              <div className="bg-card">
-                {snapshot.actualCostPerUnit !== null ? (
-                  <MoneyBlock
-                    label="Себестоимость факт"
-                    value={snapshot.actualCostPerUnit}
-                    currency="руб"
-                    decimals={2}
-                    sub="за изделие, на момент подтверждения"
-                  />
-                ) : (
-                  <div className="px-4 py-3.5">
-                    <div className="eyebrow text-[10px]">Себестоимость факт</div>
-                    <div className="num mt-2 text-[22px] font-semibold leading-none tracking-[-0.02em] text-warning">—</div>
-                    <div className="num mt-1.5 text-[11px] text-muted-foreground">
-                      не рассчитана — компоненты в разных валютах, см. вкладку «Себестоимость»
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-          ) : (
-            <div className="p-4 md:p-5">
-              <EmptyState
-                compact
-                title={
-                  passport.status === "draft"
-                    ? "Себестоимость появится после подтверждения"
-                    : "Снимок стоимости недоступен"
-                }
-                description={
-                  passport.status === "draft"
-                    ? "При подтверждении заказа GarmentOS зафиксирует себестоимость по текущим закупочным ценам."
-                    : "Этот заказ подтверждён до того, как система начала фиксировать данные партии."
-                }
-              />
-            </div>
-          )}
-        </Card>
-
-        {/* Слот «Требует внимания» из прототипа. В apps/web единственный
-            реальный повод для тревоги на этом экране — просрочка срока
-            сдачи; сумма неоплаченного счёта здесь не считается, чтобы не
-            вводить метрику, которой в системе нет. */}
-        {passport.daysOverdue !== null ? (
-          <Card className="border-warning/30 bg-warning/[0.03] p-4 md:p-5">
-            <div className="flex items-center justify-between gap-3">
-              <CardTitle className="text-[16px]">Требует внимания</CardTitle>
-              <span className="t-meta shrink-0">1 позиция</span>
-            </div>
-            <div className="mt-3 flex items-start gap-3">
-              <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-[8px] bg-warning/[0.1] text-warning">
-                <IconAlert size={15} />
-              </span>
-              <div className="min-w-0 flex-1">
-                <div className="text-[13px] font-medium">Просрочен срок сдачи цехом</div>
-                <div className="num mt-1 text-[20px] font-semibold text-warning">
-                  {passport.daysOverdue} дн.
+              {qcResult ? (
+                <div className="mt-5 border-t border-border pt-5">
+                  {!defectSummary || defectSummary.defectQuantity === 0 ? (
+                    <EmptyState
+                      compact
+                      title="Брак не выявлен"
+                      description="Компенсация не требуется."
+                    />
+                  ) : (
+                    <>
+                      <dl className="num grid grid-cols-2 gap-px bg-border sm:grid-cols-4">
+                        <div className="bg-card p-3">
+                          <dt className="eyebrow text-muted-foreground">Произведено</dt>
+                          <dd className="mt-1 text-[18px] font-medium">
+                            {formatQuantity(defectSummary.producedQuantity, "шт")}
+                          </dd>
+                        </div>
+                        <div className="bg-card p-3">
+                          <dt className="eyebrow text-muted-foreground">Брак</dt>
+                          <dd className="mt-1 text-[18px] font-medium text-danger">
+                            {formatQuantity(defectSummary.defectQuantity, "шт")}
+                          </dd>
+                        </div>
+                        <div className="bg-card p-3">
+                          <dt className="eyebrow text-muted-foreground">Компенсировано</dt>
+                          <dd className="mt-1 text-[18px] font-medium text-success">
+                            {formatQuantity(defectSummary.compensatedQuantity, "шт")}
+                          </dd>
+                        </div>
+                        <div className="bg-card p-3">
+                          <dt className="eyebrow text-muted-foreground">Осталось</dt>
+                          <dd
+                            className={cn(
+                              "mt-1 text-[18px] font-medium",
+                              defectSummary.remainingToCompensate > 0 && "text-danger",
+                            )}
+                          >
+                            {formatQuantity(defectSummary.remainingToCompensate, "шт")}
+                          </dd>
+                        </div>
+                      </dl>
+                      <div className="mt-4 space-y-2">
+                        {defects.map((defect) => (
+                          <div
+                            key={defect.id}
+                            className="flex flex-wrap items-center justify-between gap-3 border border-border p-3"
+                          >
+                            <div>
+                              <p className="t-secondary">
+                                {defectVariantLabel(defect.productVariantId)}
+                              </p>
+                              <p className="num mt-0.5 text-[14px]">
+                                Брак {formatQuantity(defect.quantity, "шт")} · компенсировано{" "}
+                                {formatQuantity(defect.compensatedQuantity, "шт")}
+                                {defect.reason ? ` · ${defect.reason}` : ""}
+                              </p>
+                            </div>
+                            {defect.remainingQuantity > 0 ? (
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="secondary"
+                                onClick={() => void openCompensationDialog(defect)}
+                              >
+                                Добавить компенсацию
+                              </Button>
+                            ) : (
+                              <span className="t-meta text-success">Компенсировано полностью</span>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </>
+                  )}
                 </div>
-                <div className="num mt-1 text-[11px] text-muted-foreground">
-                  срок был {formatDate(passport.dueDate)}
-                </div>
-              </div>
+              ) : null}
             </div>
-          </Card>
-        ) : (
-          <Card className="p-4 md:p-5">
-            <div className="flex items-center justify-between gap-3">
-              <CardTitle className="text-[16px]">Требует внимания</CardTitle>
-            </div>
-            <p className="t-secondary mt-3">Срок сдачи не нарушен.</p>
-          </Card>
-        )}
-      </div>
+          </Card>{" "}
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={nextOrderOpen} onOpenChange={setNextOrderOpen}>
         <DialogContent className="max-w-xl max-md:inset-0 max-md:left-0 max-md:top-0 max-md:h-dvh max-md:max-h-dvh max-md:w-full max-md:translate-x-0 max-md:translate-y-0 max-md:rounded-none max-md:pb-[calc(1rem+env(safe-area-inset-bottom))]">
           <DialogHeader>
             <DialogTitle>Следующий заказ</DialogTitle>
             <DialogDescription>
-              Модель «{passport.product.name}», цех «{passport.workshop.name}» — наследуются от партии-источника.
-              Добавьте строки переделки и/или нового пошива.
+              Модель «{passport.product.name}», цех «{passport.workshop.name}» — наследуются от
+              партии-источника. Добавьте строки переделки и/или нового пошива.
             </DialogDescription>
           </DialogHeader>
 
@@ -2474,8 +2437,9 @@ export function BatchPassportPage() {
               добавить строкой "Переделка". */}
           {defectSummary && defectSummary.remainingToCompensate > 0 ? (
             <div className="rounded-[10px] border border-warning/30 bg-warning/[0.06] px-3 py-2.5 text-[13px] text-warning">
-              По этой партии есть непокрытый брак: {formatQuantity(defectSummary.remainingToCompensate, "шт")} ещё не
-              компенсировано переделкой или новым пошивом. Добавьте строку «Переделка» ниже, если нужно закрыть его
+              По этой партии есть непокрытый брак:{" "}
+              {formatQuantity(defectSummary.remainingToCompensate, "шт")} ещё не компенсировано
+              переделкой или новым пошивом. Добавьте строку «Переделка» ниже, если нужно закрыть его
               этим заказом — количество нужно указать вручную.
             </div>
           ) : null}
@@ -2501,13 +2465,17 @@ export function BatchPassportPage() {
                         <span
                           className={cn(
                             "eyebrow rounded-full px-2 py-0.5",
-                            line.variantType === "rework" ? "bg-danger/10 text-danger" : "bg-success/10 text-success",
+                            line.variantType === "rework"
+                              ? "bg-danger/10 text-danger"
+                              : "bg-success/10 text-success",
                           )}
                         >
                           {line.variantType === "rework" ? "Переделка" : "Новый пошив"}
                         </span>
                         <span>{nextOrderVariantLabel(line.productVariantId)}</span>
-                        <span className="text-muted-foreground">× {formatQuantity(line.quantity, "шт")}</span>
+                        <span className="text-muted-foreground">
+                          × {formatQuantity(line.quantity, "шт")}
+                        </span>
                       </span>
                       <span className="flex items-center gap-3">
                         <span className="num text-muted-foreground">
@@ -2515,7 +2483,12 @@ export function BatchPassportPage() {
                             ? formatMoney(0, "₽", 2)
                             : `${formatMoney(linePrice, "₽", 2)} × ${formatQuantity(line.quantity, "шт")} = ${formatMoney(lineSum, "₽", 2)}`}
                         </span>
-                        <Button type="button" variant="ghost" size="sm" onClick={() => removeNextOrderLine(index)}>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => removeNextOrderLine(index)}
+                        >
                           Убрать
                         </Button>
                       </span>
@@ -2529,7 +2502,10 @@ export function BatchPassportPage() {
 
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_1fr_auto_auto]">
               <Field label="Размер / цвет">
-                <Select value={nextOrderPendingVariantId} onValueChange={setNextOrderPendingVariantId}>
+                <Select
+                  value={nextOrderPendingVariantId}
+                  onValueChange={setNextOrderPendingVariantId}
+                >
                   <SelectTrigger>
                     <SelectValue placeholder="Выберите" />
                   </SelectTrigger>
@@ -2557,7 +2533,11 @@ export function BatchPassportPage() {
                 </Select>
               </Field>
               <Field label="Количество">
-                <NumberInput value={nextOrderPendingQuantity} onChange={setNextOrderPendingQuantity} min={0} />
+                <NumberInput
+                  value={nextOrderPendingQuantity}
+                  onChange={setNextOrderPendingQuantity}
+                  min={0}
+                />
               </Field>
               <div className="flex items-end">
                 <Button type="button" size="sm" variant="secondary" onClick={addNextOrderLine}>
@@ -2568,7 +2548,11 @@ export function BatchPassportPage() {
 
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <Field label="Цена нового пошива">
-                <MoneyInput currency="₽" value={nextOrderUnitPrice} onChange={setNextOrderUnitPrice} />
+                <MoneyInput
+                  currency="₽"
+                  value={nextOrderUnitPrice}
+                  onChange={setNextOrderUnitPrice}
+                />
               </Field>
               <Field label="Срок (необязательно)">
                 <DatePicker value={nextOrderDueDate} onChange={setNextOrderDueDate} />
@@ -2578,11 +2562,15 @@ export function BatchPassportPage() {
             <dl className="num grid grid-cols-2 gap-px overflow-hidden rounded-[10px] bg-border">
               <div className="bg-card p-3">
                 <dt className="eyebrow text-muted-foreground">Итого количество</dt>
-                <dd className="mt-1 text-[16px] font-medium">{formatQuantity(nextOrderTotalQuantity, "шт")}</dd>
+                <dd className="mt-1 text-[16px] font-medium">
+                  {formatQuantity(nextOrderTotalQuantity, "шт")}
+                </dd>
               </div>
               <div className="bg-card p-3">
                 <dt className="eyebrow text-muted-foreground">Сумма партии</dt>
-                <dd className="mt-1 text-[16px] font-medium">{formatMoney(nextOrderBatchSum, "руб", 2)}</dd>
+                <dd className="mt-1 text-[16px] font-medium">
+                  {formatMoney(nextOrderBatchSum, "руб", 2)}
+                </dd>
               </div>
             </dl>
           </div>
@@ -2608,26 +2596,45 @@ export function BatchPassportPage() {
           явного подтверждения. Список заказов — только те, что явно
           ссылаются на эту партию как на источник (sourceProductionOrderId),
           строка — только rework (не начисляет повторно оплату). */}
-      <Dialog open={compensationDefect !== null} onOpenChange={(open) => !open && setCompensationDefect(null)}>
+      <Dialog
+        open={compensationDefect !== null}
+        onOpenChange={(open) => !open && setCompensationDefect(null)}
+      >
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle>Добавить компенсацию</DialogTitle>
             <DialogDescription>
-              Брак «{compensationDefect ? defectVariantLabel(compensationDefect.productVariantId) : ""}» —{" "}
-              осталось компенсировать {compensationDefect ? formatQuantity(compensationDefect.remainingQuantity, "шт") : ""}.
+              Брак «
+              {compensationDefect ? defectVariantLabel(compensationDefect.productVariantId) : ""}» —{" "}
+              осталось компенсировать{" "}
+              {compensationDefect ? formatQuantity(compensationDefect.remainingQuantity, "шт") : ""}
+              .
             </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4">
             <Field label="Компенсирующий заказ">
-              <Select value={compensationOrderId} onValueChange={(value) => { setCompensationOrderId(value); setCompensationVariantId(""); }}>
+              <Select
+                value={compensationOrderId}
+                onValueChange={(value) => {
+                  setCompensationOrderId(value);
+                  setCompensationVariantId("");
+                }}
+              >
                 <SelectTrigger>
-                  <SelectValue placeholder={compensationCandidates.length === 0 ? "Нет заказов-переделок на эту партию" : "Выберите заказ"} />
+                  <SelectValue
+                    placeholder={
+                      compensationCandidates.length === 0
+                        ? "Нет заказов-переделок на эту партию"
+                        : "Выберите заказ"
+                    }
+                  />
                 </SelectTrigger>
                 <SelectContent>
                   {compensationCandidates.map((order) => (
                     <SelectItem key={order.id} value={order.id}>
-                      Заказ {order.orderNumber ? `№${order.orderNumber}` : order.id.slice(0, 8)} · {statusMeta(order.status).label}
+                      Заказ {order.orderNumber ? `№${order.orderNumber}` : order.id.slice(0, 8)} ·{" "}
+                      {statusMeta(order.status).label}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -2635,26 +2642,35 @@ export function BatchPassportPage() {
             </Field>
             {compensationCandidates.length === 0 ? (
               <p className="t-secondary">
-                Сначала создайте заказ-переделку через «Следующий заказ» со строкой типа «Переделка», ссылающийся на эту
-                партию.
+                Сначала создайте заказ-переделку через «Следующий заказ» со строкой типа
+                «Переделка», ссылающийся на эту партию.
               </p>
             ) : null}
             <Field label="Строка заказа (необязательно)">
-              <Select value={compensationVariantId} onValueChange={setCompensationVariantId} disabled={!compensationOrder}>
+              <Select
+                value={compensationVariantId}
+                onValueChange={setCompensationVariantId}
+                disabled={!compensationOrder}
+              >
                 <SelectTrigger>
                   <SelectValue placeholder="Без привязки к строке" />
                 </SelectTrigger>
                 <SelectContent>
                   {compensationReworkVariants.map((variant) => (
                     <SelectItem key={variant.id} value={variant.id}>
-                      {nextOrderVariantLabel(variant.productVariantId)} × {formatQuantity(Number(variant.quantity), "шт")}
+                      {nextOrderVariantLabel(variant.productVariantId)} ×{" "}
+                      {formatQuantity(Number(variant.quantity), "шт")}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </Field>
             <Field label="Количество">
-              <NumberInput value={compensationQuantity} onChange={setCompensationQuantity} min={0} />
+              <NumberInput
+                value={compensationQuantity}
+                onChange={setCompensationQuantity}
+                min={0}
+              />
             </Field>
           </div>
 
@@ -2673,74 +2689,6 @@ export function BatchPassportPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      {/* 5. Детали — табы на десктопе */}
-      <div className="mt-4 hidden md:block">
-        <Card className="overflow-hidden">
-          <div className="flex flex-wrap gap-1 border-b border-border px-3 pt-2">
-            {TABS.map((t) => (
-              <button
-                key={t.key}
-                type="button"
-                onClick={() => setTab(t.key)}
-                className={cn(
-                  "interactive relative -mb-px h-9 rounded-t-[6px] px-3 text-[13px]",
-                  tab === t.key
-                    ? "font-medium text-foreground"
-                    : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
-                )}
-              >
-                {t.label}
-                <span
-                  className={cn(
-                    "absolute inset-x-2 -bottom-px h-[2px] rounded-full bg-primary transition-[opacity,transform] duration-200",
-                    tab === t.key ? "scale-x-100 opacity-100" : "scale-x-0 opacity-0",
-                  )}
-                />
-              </button>
-            ))}
-          </div>
-          <div key={tab} className="anim-content p-5">
-            {renderTab(tab)}
-          </div>
-        </Card>
-      </div>
-
-      {/* 5. Детали — аккордеоны на мобильном */}
-      <div className="mt-4 space-y-2 md:hidden">
-        {TABS.map((t, i) => (
-          <Accordion key={t.key} title={t.label} defaultOpen={i === 0}>
-            {renderTab(t.key)}
-          </Accordion>
-        ))}
-      </div>
-
-      {/* Разделы без источника данных. В прототипе им соответствия нет —
-          показываем честные пустые состояния, а не выдуманные нули. */}
-      <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
-        {[
-          {
-            // Переименовано (UI GAP AUDIT, владелец проекта, 2026-09-15) — во
-            // избежание совпадения названия с реальной, уже работающей
-            // секцией «ОТК и брак» выше (Этап B): этот пустой раздел про
-            // другое — отправку/приёмку/устранение силами цеха, раздел 4
-            // «Баланса производственной партии», ещё не утверждён.
-            title: "Отправка и устранение брака",
-            hint: "Отправлено / принято / брак / устранение — появится после утверждения раздела 4 «Баланса производственной партии».",
-          },
-          {
-            title: "Логистика",
-            hint: "Трек Red Express — раздел 22 архитектуры партии, интеграция с перевозчиком.",
-          },
-        ].map((section) => (
-          <Card key={section.title} className="p-4 md:p-5">
-            <CardTitle className="text-[16px]">{section.title}</CardTitle>
-            <div className="mt-3">
-              <EmptyState compact title="Раздел ещё не подключён" description={section.hint} />
-            </div>
-          </Card>
-        ))}
-      </div>
     </div>
   );
 }

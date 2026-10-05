@@ -1,6 +1,7 @@
 import { Inject, Injectable } from "@nestjs/common";
 import {
   assignRoleToUser,
+  listUserPermissions,
   bootstrapCompany,
   createCompany,
   createUser,
@@ -21,7 +22,12 @@ import type { Database } from "@garmentos/db-schema";
 import type { CreateCompanyDto, CreateUserDto } from "@garmentos/shared-types";
 import { AuditService } from "../audit/audit.service";
 import { DATABASE_CONNECTION } from "../database/database.module";
-import { COMPANY_REPOSITORY, ROLE_REPOSITORY, USER_REPOSITORY, USER_ROLE_REPOSITORY } from "./identity.tokens";
+import {
+  COMPANY_REPOSITORY,
+  ROLE_REPOSITORY,
+  USER_REPOSITORY,
+  USER_ROLE_REPOSITORY,
+} from "./identity.tokens";
 import { hashPassword } from "./password-hasher";
 
 export interface BootstrapCompanyCliInput {
@@ -62,6 +68,10 @@ export class IdentityService {
 
   // Используется только bootstrap-company.script.ts (docs/AUTH_ARCHITECTURE.md,
   // раздел 9) — нет HTTP-эндпоинта, создающего компанию.
+  async getUserPermissions(userId: string): Promise<string[]> {
+    return listUserPermissions({ userRoles: this.userRoles }, { userId });
+  }
+
   async createCompany(input: CreateCompanyDto): Promise<Company> {
     const company = await createCompany({ companies: this.companies }, input);
     await this.auditService.record(company.id, null, "cli", {
@@ -115,7 +125,11 @@ export class IdentityService {
         entityType: "company",
         entityId: result.company.id,
         action: "identity.bootstrap_company",
-        afterJson: { name: result.company.name, outcome: result.outcome, ownerEmail: result.owner.email },
+        afterJson: {
+          name: result.company.name,
+          outcome: result.outcome,
+          ownerEmail: result.owner.email,
+        },
       });
     }
 
@@ -128,7 +142,10 @@ export class IdentityService {
   // код уже знает companyId из контекста, а не из тела запроса клиента.
   async createUser(companyId: string, input: CreateUserDto, actor: AuditActor): Promise<User> {
     const passwordHash = hashPassword(input.password);
-    const user = await createUser({ users: this.users }, { companyId, email: input.email, passwordHash, fullName: input.fullName });
+    const user = await createUser(
+      { users: this.users },
+      { companyId, email: input.email, passwordHash, fullName: input.fullName },
+    );
     await this.auditService.record(companyId, actor.userId, actor.source, {
       entityType: "user",
       entityId: user.id,
@@ -138,7 +155,12 @@ export class IdentityService {
     return user;
   }
 
-  async assignRole(companyId: string, userId: string, roleCode: string, actor: AuditActor): Promise<void> {
+  async assignRole(
+    companyId: string,
+    userId: string,
+    roleCode: string,
+    actor: AuditActor,
+  ): Promise<void> {
     await assignRoleToUser(
       { users: this.users, roles: this.roles, userRoles: this.userRoles },
       { companyId, userId, roleCode },

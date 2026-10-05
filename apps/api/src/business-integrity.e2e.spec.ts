@@ -1,3 +1,4 @@
+import { IdentityService } from "./identity/identity.service";
 import { randomUUID } from "node:crypto";
 import type { INestApplication } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
@@ -166,7 +167,9 @@ describe("Целостность связей между бизнес-модул
       await db.execute(
         sql`delete from purchase_order_items where purchase_order_id in (select id from purchase_orders where company_id = ${user.companyId})`,
       );
-      await db.execute(sql`update specifications set production_order_id = null where company_id = ${user.companyId}`);
+      await db.execute(
+        sql`update specifications set production_order_id = null where company_id = ${user.companyId}`,
+      );
       await db.execute(sql`delete from production_orders where company_id = ${user.companyId}`);
       await db.execute(
         sql`delete from specification_items where specification_id in (select id from specifications where company_id = ${user.companyId})`,
@@ -709,7 +712,9 @@ describe("Целостность связей между бизнес-модул
     const service = app.get(ProductionOrderOrchestrationService);
     const input = placementInput();
     const before = await production.listProductionOrders(user.companyId);
-    const counterBefore = await db.execute(sql`select next_production_order_number from companies where id=${user.companyId}`);
+    const counterBefore = await db.execute(
+      sql`select next_production_order_number from companies where id=${user.companyId}`,
+    );
     const spy = vi
       .spyOn(app.get(SpecificationService), "createFromProductionOrder")
       .mockRejectedValueOnce(new Error("specification-save-failed"));
@@ -722,7 +727,11 @@ describe("Целостность связей между бизнес-модул
         .get(AuditService)
         .listForEntity(user.companyId, "production_order_request", input.requestId),
     ).toHaveLength(0);
-    expect(await db.execute(sql`select next_production_order_number from companies where id=${user.companyId}`)).toEqual(counterBefore);
+    expect(
+      await db.execute(
+        sql`select next_production_order_number from companies where id=${user.companyId}`,
+      ),
+    ).toEqual(counterBefore);
     spy.mockRestore();
     expect((await service.placeProductionOrder(user, input)).status).toBe("placed");
   });
@@ -817,13 +826,71 @@ describe("Целостность связей между бизнес-модул
   });
   it("убранный размер остаётся в истории SKU, но не попадает в новую раскладку", async () => {
     const catalog = app.get(CatalogService);
-    const model = await catalog.quickProduct(user, { requestId: randomUUID(), name: "Текущий ряд", sizes: [{ size: "M", ratioWeight: 1 }, { size: "L", ratioWeight: 1 }], colors: ["Синий"] });
+    const model = await catalog.quickProduct(user, {
+      requestId: randomUUID(),
+      name: "Текущий ряд",
+      sizes: [
+        { size: "M", ratioWeight: 1 },
+        { size: "L", ratioWeight: 1 },
+      ],
+      colors: ["Синий"],
+    });
     await catalog.replaceProductSizes(user, model.id, { sizes: [{ size: "M", ratioWeight: 1 }] });
     expect(await catalog.listProductVariants(user.companyId, model.id)).toHaveLength(2);
-    const preview = await production.previewProductionOrderVariants(user.companyId, { productId: model.id, colors: [{ color: "Синий", quantity: 5 }] });
+    const preview = await production.previewProductionOrderVariants(user.companyId, {
+      productId: model.id,
+      colors: [{ color: "Синий", quantity: 5 }],
+    });
     expect(preview.rows).toHaveLength(1);
     expect(preview.rows[0]?.size).toBe("M");
     expect(preview.totalQuantity).toBe(5);
   });
 
+  it("доступные действия учитывают реальные права, компанию и фактическую приёмку", async () => {
+    const draft = await production.createProductionOrderDraft(user.companyId, {
+      productId,
+      workshopId,
+      plannedQuantity: 2,
+      agreedUnitPrice: 700,
+      variants: variantIds.map((productVariantId) => ({ productVariantId, quantity: 1 })),
+    });
+    const permissions = vi.spyOn(app.get(IdentityService), "getUserPermissions");
+    permissions.mockResolvedValue(["contract_manufacturing.read", "contract_manufacturing.write"]);
+    expect((await production.getProductionOrderActions(user, draft.id)).cancel).toBe(false);
+    permissions.mockResolvedValue([
+      "contract_manufacturing.read",
+      "contract_manufacturing.write",
+      "contract_manufacturing.cancel",
+      "contract_manufacturing.rollback",
+    ]);
+    expect((await production.getProductionOrderActions(user, draft.id)).cancel).toBe(true);
+    await expect(
+      production.getProductionOrderActions({ ...user, companyId: foreignCompanyId }, draft.id),
+    ).rejects.toThrow("Партия не найдена");
+    await db
+      .update(productionOrders)
+      .set({ status: "ready_for_pickup" })
+      .where(eq(productionOrders.id, draft.id));
+    expect((await production.getProductionOrderActions(user, draft.id)).receive).toBe(true);
+    await db
+      .update(productionOrders)
+      .set({ status: "received" })
+      .where(eq(productionOrders.id, draft.id));
+    await db
+      .update(productionOrderVariants)
+      .set({ receivedQuantity: "1" })
+      .where(eq(productionOrderVariants.productionOrderId, draft.id));
+    const received = await production.getProductionOrderActions(user, draft.id);
+    expect(received.cancel).toBe(false);
+    expect(received.rollback).toBe(false);
+    expect(received.complete).toBe(true);
+    expect(received.quality).toBe(true);
+    await db
+      .update(productionOrders)
+      .set({ status: "completed" })
+      .where(eq(productionOrders.id, draft.id));
+    const closed = await production.getProductionOrderActions(user, draft.id);
+    expect(closed.complete).toBe(false);
+    expect(closed.quality).toBe(false);
+  });
 });

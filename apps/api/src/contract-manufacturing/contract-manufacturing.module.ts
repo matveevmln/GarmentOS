@@ -1,6 +1,10 @@
+import { IdentityModule } from "../identity/identity.module";
 import { Module } from "@nestjs/common";
 import type { Database } from "@garmentos/db-schema";
-import { DrizzleProductionOrderRepository, DrizzleWorkshopRepository } from "@garmentos/domain-contract-manufacturing";
+import {
+  DrizzleProductionOrderRepository,
+  DrizzleWorkshopRepository,
+} from "@garmentos/domain-contract-manufacturing";
 import { DATABASE_CONNECTION } from "../database/database.module";
 import { CatalogModule } from "../catalog/catalog.module";
 import { WarehouseModule } from "../warehouse/warehouse.module";
@@ -12,7 +16,7 @@ import { qcResultLookupProvider } from "./qc-result-lookup.provider";
 import { ContractManufacturingService } from "./contract-manufacturing.service";
 
 @Module({
-  imports: [WarehouseModule, CatalogModule],
+  imports: [WarehouseModule, CatalogModule, IdentityModule],
   controllers: [WorkshopsController, ProductionOrdersController],
   providers: [
     ContractManufacturingService,

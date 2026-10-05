@@ -1,6 +1,14 @@
+import { AuditService } from "../audit/audit.service";
 import { Inject, Injectable, NotFoundException } from "@nestjs/common";
-import { invoices as invoicesTable, specifications as specificationsTable, type Database } from "@garmentos/db-schema";
-import type { BatchPassportResponseDto, ProductionOrderCostSnapshot } from "@garmentos/shared-types";
+import {
+  invoices as invoicesTable,
+  specifications as specificationsTable,
+  type Database,
+} from "@garmentos/db-schema";
+import type {
+  BatchPassportResponseDto,
+  ProductionOrderCostSnapshot,
+} from "@garmentos/shared-types";
 import { and, eq } from "drizzle-orm";
 import { CatalogService } from "../catalog/catalog.service";
 import { ContractManufacturingService } from "../contract-manufacturing/contract-manufacturing.service";
@@ -24,6 +32,7 @@ function daysOverdue(dueDate: string | null, today: Date): number | null {
 @Injectable()
 export class BatchPassportService {
   constructor(
+    private readonly auditService: AuditService,
     private readonly contractManufacturingService: ContractManufacturingService,
     private readonly catalogService: CatalogService,
     private readonly documentService: DocumentService,
@@ -31,8 +40,14 @@ export class BatchPassportService {
     @Inject(DATABASE_CONNECTION) private readonly db: Database,
   ) {}
 
-  async getPassport(companyId: string, productionOrderId: string): Promise<BatchPassportResponseDto> {
-    const order = await this.contractManufacturingService.findProductionOrderById(companyId, productionOrderId);
+  async getPassport(
+    companyId: string,
+    productionOrderId: string,
+  ): Promise<BatchPassportResponseDto> {
+    const order = await this.contractManufacturingService.findProductionOrderById(
+      companyId,
+      productionOrderId,
+    );
     if (!order) {
       throw new NotFoundException({
         statusCode: 404,
@@ -41,7 +56,15 @@ export class BatchPassportService {
       });
     }
 
-    const [product, workshop, variants, productionOrderDocuments, productDocuments, invoiceRows, specificationRow] = await Promise.all([
+    const [
+      product,
+      workshop,
+      variants,
+      productionOrderDocuments,
+      productDocuments,
+      invoiceRows,
+      specificationRow,
+    ] = await Promise.all([
       this.catalogService.findProductById(companyId, order.productId),
       this.contractManufacturingService.findWorkshopById(companyId, order.workshopId),
       this.catalogService.listProductVariants(companyId, order.productId),
@@ -51,9 +74,19 @@ export class BatchPassportService {
       // партии с BatchCard, не бизнес-логика.
       this.documentService.listForEntity(companyId, "product", order.productId),
       this.db
-        .select({ id: invoicesTable.id, status: invoicesTable.status, amount: invoicesTable.amount, dueDate: invoicesTable.dueDate })
+        .select({
+          id: invoicesTable.id,
+          status: invoicesTable.status,
+          amount: invoicesTable.amount,
+          dueDate: invoicesTable.dueDate,
+        })
         .from(invoicesTable)
-        .where(and(eq(invoicesTable.companyId, companyId), eq(invoicesTable.productionOrderId, order.id))),
+        .where(
+          and(
+            eq(invoicesTable.companyId, companyId),
+            eq(invoicesTable.productionOrderId, order.id),
+          ),
+        ),
       // Спецификация-источник (Этап 3, LEGACY) ИЛИ спецификация, созданная
       // ИЗ этого заказа (ПРОМПТ №3, раздел 9 — NEW-поток,
       // specifications.production_order_id) — прямой запрос вместо
@@ -65,19 +98,37 @@ export class BatchPassportService {
         ? this.db
             .select({ id: specificationsTable.id, specNumber: specificationsTable.specNumber })
             .from(specificationsTable)
-            .where(and(eq(specificationsTable.companyId, companyId), eq(specificationsTable.id, order.specificationId)))
+            .where(
+              and(
+                eq(specificationsTable.companyId, companyId),
+                eq(specificationsTable.id, order.specificationId),
+              ),
+            )
             .limit(1)
         : this.db
             .select({ id: specificationsTable.id, specNumber: specificationsTable.specNumber })
             .from(specificationsTable)
-            .where(and(eq(specificationsTable.companyId, companyId), eq(specificationsTable.productionOrderId, order.id)))
+            .where(
+              and(
+                eq(specificationsTable.companyId, companyId),
+                eq(specificationsTable.productionOrderId, order.id),
+              ),
+            )
             .limit(1),
     ]);
     if (!product) {
-      throw new NotFoundException({ statusCode: 404, code: "PRODUCT_NOT_FOUND", message: `Модель ${order.productId} не найдена` });
+      throw new NotFoundException({
+        statusCode: 404,
+        code: "PRODUCT_NOT_FOUND",
+        message: `Модель ${order.productId} не найдена`,
+      });
     }
     if (!workshop) {
-      throw new NotFoundException({ statusCode: 404, code: "WORKSHOP_NOT_FOUND", message: `Цех ${order.workshopId} не найден` });
+      throw new NotFoundException({
+        statusCode: 404,
+        code: "WORKSHOP_NOT_FOUND",
+        message: `Цех ${order.workshopId} не найден`,
+      });
     }
 
     // PDF-спецификация для заказа теперь всегда генерируется через
@@ -115,22 +166,53 @@ export class BatchPassportService {
     // Snapshot при подтверждении, каждая генерация документа), не выдуманная
     // лента "начали крой"/"закупили ткань" — этих событий система пока не
     // пишет (docs/PRODUCTION_BATCH_LIFECYCLE_ARCHITECTURE.md, §26.5).
-    const timeline: BatchPassportResponseDto["timeline"] = [{ label: "Заказ создан", occurredAt: order.createdAt }];
+    const timeline: BatchPassportResponseDto["timeline"] = [
+      { label: "Заказ создан", occurredAt: order.createdAt },
+    ];
     const snapshot = order.costSnapshot as ProductionOrderCostSnapshot | null;
     if (snapshot) {
       // Подписи ленты уходят прямо в интерфейс, поэтому здесь — язык
       // пользователя, а не внутренние названия механизмов.
-      timeline.push({ label: "Подтверждён, данные партии зафиксированы", occurredAt: new Date(snapshot.capturedAt) });
+      timeline.push({
+        label: "Подтверждён, данные партии зафиксированы",
+        occurredAt: new Date(snapshot.capturedAt),
+      });
     }
     for (const doc of documents) {
-      timeline.push({ label: `Спецификация «${doc.title ?? doc.docType}» сформирована`, occurredAt: doc.createdAt });
+      timeline.push({
+        label: `Спецификация «${doc.title ?? doc.docType}» сформирована`,
+        occurredAt: doc.createdAt,
+      });
     }
     if (order.receivedAt) {
       timeline.push({ label: "Партия принята на склад", occurredAt: order.receivedAt });
     }
+    const history = await this.auditService.listForEntity(companyId, "production_order", order.id);
+    const statusLabels: Record<string, string> = {
+      in_progress: "Начали шить",
+      sewing_completed: "Пошив завершён",
+      ready_for_pickup: "Изделия готовы к передаче",
+      shipped_to_fulfillment: "Цех отправил изделия",
+    };
+    for (const entry of history) {
+      if (entry.action === "production_order.status_changed") {
+        const after = entry.afterJson as { status?: string } | null;
+        timeline.push({
+          label: statusLabels[after?.status ?? ""] ?? "Этап партии изменён",
+          occurredAt: entry.occurredAt,
+        });
+      } else if (entry.action === "production_order.completed")
+        timeline.push({ label: "Партия закрыта", occurredAt: entry.occurredAt });
+      else if (entry.action === "production_order.cancelled")
+        timeline.push({ label: "Партия отменена", occurredAt: entry.occurredAt });
+      else if (entry.action === "production_order.status_rolled_back")
+        timeline.push({ label: "Последний этап исправлен", occurredAt: entry.occurredAt });
+    }
     timeline.sort((a, b) => a.occurredAt.getTime() - b.occurredAt.getTime());
 
-    const photoDocument = productDocuments.find((doc) => doc.docType === "photo_product" && doc.isCurrentVersion) ?? null;
+    const photoDocument =
+      productDocuments.find((doc) => doc.docType === "photo_product" && doc.isCurrentVersion) ??
+      null;
 
     const requirement = computeMaterialRequirement(snapshot, Number(order.plannedQuantity));
     const onHandByMaterial = await this.aggregateMaterialOnHand(
@@ -144,7 +226,9 @@ export class BatchPassportService {
       plannedQuantity: order.plannedQuantity,
       agreedUnitPrice: order.agreedUnitPrice,
       orderNumber: order.orderNumber,
-      specification: specificationRow[0] ? { id: specificationRow[0].id, specNumber: specificationRow[0].specNumber } : null,
+      specification: specificationRow[0]
+        ? { id: specificationRow[0].id, specNumber: specificationRow[0].specNumber }
+        : null,
       dueDate: order.dueDate,
       // "completed" (Global Completed Regression Audit, владелец проекта,
       // 2026-09-15) — терминальный статус наравне с "received"/"cancelled":
@@ -166,12 +250,22 @@ export class BatchPassportService {
       costSnapshot: snapshot,
       variants: orderVariants,
       documents,
-      invoices: invoiceRows.map((row) => ({ id: row.id, status: row.status, amount: Number(row.amount), dueDate: row.dueDate })),
+      invoices: invoiceRows.map((row) => ({
+        id: row.id,
+        status: row.status,
+        amount: Number(row.amount),
+        dueDate: row.dueDate,
+      })),
       timeline,
       materialRequirement: requirement.map((row) => {
         const onHand = onHandByMaterial.get(row.materialId) ?? 0;
         const isAvailable = onHand >= row.totalRequired;
-        return { ...row, onHand, deficit: isAvailable ? 0 : row.totalRequired - onHand, isAvailable };
+        return {
+          ...row,
+          onHand,
+          deficit: isAvailable ? 0 : row.totalRequired - onHand,
+          isAvailable,
+        };
       }),
     };
   }
@@ -181,14 +275,20 @@ export class BatchPassportService {
   // партии»; UI обязан явно подписать это как «Остаток по всем складам».
   // Переиспользует существующий WarehouseService.listMaterialStock (P0-3) по
   // каждому складу — новой агрегирующей таблицы не заводит.
-  private async aggregateMaterialOnHand(companyId: string, materialIds: string[]): Promise<Map<string, number>> {
+  private async aggregateMaterialOnHand(
+    companyId: string,
+    materialIds: string[],
+  ): Promise<Map<string, number>> {
     const totals = new Map<string, number>();
     if (materialIds.length === 0) return totals;
     const warehouses = await this.warehouseService.listWarehouses(companyId);
     for (const warehouse of warehouses) {
       const items = await this.warehouseService.listMaterialStock(companyId, warehouse.id);
       for (const item of items) {
-        totals.set(item.materialId, (totals.get(item.materialId) ?? 0) + Number(item.quantityOnHand));
+        totals.set(
+          item.materialId,
+          (totals.get(item.materialId) ?? 0) + Number(item.quantityOnHand),
+        );
       }
     }
     return totals;
@@ -203,7 +303,10 @@ export class BatchPassportService {
 // подставлять текущие нормы модели нельзя, это ровно то, от чего защищает
 // весь механизм: старая партия не должна пересчитываться задним числом.
 export type MaterialRequirementBase = Array<
-  Omit<BatchPassportResponseDto["materialRequirement"][number], "onHand" | "deficit" | "isAvailable">
+  Omit<
+    BatchPassportResponseDto["materialRequirement"][number],
+    "onHand" | "deficit" | "isAvailable"
+  >
 >;
 
 export function computeMaterialRequirement(

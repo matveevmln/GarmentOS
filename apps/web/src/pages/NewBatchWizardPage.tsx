@@ -5,6 +5,7 @@ import {
   quickProductSchema,
   placeProductionOrderSchema,
   type PlaceProductionOrderDto,
+  type DocumentResponseDto,
   type ProductResponseDto,
   type ProductVariantResponseDto,
   type ProductSizeResponseDto,
@@ -18,8 +19,9 @@ import { Button } from "../design-system/Button/Button";
 import { Input } from "../design-system/Input/Input";
 import { NumberInput } from "../design-system/Input/NumberInput";
 import { Field } from "../design-system/Form/Field";
-import { Card, CardContent } from "../design-system/Card/Card";
-import { PageHeader } from "../design-system/PageHeader/PageHeader";
+import { ModelThumb } from "../design-system/Blocks/BatchCard";
+import { MobileActionBar } from "../design-system/Blocks/MobileActionBar";
+import { ArrowLeft, X, Minus, Plus } from "lucide-react";
 import { ErrorState } from "../design-system/Feedback/ErrorState";
 import { SkeletonList } from "../design-system/Feedback/Skeleton";
 
@@ -101,6 +103,7 @@ export function NewBatchWizardPage() {
   });
   const [products, setProducts] = useState<ProductResponseDto[]>([]);
   const [workshops, setWorkshops] = useState<WorkshopResponseDto[]>([]);
+  const [photoDocumentId, setPhotoDocumentId] = useState<string | null>(null);
   const [variants, setVariants] = useState<ProductVariantResponseDto[]>([]);
   const [sizes, setSizes] = useState<ProductSizeResponseDto[]>([]);
   const [loading, setLoading] = useState(true);
@@ -108,7 +111,10 @@ export function NewBatchWizardPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [storageError, setStorageError] = useState(false);
-  const update = (patch: Partial<Draft>) => setDraft((prev) => ({ ...prev, ...patch }));
+  const update = (patch: Partial<Draft>) => {
+    setError("");
+    setDraft((prev) => ({ ...prev, ...patch }));
+  };
   useEffect(() => {
     try {
       localStorage.setItem(key, JSON.stringify(draft));
@@ -133,7 +139,8 @@ export function NewBatchWizardPage() {
         setProducts(models.filter((model) => !model.deletedAt && model.status !== "discontinued"));
         const active = shops.filter((shop) => shop.status === "active");
         setWorkshops(active);
-        if (active.length === 1) setDraft((prev) => ({ ...prev, workshopId: prev.workshopId || active[0].id }));
+        if (active.length === 1)
+          setDraft((prev) => ({ ...prev, workshopId: prev.workshopId || active[0].id }));
       })
       .catch((err) => setError(err instanceof Error ? err.message : "Не удалось загрузить данные"))
       .finally(() => setLoading(false));
@@ -175,6 +182,25 @@ export function NewBatchWizardPage() {
     };
   }, [draft.productId]);
 
+  useEffect(() => {
+    let live = true;
+    setPhotoDocumentId(null);
+    if (draft.productId)
+      void apiRequest<DocumentResponseDto[]>(
+        `/documents?entityType=product&entityId=${draft.productId}`,
+      )
+        .then((docs) => {
+          if (live)
+            setPhotoDocumentId(
+              docs.find((doc) => doc.docType === "photo_product" && doc.isCurrentVersion)?.id ??
+                null,
+            );
+        })
+        .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [draft.productId]);
   const product = products.find((model) => model.id === draft.productId);
   const colorNames = [
     ...new Set(
@@ -190,7 +216,7 @@ export function NewBatchWizardPage() {
     setError(message);
   };
 
-  const next = async () => {
+  const next = async (redistribute = false) => {
     setError("");
     setBusy(true);
     try {
@@ -238,7 +264,11 @@ export function NewBatchWizardPage() {
         else update({ step: 1 });
       } else if (draft.step === 1) {
         if (!totalRequested) return fail("Укажите количество хотя бы для одного цвета");
-        if (!draft.rows.length) {
+        if (Object.values(draft.quantities).some((qty) => !Number.isInteger(qty) || qty < 0))
+          return fail("Укажите целое число изделий для каждого цвета");
+        if (draft.rows.some((row) => !Number.isInteger(row.quantity) || row.quantity < 0))
+          return fail("Количество изделий по каждому размеру должно быть целым");
+        if (redistribute || !draft.rows.length) {
           const preview = await apiRequest<PreviewProductionOrderVariantsResponseDto>(
             "/production-orders/preview-variants",
             {
@@ -350,11 +380,27 @@ export function NewBatchWizardPage() {
   if (!products.length && error && !workshops.length)
     return <ErrorState title={error} onRetry={load} />;
   return (
-    <div className="mx-auto max-w-2xl pb-6">
-      <PageHeader
-        title="Новая партия"
-        subtitle={`Шаг ${draft.step + 1} из 4 · ${TITLES[draft.step]}`}
-      />
+    <div className="seller-screen">
+      <header className="mb-6 flex items-center justify-between gap-2">
+        <button
+          className="focus-ring grid h-11 w-11 place-items-center"
+          aria-label="Назад к партиям"
+          onClick={() => void navigate("/production-orders")}
+        >
+          <ArrowLeft size={22} />
+        </button>
+        <h1 className="!text-xl">Новая партия</h1>
+        <button
+          className="focus-ring grid h-11 w-11 place-items-center"
+          aria-label="Закрыть мастер"
+          onClick={() => void navigate("/production-orders")}
+        >
+          <X size={22} />
+        </button>
+      </header>
+      <p className="mb-3 text-sm text-muted-foreground">
+        Шаг {draft.step + 1} из 4 · {TITLES[draft.step]}
+      </p>
       {restored && (
         <p className="mb-3 text-sm text-muted-foreground">
           Восстановлено то, что вы заполняли на этом устройстве.
@@ -365,163 +411,200 @@ export function NewBatchWizardPage() {
           Браузер не сохраняет черновик. Оставьте эту страницу открытой до завершения.
         </p>
       )}
-      <ol className="mb-4 grid grid-cols-4 gap-1 text-xs" aria-label="Шаги создания партии">
+      <ol className="mb-6 grid grid-cols-4 gap-2" aria-label="Шаги создания партии">
         {TITLES.map((title, index) => (
           <li
             key={title}
+            aria-label={`Шаг ${index + 1}: ${title}`}
             aria-current={index === draft.step ? "step" : undefined}
-            className={`rounded-lg p-2 ${index === draft.step ? "bg-primary/15 font-semibold" : "bg-muted"}`}
-          >
-            {index + 1}. {title}
-          </li>
+            className={`h-1.5 rounded-full ${index <= draft.step ? "bg-[var(--seller-accent)]" : "bg-muted"}`}
+          />
         ))}
       </ol>
-      <Card>
-        <CardContent className="flex flex-col gap-4 pt-5">
-          <fieldset
-            disabled={busy || Boolean(draft.pending) || Boolean(draft.modelPending)}
-            className="flex min-w-0 flex-col gap-4"
-          >
-            {draft.step === 0 && (
-              <>
-                <Field label="Модель">
-                  <select
-                    className={`field w-full rounded-lg border border-border bg-card px-3 ${inputClass}`}
-                    aria-label="Модель"
-                    value={draft.productId}
-                    onChange={(event) =>
-                      update({
-                        productId: event.target.value,
-                        name: products.find((model) => model.id === event.target.value)?.name || "",
-                        sizes: "",
-                        colors: "",
-                        setup: false,
-                        rows: [],
-                        quantities: {},
-                        modelRequestId: crypto.randomUUID(),
-                      })
-                    }
-                  >
-                    <option value="">Выберите модель</option>
-                    {products.map((model) => (
-                      <option key={model.id} value={model.id}>
-                        {model.name}
-                      </option>
-                    ))}
-                  </select>
-                </Field>
-                <Button
-                  variant="secondary"
-                  size="lg"
-                  onClick={() =>
+      <div className="flex flex-col gap-4">
+        <fieldset
+          disabled={busy || Boolean(draft.pending) || Boolean(draft.modelPending)}
+          className="flex min-w-0 flex-col gap-4"
+        >
+          {draft.step === 0 && (
+            <>
+              <Field label="Модель">
+                <select
+                  className={`field w-full rounded-lg border border-border bg-card px-3 ${inputClass}`}
+                  aria-label="Модель"
+                  value={draft.productId}
+                  onChange={(event) =>
                     update({
-                      productId: "",
-                      setup: true,
-                      name: "",
+                      productId: event.target.value,
+                      name: products.find((model) => model.id === event.target.value)?.name || "",
                       sizes: "",
                       colors: "",
+                      setup: false,
                       rows: [],
                       quantities: {},
                       modelRequestId: crypto.randomUUID(),
                     })
                   }
                 >
-                  + Новая модель
-                </Button>
-                {modelLoading && <p>Загружаем размеры и цвета…</p>}
-                {product && !draft.setup && (
-                  <>
-                    <p className="text-sm">
-                      Размеры:{" "}
-                      {[...new Set(variants.map((row) => row.size))].join(", ") || "ещё не заданы"}
-                      <br />
-                      Цвета: {colorNames.join(", ") || "ещё не заданы"}
-                    </p>
-                    <Button
-                      variant="ghost"
-                      size="lg"
-                      onClick={() =>
-                        update({
-                          setup: true,
-                          name: product.name,
-                          sizes: (sizes.length
-                            ? sizes.map((row) => row.size)
-                            : [...new Set(variants.map((row) => row.size))]
-                          ).join(", "),
-                          colors: colorNames.join(", "),
-                          modelRequestId: crypto.randomUUID(),
-                        })
-                      }
-                    >
-                      Настроить размеры и цвета
-                    </Button>
-                  </>
-                )}
-                {draft.setup && (
-                  <>
-                    <Field label="Название модели">
-                      <Input
-                        className={inputClass}
-                        value={draft.name}
-                        disabled={Boolean(draft.productId)}
-                        onChange={(event) => update({ name: event.target.value })}
-                        placeholder="Например, Хуплушка"
-                      />
-                    </Field>
-                    <Field label="Размеры через запятую">
-                      <Input
-                        className={inputClass}
-                        value={draft.sizes}
-                        onChange={(event) => update({ sizes: event.target.value })}
-                        placeholder="48-50, 52-54, 56-58"
-                      />
-                    </Field>
-                    <Field label={draft.productId ? "Цвета для добавления через запятую" : "Цвета через запятую"}>
-                      <Input
-                        className={inputClass}
-                        value={draft.colors}
-                        onChange={(event) => update({ colors: event.target.value })}
-                        placeholder="Петроль"
-                      />
-                    </Field>
-                    <p className="text-sm text-muted-foreground">
-                      Размеры и цвета сохранятся у модели для следующих партий. Фото можно добавить
-                      позже.
-                    </p>
-                  </>
-                )}
-              </>
-            )}
-            {draft.step === 1 && (
-              <>
-                <p className="font-medium">{product?.name}</p>
-                {colorNames.map((color) => (
-                  <Field key={color} label={`${color} · всего изделий`}>
-                    <NumberInput
+                  <option value="">Выберите модель</option>
+                  {products.map((model) => (
+                    <option key={model.id} value={model.id}>
+                      {model.name}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Button
+                variant="secondary"
+                size="lg"
+                onClick={() =>
+                  update({
+                    productId: "",
+                    setup: true,
+                    name: "",
+                    sizes: "",
+                    colors: "",
+                    rows: [],
+                    quantities: {},
+                    modelRequestId: crypto.randomUUID(),
+                  })
+                }
+              >
+                + Новая модель
+              </Button>
+              {modelLoading && <p>Загружаем размеры и цвета…</p>}
+              {product && !draft.setup && (
+                <>
+                  <p className="text-sm">
+                    Размеры:{" "}
+                    {[...new Set(variants.map((row) => row.size))].join(", ") || "ещё не заданы"}
+                    <br />
+                    Цвета: {colorNames.join(", ") || "ещё не заданы"}
+                  </p>
+                  <Button
+                    variant="ghost"
+                    size="lg"
+                    onClick={() =>
+                      update({
+                        setup: true,
+                        name: product.name,
+                        sizes: (sizes.length
+                          ? sizes.map((row) => row.size)
+                          : [...new Set(variants.map((row) => row.size))]
+                        ).join(", "),
+                        colors: colorNames.join(", "),
+                        modelRequestId: crypto.randomUUID(),
+                      })
+                    }
+                  >
+                    Настроить размеры и цвета
+                  </Button>
+                </>
+              )}
+              {draft.setup && (
+                <>
+                  <Field label="Название модели">
+                    <Input
                       className={inputClass}
-                      aria-label={`${color} · всего изделий`}
-                      min={0}
-                      value={draft.quantities[color] || undefined}
-                      onChange={(qty) =>
-                        update({ quantities: { ...draft.quantities, [color]: qty ?? 0 }, rows: [] })
-                      }
-                      suffix="шт."
+                      value={draft.name}
+                      disabled={Boolean(draft.productId)}
+                      onChange={(event) => update({ name: event.target.value })}
+                      placeholder="Например, Хуплушка"
                     />
                   </Field>
-                ))}
-                {draft.rows.length > 0 && (
-                  <>
-                    <p className="text-sm">
-                      Размеры распределены автоматически. Можно изменить каждое количество.
-                    </p>
+                  <Field label="Размеры через запятую">
+                    <Input
+                      className={inputClass}
+                      value={draft.sizes}
+                      onChange={(event) => update({ sizes: event.target.value })}
+                      placeholder="48-50, 52-54, 56-58"
+                    />
+                  </Field>
+                  <Field
+                    label={
+                      draft.productId ? "Цвета для добавления через запятую" : "Цвета через запятую"
+                    }
+                  >
+                    <Input
+                      className={inputClass}
+                      value={draft.colors}
+                      onChange={(event) => update({ colors: event.target.value })}
+                      placeholder="Петроль"
+                    />
+                  </Field>
+                  <p className="text-sm text-muted-foreground">
+                    Размеры и цвета сохранятся у модели для следующих партий. Фото можно добавить
+                    позже.
+                  </p>
+                </>
+              )}
+            </>
+          )}
+          {draft.step === 1 && (
+            <>
+              <div className="seller-card flex items-center gap-3 bg-muted/30">
+                <ModelThumb
+                  photoDocumentId={photoDocumentId}
+                  productName={product?.name ?? "Модель"}
+                  size={40}
+                />
+                <strong className="text-sm">
+                  {product?.name} · {colorNames.join(", ")}
+                </strong>
+              </div>
+              {colorNames.map((color) => (
+                <Field
+                  key={color}
+                  label={colorNames.length === 1 ? "Всего изделий" : `${color} · всего изделий`}
+                >
+                  <NumberInput
+                    className={`${inputClass} seller-total-input`}
+                    aria-label={
+                      colorNames.length === 1 ? "Всего изделий" : `${color} · всего изделий`
+                    }
+                    min={0}
+                    value={draft.quantities[color] || undefined}
+                    onChange={(qty) =>
+                      update({ quantities: { ...draft.quantities, [color]: qty ?? 0 }, rows: [] })
+                    }
+                    inputMode="numeric"
+                  />
+                </Field>
+              ))}
+              <Button variant="secondary" size="lg" onClick={() => void next(true)}>
+                Распределить по размерам
+              </Button>
+              {draft.rows.length > 0 && (
+                <>
+                  <div className="divide-y divide-border">
                     {draft.rows.map((row, index) => (
-                      <Field key={row.productVariantId} label={`${row.color} · ${row.size}`}>
+                      <div key={row.productVariantId} className="flex items-center gap-2 py-3">
+                        <span className="min-w-0 flex-1 text-sm">
+                          {colorNames.length > 1 ? `${row.color} · ` : ""}
+                          {row.size}
+                        </span>
+                        <button
+                          type="button"
+                          aria-label={`Уменьшить ${row.color} · ${row.size}`}
+                          className="focus-ring grid h-11 w-11 shrink-0 place-items-center rounded-lg border border-border bg-muted/40"
+                          disabled={row.quantity === 0}
+                          onClick={() =>
+                            update({
+                              rows: draft.rows.map((old, i) =>
+                                i === index
+                                  ? { ...old, quantity: Math.max(0, old.quantity - 1) }
+                                  : old,
+                              ),
+                            })
+                          }
+                        >
+                          <Minus size={18} />
+                        </button>
                         <NumberInput
-                          className={inputClass}
+                          className={`${inputClass} w-16 text-center`}
                           aria-label={`${row.color} · ${row.size}`}
                           value={row.quantity}
                           min={0}
-                          suffix="шт."
                           onChange={(qty) =>
                             update({
                               rows: draft.rows.map((old, i) =>
@@ -530,149 +613,161 @@ export function NewBatchWizardPage() {
                             })
                           }
                         />
-                      </Field>
+                        <button
+                          type="button"
+                          aria-label={`Увеличить ${row.color} · ${row.size}`}
+                          className="focus-ring grid h-11 w-11 shrink-0 place-items-center rounded-lg border border-border bg-muted/40"
+                          onClick={() =>
+                            update({
+                              rows: draft.rows.map((old, i) =>
+                                i === index ? { ...old, quantity: old.quantity + 1 } : old,
+                              ),
+                            })
+                          }
+                        >
+                          <Plus size={18} />
+                        </button>
+                      </div>
                     ))}
-                    <p className="font-semibold">
-                      По размерам: {total} шт. · Запланировано: {totalRequested} шт.
-                    </p>
-                  </>
-                )}
-              </>
-            )}
-            {draft.step === 2 && (
-              <>
-                <Field label="Цена пошива за изделие, ₽">
-                  <NumberInput
-                    className={inputClass}
-                    aria-label="Цена пошива за изделие, ₽"
-                    decimals={2}
-                    min={0}
-                    value={draft.price || undefined}
-                    onChange={(price) => update({ price: price ?? 0 })}
-                    suffix="₽"
-                  />
-                </Field>
-                <p className="font-medium">
-                  {total} шт. × {draft.price || "—"} ₽ ={" "}
-                  {(total * draft.price).toLocaleString("ru-RU")} ₽
-                </p>
-                <Field label="Срок готовности (необязательно)">
-                  <Input
-                    className={inputClass}
-                    type="date"
-                    aria-label="Срок готовности"
-                    value={draft.dueDate}
-                    onChange={(event) => update({ dueDate: event.target.value })}
-                  />
-                </Field>
-                {workshops.length === 1 ? (
-                  <p>
-                    Цех: <strong>{workshops[0].name}</strong>
-                  </p>
-                ) : (
-                  <Field label="Цех">
-                    <select
-                      className={`field w-full border border-border bg-card px-3 ${inputClass}`}
-                      value={draft.workshopId}
-                      aria-label="Цех"
-                      onChange={(event) => update({ workshopId: event.target.value })}
-                    >
-                      <option value="">Выберите цех</option>
-                      {workshops.map((shop) => (
-                        <option key={shop.id} value={shop.id}>
-                          {shop.name}
-                        </option>
-                      ))}
-                    </select>
-                  </Field>
-                )}
-                {!workshops.length && (
-                  <Button variant="secondary" size="lg" onClick={() => void navigate("/workshops")}>
-                    Добавить мой цех
-                  </Button>
-                )}
-              </>
-            )}
-            {draft.step === 3 && (
-              <>
-                <h2 className="text-lg font-semibold">Проверьте партию</h2>
-                <p>
-                  <strong>{product?.name}</strong>
-                  <br />
-                  Цех: {workshop?.name}
-                  <br />
-                  Количество: {total} шт.
-                  <br />
-                  Пошив: {draft.price} ₽ за изделие
-                  <br />
-                  Итого: {(total * draft.price).toLocaleString("ru-RU")} ₽<br />
-                  Срок: {draft.dueDate || "не указан"}
-                </p>
-                <ul className="flex flex-col gap-2">
-                  {draft.rows
-                    .filter((row) => row.quantity > 0)
-                    .map((row) => (
-                      <li key={row.productVariantId}>
-                        {row.color} · {row.size}: <strong>{row.quantity} шт.</strong>
-                      </li>
-                    ))}
-                </ul>
-                <p className="text-sm text-muted-foreground">
-                  При размещении партия и её спецификация сохранятся вместе. Затем в карточке партии
-                  появится следующий шаг. Отправка документов цеху — отдельное действие.
-                </p>
-              </>
-            )}
-          </fieldset>
-          {error && (
-            <p role="alert" className="text-sm text-destructive">
-              {error}
-            </p>
-          )}
-          {draft.pending && (
-            <p className="text-sm">
-              Ожидаем подтверждение этой попытки. Повторное нажатие вернёт ту же партию.
-            </p>
-          )}
-          <div className="sticky bottom-[calc(4.5rem+env(safe-area-inset-bottom))] z-10 flex flex-col gap-2 rounded-lg border border-border bg-card p-3 shadow-md md:bottom-3">
-            {draft.step < 3 ? (
-              <Button size="lg" loading={busy} disabled={modelLoading} onClick={() => void next()}>
-                {draft.modelPending
-                  ? "Повторить сохранение модели"
-                  : draft.step === 1 && !draft.rows.length
-                    ? "Распределить по размерам"
-                    : "Далее"}
-              </Button>
-            ) : (
-              <>
-                <Button size="lg" loading={busy} onClick={() => void submit("place")}>
-                  {draft.pending ? "Повторить сохранение" : "Разместить партию"}
-                </Button>
-                {!draft.pending && (
-                  <Button
-                    size="lg"
-                    variant="secondary"
-                    disabled={busy}
-                    onClick={() => void submit("draft")}
+                  </div>
+                  <p
+                    role="status"
+                    className={`rounded-lg p-3 text-sm ${total === totalRequested && colorNames.every((color) => draft.rows.filter((row) => row.color === color).reduce((sum, row) => sum + row.quantity, 0) === (draft.quantities[color] ?? 0)) ? "bg-success/10 text-success" : "bg-warning/10 text-warning"}`}
                   >
-                    Сохранить как черновик
-                  </Button>
-                )}
-              </>
-            )}
-            {draft.step > 0 && !draft.pending && (
-              <Button
-                size="lg"
-                variant="ghost"
-                disabled={busy}
-                onClick={() => update({ step: draft.step - 1 })}
-              >
-                Назад
-              </Button>
-            )}
-          </div>
-        </CardContent>
-      </Card>
+                    Распределено {total} из {totalRequested} изделий
+                  </p>
+                </>
+              )}
+            </>
+          )}
+          {draft.step === 2 && (
+            <>
+              <Field label="Цена пошива за изделие, ₽">
+                <NumberInput
+                  className={`${inputClass} seller-total-input`}
+                  aria-label="Цена пошива за изделие, ₽"
+                  decimals={2}
+                  min={0}
+                  value={draft.price || undefined}
+                  onChange={(price) => update({ price: price ?? 0 })}
+                  suffix="₽"
+                />
+              </Field>
+              <p className="font-medium">
+                {total} шт. × {draft.price || "—"} ₽ ={" "}
+                {(total * draft.price).toLocaleString("ru-RU")} ₽
+              </p>
+              <Field label="Срок готовности (необязательно)">
+                <Input
+                  className={`${inputClass} seller-total-input`}
+                  type="date"
+                  aria-label="Срок готовности"
+                  value={draft.dueDate}
+                  onChange={(event) => update({ dueDate: event.target.value })}
+                />
+              </Field>
+              {workshops.length === 1 ? (
+                <p>
+                  Цех: <strong>{workshops[0].name}</strong>
+                </p>
+              ) : (
+                <Field label="Цех">
+                  <select
+                    className={`field w-full border border-border bg-card px-3 ${inputClass}`}
+                    value={draft.workshopId}
+                    aria-label="Цех"
+                    onChange={(event) => update({ workshopId: event.target.value })}
+                  >
+                    <option value="">Выберите цех</option>
+                    {workshops.map((shop) => (
+                      <option key={shop.id} value={shop.id}>
+                        {shop.name}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+              )}
+              {!workshops.length && (
+                <Button variant="secondary" size="lg" onClick={() => void navigate("/workshops")}>
+                  Добавить мой цех
+                </Button>
+              )}
+            </>
+          )}
+          {draft.step === 3 && (
+            <>
+              <h2 className="text-lg font-semibold">Проверьте партию</h2>
+              <p>
+                <strong>{product?.name}</strong>
+                <br />
+                Цех: {workshop?.name}
+                <br />
+                Количество: {total} шт.
+                <br />
+                Пошив: {draft.price} ₽ за изделие
+                <br />
+                Итого: {(total * draft.price).toLocaleString("ru-RU")} ₽<br />
+                Срок: {draft.dueDate || "не указан"}
+              </p>
+              <ul className="flex flex-col gap-2">
+                {draft.rows
+                  .filter((row) => row.quantity > 0)
+                  .map((row) => (
+                    <li key={row.productVariantId}>
+                      {row.color} · {row.size}: <strong>{row.quantity} шт.</strong>
+                    </li>
+                  ))}
+              </ul>
+              <p className="text-sm text-muted-foreground">
+                При размещении партия и её спецификация сохранятся вместе. Затем в карточке партии
+                появится следующий шаг. Отправка документов цеху — отдельное действие.
+              </p>
+            </>
+          )}
+        </fieldset>
+        {error && (
+          <p role="alert" className="text-sm text-destructive">
+            {error}
+          </p>
+        )}
+        {draft.pending && (
+          <p className="text-sm">
+            Ожидаем подтверждение этой попытки. Повторное нажатие вернёт ту же партию.
+          </p>
+        )}
+        {draft.step === 3 && !draft.pending && (
+          <Button variant="ghost" disabled={busy} onClick={() => void submit("draft")}>
+            Сохранить как черновик
+          </Button>
+        )}
+        <MobileActionBar wizard>
+          {draft.step > 0 && !draft.pending && !draft.modelPending && (
+            <Button
+              size="lg"
+              variant="secondary"
+              className="!flex-[0.65]"
+              disabled={busy}
+              onClick={() => update({ step: draft.step - 1 })}
+            >
+              Назад
+            </Button>
+          )}
+          {draft.step < 3 ? (
+            <Button
+              size="lg"
+              loading={busy}
+              disabled={modelLoading || (draft.step === 1 && !draft.rows.length)}
+              onClick={() => void next()}
+            >
+              {draft.modelPending ? "Повторить сохранение модели" : "Далее"}
+            </Button>
+          ) : (
+            <Button size="lg" loading={busy} onClick={() => void submit("place")}>
+              {draft.pending ? "Повторить сохранение" : "Разместить партию"}
+            </Button>
+          )}
+        </MobileActionBar>
+      </div>
     </div>
   );
 }
