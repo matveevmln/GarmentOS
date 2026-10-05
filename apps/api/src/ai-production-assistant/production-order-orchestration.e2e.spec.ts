@@ -327,7 +327,7 @@ describe("Вертикальный сценарий Итерации 7 (e2e): т
   // нему создавался, но подтвердиться не мог никогда, а исправить карточку
   // было нечем. Тест фиксирует обе стороны: инвариант продолжает работать и
   // теперь у него есть выход.
-  it("цех без договора блокирует подтверждение заказа, PATCH карточки снимает блокировку", async () => {
+  it("цех без договора разрешает подтверждение; последующая правка не переписывает снимок", async () => {
     const companyName = `E2E Workshop Contract ${Date.now()}`;
     createdCompanyNames.push(companyName);
     const { accessToken } = await setupAuthenticatedCompany(db, httpServer, companyName, "owner");
@@ -393,12 +393,15 @@ describe("Вертикальный сценарий Итерации 7 (e2e): т
         .expect(201)
     ).body as ProductionOrderResponseDto;
 
-    // Инвариант «основания генерации» продолжает действовать.
-    const blocked = await request(httpServer)
-      .post(`/v1/production-orders/${order.id}/confirm`)
-      .set(...authHeader(accessToken))
-      .expect(400);
-    expect((blocked.body as ErrorResponseBody).code).toBe("WORKSHOP_CONTRACT_NUMBER_MISSING");
+    const confirmedWithoutContract = (
+      await request(httpServer)
+        .post(`/v1/production-orders/${order.id}/confirm`)
+        .set(...authHeader(accessToken))
+        .expect(201)
+    ).body as ProductionOrderResponseDto;
+    expect(confirmedWithoutContract.status).toBe("placed");
+    expect(confirmedWithoutContract.costSnapshot?.contractNumber).toBe("");
+    expect(confirmedWithoutContract.costSnapshot?.contractDate).toBe("");
 
     const patched = (
       await request(httpServer)
@@ -431,19 +434,15 @@ describe("Вертикальный сценарий Итерации 7 (e2e): т
     expect(cleared.signerRole).toBeNull();
     expect(cleared.contractNumber).toBe("АС-2026/14");
 
-    // Тот же заказ теперь подтверждается, а реквизиты попадают в Snapshot
-    // партии — тот, из которого потом печатается спецификация.
-    const confirmed = (
+    // Новые реквизиты не меняют уже подтверждённую партию.
+    const existing = (
       await request(httpServer)
-        .post(`/v1/production-orders/${order.id}/confirm`)
+        .get(`/v1/production-orders/${order.id}`)
         .set(...authHeader(accessToken))
-        .expect(201)
+        .expect(200)
     ).body as ProductionOrderResponseDto;
-    expect(confirmed.status).toBe("placed");
-    expect(confirmed.costSnapshot?.contractNumber).toBe("АС-2026/14");
-    expect(confirmed.costSnapshot?.contractDate).toBe("2026-08-01");
-    expect(confirmed.costSnapshot?.paymentTerms).toBe("Предоплата 70%, остаток по приёмке");
-    expect(confirmed.costSnapshot?.contractorSignerName).toBe("Абдыраимов К.А.");
+    expect(existing.costSnapshot?.contractNumber).toBe("");
+    expect(existing.costSnapshot?.contractDate).toBe("");
 
     await request(httpServer)
       .patch("/v1/workshops/00000000-0000-4000-8000-000000000099")

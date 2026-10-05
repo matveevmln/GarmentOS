@@ -104,7 +104,7 @@ export function NewBatchWizardPage({ onClose }: { onClose?: () => void }) {
     }
     return { draft: fresh(requestedProductId), restored: false };
   });
-  const restored = initial.restored;
+  const [restored, setRestored] = useState(initial.restored);
   const [draft, setDraft] = useState<Draft>(initial.draft);
   const [products, setProducts] = useState<ProductResponseDto[]>([]);
   const [workshops, setWorkshops] = useState<WorkshopResponseDto[]>([]);
@@ -153,8 +153,7 @@ export function NewBatchWizardPage({ onClose }: { onClose?: () => void }) {
         setProducts(models.filter((model) => !model.deletedAt && model.status !== "discontinued"));
         const active = shops.filter((shop) => shop.status === "active");
         setWorkshops(active);
-        if (active.length === 1)
-          setDraft((prev) => ({ ...prev, workshopId: prev.workshopId || active[0].id }));
+        if (active.length === 1) setDraft((prev) => ({ ...prev, workshopId: prev.pending ? prev.workshopId : active[0].id }));
       })
       .catch((err) => setError(err instanceof Error ? err.message : "Не удалось загрузить данные"))
       .finally(() => setLoading(false));
@@ -326,10 +325,6 @@ export function NewBatchWizardPage({ onClose }: { onClose?: () => void }) {
           return fail(
             "Выберите цех. Если список пуст, сначала добавьте цех в разделе “Ещё → Мой цех”.",
           );
-        if (!workshop.contractNumber)
-          return fail(
-            "У цеха не указан номер договора. Заполните его в “Мой цех” перед размещением партии.",
-          );
         update({ step: 3 });
       }
     } catch (err) {
@@ -343,6 +338,27 @@ export function NewBatchWizardPage({ onClose }: { onClose?: () => void }) {
     } finally {
       setBusy(false);
     }
+  };
+
+  const resetDraft = () => {
+    if (busy || draft.pending || draft.modelPending) return;
+    if (
+      !window.confirm(
+        "Очистить незавершённый ввод? Созданные модели и сохранённые партии останутся.",
+      )
+    )
+      return;
+    try {
+      localStorage.removeItem(key);
+      if (draft.productId) localStorage.removeItem(`${key}:model:${draft.productId}`);
+    } catch {
+      setStorageError(true);
+    }
+    const reset = fresh(requestedProductId);
+    if (workshops.length === 1) reset.workshopId = workshops[0].id;
+    setDraft(reset);
+    setRestored(false);
+    setError("");
   };
 
   const submit = async (mode: "place" | "draft") => {
@@ -430,6 +446,17 @@ export function NewBatchWizardPage({ onClose }: { onClose?: () => void }) {
         <p role="alert" className="mb-3 text-sm text-destructive">
           Браузер не сохраняет черновик. Оставьте эту страницу открытой до завершения.
         </p>
+      )}
+      {restored && !draft.pending && !draft.modelPending && (
+        <Button
+          type="button"
+          variant="secondary"
+          className="mb-3"
+          disabled={busy}
+          onClick={resetDraft}
+        >
+          Очистить незавершённый ввод
+        </Button>
       )}
       <ol className="mb-6 grid grid-cols-4 gap-2" aria-label="Шаги создания партии">
         {TITLES.map((title, index) => (

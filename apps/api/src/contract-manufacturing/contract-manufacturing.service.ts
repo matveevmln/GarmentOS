@@ -708,7 +708,7 @@ export class ContractManufacturingService {
     return this.workshops.reserveNextSpecificationNumber(workshopId);
   }
 
-  async listActiveWorkshops(companyId: string): Promise<Workshop[]> {
-    return this.workshops.listActiveByCompany(companyId);
+  async listActiveWorkshops(companyId: string, includeArchived = false): Promise<Workshop[]> {
+    return this.workshops.listActiveByCompany(companyId, includeArchived);
   }
 }

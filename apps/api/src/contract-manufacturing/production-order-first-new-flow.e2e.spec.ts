@@ -160,9 +160,6 @@ describe("Production Order → Specification — новая цепочка це�
       .set(...authHeader(accessToken))
       .send({
         name: `Ак-Сарай ${suffix}`,
-        contractNumber: `П-${suffix}`,
-        contractDate: "2026-04-22",
-        legalAddress: "Кыргызская республика, город Бишкек",
       })
       .expect(201);
     const workshop = workshopResponse.body as WorkshopResponseDto;
@@ -379,6 +376,157 @@ describe("Production Order → Specification — новая цепочка це�
   // существовали, тест ниже фиксирует, что происходит, когда app-level
   // проверка проигрывает настоящей гонке (две параллельные попытки создать
   // спецификацию из ОДНОГО заказа) и решает вопрос только DB-constraint.
+  it("Ак Сарай без реквизитов: размещение идемпотентно, архив исключает только новые партии, восстановление сохраняет связи", async () => {
+    const companyName = `E2E Single Workshop ${Date.now()}`;
+    createdCompanyNames.push(companyName);
+    const { accessToken } = await setupAuthenticatedCompany(db, httpServer, companyName, "owner");
+    const product = (
+      await request(httpServer)
+        .post("/v1/products")
+        .set(...authHeader(accessToken))
+        .send({ name: "Хуплушка", code: `SINGLE-${Date.now()}` })
+        .expect(201)
+    ).body as ProductResponseDto;
+    const variant = (
+      await request(httpServer)
+        .post("/v1/product-variants")
+        .set(...authHeader(accessToken))
+        .send({
+          productId: product.id,
+          size: "48-50",
+          color: "Петрол",
+          skuCode: `SINGLE-${product.id}`,
+        })
+        .expect(201)
+    ).body as ProductVariantResponseDto;
+    const workshop = (
+      await request(httpServer)
+        .post("/v1/workshops")
+        .set(...authHeader(accessToken))
+        .send({ name: "Ак Сарай" })
+        .expect(201)
+    ).body as WorkshopResponseDto;
+    expect(workshop.contractNumber).toBeNull();
+    const input = {
+      requestId: crypto.randomUUID(),
+      mode: "place",
+      productId: product.id,
+      workshopId: workshop.id,
+      plannedQuantity: 5,
+      agreedUnitPrice: 500,
+      variants: [{ productVariantId: variant.id, quantity: 5 }],
+    };
+    const placed = (
+      await request(httpServer)
+        .post("/v1/production-orders/place")
+        .set(...authHeader(accessToken))
+        .send(input)
+        .expect(201)
+    ).body as ProductionOrderResponseDto;
+    expect(placed.status).toBe("placed");
+    expect(placed.costSnapshot?.contractNumber).toBe("");
+    expect(placed.dueDate).toBeNull();
+    const repeated = (
+      await request(httpServer)
+        .post("/v1/production-orders/place")
+        .set(...authHeader(accessToken))
+        .send(input)
+        .expect(201)
+    ).body as ProductionOrderResponseDto;
+    expect(repeated.id).toBe(placed.id);
+    const specs = (
+      await request(httpServer)
+        .get("/v1/specifications")
+        .set(...authHeader(accessToken))
+        .expect(200)
+    ).body as SpecificationResponseDto[];
+    expect(specs.filter((spec) => spec.productionOrderId === placed.id)).toHaveLength(1);
+
+    const legacySpec = (
+      await request(httpServer).post("/v1/specifications").set(...authHeader(accessToken))
+        .send({ productId: product.id, workshopId: workshop.id,
+          items: [{ productVariantId: variant.id, quantity: 5, unitPrice: 500 }] }).expect(201)
+    ).body as SpecificationResponseDto;
+    await request(httpServer).post(`/v1/specifications/${legacySpec.id}/approve`)
+      .set(...authHeader(accessToken)).expect(201);
+
+    await request(httpServer)
+      .patch(`/v1/workshops/${workshop.id}`)
+      .set(...authHeader(accessToken))
+      .send({ status: "archived" })
+      .expect(200);
+    expect(
+      (
+        await request(httpServer)
+          .get("/v1/workshops")
+          .set(...authHeader(accessToken))
+          .expect(200)
+      ).body,
+    ).toHaveLength(0);
+    const archived = (
+      await request(httpServer)
+        .get("/v1/workshops?includeArchived=true")
+        .set(...authHeader(accessToken))
+        .expect(200)
+    ).body as WorkshopResponseDto[];
+    expect(archived.map((row) => row.id)).toEqual([workshop.id]);
+    await request(httpServer)
+      .get("/v1/workshops?includeArchived=invalid")
+      .set(...authHeader(accessToken))
+      .expect(400);
+    const denied = await request(httpServer)
+      .post("/v1/production-orders/place")
+      .set(...authHeader(accessToken))
+      .send({ ...input, requestId: crypto.randomUUID() })
+      .expect(400);
+    expect((denied.body as { code: string }).code).toBe("WORKSHOP_UNAVAILABLE");
+    const deniedLegacy = await request(httpServer).post(`/v1/specifications/${legacySpec.id}/production-order`)
+      .set(...authHeader(accessToken)).send({}).expect(400);
+    expect((deniedLegacy.body as { code: string }).code).toBe("WORKSHOP_UNAVAILABLE");
+    // Историческая партия доступна и после архива цеха.
+    const saved = (
+      await request(httpServer)
+        .get(`/v1/production-orders/${placed.id}`)
+        .set(...authHeader(accessToken))
+        .expect(200)
+    ).body as ProductionOrderResponseDto;
+    expect(saved.workshopId).toBe(workshop.id);
+    expect(saved.status).toBe("placed");
+    await request(httpServer)
+      .patch(`/v1/workshops/${workshop.id}`)
+      .set(...authHeader(accessToken))
+      .send({ status: "active" })
+      .expect(200);
+    expect(
+      (
+        await request(httpServer)
+          .get("/v1/workshops")
+          .set(...authHeader(accessToken))
+          .expect(200)
+      ).body,
+    ).toHaveLength(1);
+    // Черновик убирается из рабочего списка отменой с причиной, без удаления модели.
+    const draft = (
+      await request(httpServer)
+        .post("/v1/production-orders/place")
+        .set(...authHeader(accessToken))
+        .send({ ...input, mode: "draft", requestId: crypto.randomUUID() })
+        .expect(201)
+    ).body as ProductionOrderResponseDto;
+    const cancelled = (
+      await request(httpServer)
+        .post(`/v1/production-orders/${draft.id}/cancel`)
+        .set(...authHeader(accessToken))
+        .send({ reason: "Ошибочный черновик" })
+        .expect(201)
+    ).body as ProductionOrderResponseDto;
+    expect(cancelled.status).toBe("cancelled");
+    await request(httpServer)
+      .get(`/v1/products/${product.id}`)
+      .set(...authHeader(accessToken))
+      .expect(200);
+  });
+
   it("constraint: параллельное создание спецификации из одного заказа — ровно одна побеждает, вторая получает явный отказ (не 500)", async () => {
     const companyName = `E2E NewFlow SpecRace ${Date.now()}`;
     createdCompanyNames.push(companyName);
@@ -530,7 +678,11 @@ describe("Production Order → Specification — новая цепочка це�
       .set(...authHeader(accessToken))
       .send({ reason: "Ошибочно отмечено как принято, факта приёмки ещё не было" })
       .expect(201);
-    const rollbackBody = rollbackResponse.body as { fromStatus: string; toStatus: string; order: ProductionOrderResponseDto };
+    const rollbackBody = rollbackResponse.body as {
+      fromStatus: string;
+      toStatus: string;
+      order: ProductionOrderResponseDto;
+    };
     expect(rollbackBody.fromStatus).toBe("received");
     expect(rollbackBody.toStatus).toBe("shipped_to_fulfillment");
     expect(rollbackBody.order.status).toBe("shipped_to_fulfillment");

@@ -62,6 +62,13 @@ export async function createProductionOrderDraft(
     );
   }
 
+  if (workshop.status !== "active" || workshop.deletedAt) {
+    throw new DomainError(
+      "Цех недоступен для новой партии. Восстановите его из архива.",
+      "WORKSHOP_UNAVAILABLE",
+    );
+  }
+
   const bomApproved = await deps.bomApproval.isBomApproved(
     input.companyId,
     input.bomId,

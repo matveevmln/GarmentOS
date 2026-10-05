@@ -127,11 +127,16 @@ export class DrizzleWorkshopRepository implements WorkshopRepository {
     return row ? toWorkshop(row) : null;
   }
 
-  async listActiveByCompany(companyId: string): Promise<Workshop[]> {
+  async listActiveByCompany(companyId: string, includeArchived = false): Promise<Workshop[]> {
     const rows = await this.db
       .select()
       .from(workshops)
-      .where(and(eq(workshops.companyId, companyId), eq(workshops.status, "active")));
+      .where(
+        and(
+          eq(workshops.companyId, companyId),
+          includeArchived ? undefined : eq(workshops.status, "active"),
+        ),
+      );
     return rows.map(toWorkshop);
   }
 

@@ -19,37 +19,8 @@ import { ErrorState } from "../design-system/Feedback/ErrorState";
 import { toast } from "../design-system/Toast/Toast";
 import { ApiError, apiRequest } from "../api/client";
 
-// Первый из 7 экранов, перенесённых на дизайн-систему после утверждения
-// формы-эталона (docs/DESIGN_SYSTEM_MAP.md). Изменения относительно старой
-// версии — не только замена компонентов:
-// 1. Голый текст «Загрузка…» → SkeletonList (тот же реальный пробел,
-//    что уже был закрыт в форме-эталоне).
-// 2. Ошибка загрузки списка (не только ошибка формы) → полностраничный
-//    ErrorState с кнопкой «Повторить» (docs/UX_PRINCIPLES.md §5) — раньше
-//    неудача загрузки была неотличима от пустого списка.
-// 3. Ошибка отправки формы → toast.error вместо статичного <p> (не занимает
-//    место в layout, не остаётся на экране после исправления).
-// 4. Кнопка «Добавить цех» → loading-состояние на время отправки.
-// 5. Пустой список → emptyActionLabel, ведущий к самой форме (Zero Input —
-//    не просто объясняет, что пусто, а сразу предлагает действие).
-//
-// Pilot v1, этап 1 — две правки к этому экрану:
-// 1. Форма собирает договорные реквизиты (номер и дата договора, условия
-//    оплаты, способ доставки, подписант). Без них подтверждение заказа
-//    пошива падает с WORKSHOP_CONTRACT_NUMBER_MISSING, а сами поля уже
-//    принимались схемой и доходили до БД — не отрисованы были только они.
-//    Эти же значения подставляются в Snapshot партии и в спецификацию.
-// 2. Появилось редактирование: клик по строке открывает ту же форму
-//    заполненной. Раньше действий на строках сознательно не было, потому
-//    что у API не существовало эндпоинта правки (см. историю ниже) —
-//    теперь есть PATCH /workshops/:id, и «мёртвой кнопки» не возникает.
-//
-// Убраны вкладки «Черновик»/«Архив» (docs/PILOT_BUGS.md): create-workshop
-// всегда проставляет status='active' (черновик зарезервирован под будущий
-// Inbox-сценарий, архивации нигде не существует), а GET /workshops и так
-// отдаёт только активные — обе вкладки были гарантированно пустыми не из-за
-// бага фильтрации, а потому что показывать было нечего. Сам фильтр по
-// статусу с единственным реальным значением тоже смысла не имеет.
+// Активные цеха выбираются в партии автоматически. Архив доступен здесь
+// с восстановлением; договорные реквизиты необязательны (ADR 0004).
 
 // Договорная дата хранится в БД строкой (workshops.contract_date — text), а
 // DatePicker работает с Date. Обе стороны конвертации — здесь, чтобы формат
@@ -88,10 +59,13 @@ const EMPTY_FORM: CreateWorkshopDto = {
 };
 
 export function WorkshopsPage() {
-  const { items, isLoading, error, reload, create } = useCrudResource<WorkshopResponseDto, CreateWorkshopDto>(
-    "/workshops",
-  );
+  const { items, isLoading, error, reload, create } = useCrudResource<
+    WorkshopResponseDto,
+    CreateWorkshopDto
+  >("/workshops?includeArchived=true");
   const [query, setQuery] = useState("");
+  const [showArchive, setShowArchive] = useState(false);
+  const [archiving, setArchiving] = useState(false);
   // null — режим создания, иначе правим этот цех той же формой.
   const [editing, setEditing] = useState<WorkshopResponseDto | null>(null);
   const [contractDate, setContractDate] = useState<Date | undefined>(undefined);
@@ -152,9 +126,40 @@ export function WorkshopsPage() {
     }
   };
 
+  const toggleArchive = async () => {
+    if (!editing || archiving) return;
+    const archive = editing.status !== "archived";
+    if (
+      archive &&
+      !window.confirm(
+        "Убрать цех в архив? Он перестанет предлагаться для новых партий. Текущие партии и документы сохранятся; цех можно восстановить.",
+      )
+    )
+      return;
+    setArchiving(true);
+    try {
+      await apiRequest(`/workshops/${editing.id}`, {
+        method: "PATCH",
+        body: { status: archive ? "archived" : "active" },
+      });
+      await reload();
+      setEditing(null);
+      toast.success(archive ? "Цех убран в архив" : "Цех восстановлен");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Не удалось сохранить");
+    } finally {
+      setArchiving(false);
+    }
+  };
+
   const filtered = useMemo(
-    () => items.filter((row) => row.name.toLowerCase().includes(query.trim().toLowerCase())),
-    [items, query],
+    () =>
+      items.filter(
+        (row) =>
+          (showArchive ? row.status === "archived" : row.status === "active") &&
+          row.name.toLowerCase().includes(query.trim().toLowerCase()),
+      ),
+    [items, query, showArchive],
   );
 
   return (
@@ -191,7 +196,7 @@ export function WorkshopsPage() {
                 поэтому подпись говорит, на что они влияют. */}
             <div className="border-t border-border pt-4">
               <p className="mb-3 text-[12px] text-muted-foreground">
-                Договор и условия — подставляются в спецификацию партии
+                Договор и условия — необязательно для создания партии
               </p>
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
                 <Field label="Номер договора">
@@ -216,7 +221,19 @@ export function WorkshopsPage() {
             </div>
 
             <div className="flex flex-col gap-2 md:flex-row md:self-start">
-              <Button type="submit" size="sm" loading={isSubmitting}>
+              {editing && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  loading={archiving}
+                  disabled={isSubmitting}
+                  onClick={() => void toggleArchive()}
+                >
+                  {editing.status === "archived" ? "Восстановить цех" : "Убрать цех в архив"}
+                </Button>
+              )}
+              <Button type="submit" size="sm" loading={isSubmitting} disabled={archiving}>
                 {editing ? "Сохранить" : isSubmitting ? "Добавляем..." : "Добавить цех"}
               </Button>
               {editing && (
@@ -237,7 +254,23 @@ export function WorkshopsPage() {
       {!isLoading && !error && (
         <>
           <div className="mb-3">
-            <SearchBar value={query} onChange={setQuery} placeholder="Поиск цеха" className="md:w-[340px]" />
+            <Button
+              type="button"
+              variant="secondary"
+              className="mb-3"
+              onClick={() => {
+                setShowArchive((value) => !value);
+                setEditing(null);
+              }}
+            >
+              {showArchive ? "Показать рабочие цеха" : "Открыть архив цехов"}
+            </Button>
+            <SearchBar
+              value={query}
+              onChange={setQuery}
+              placeholder="Поиск цеха"
+              className="md:w-[340px]"
+            />
           </div>
 
           {filtered.length === 0 ? (

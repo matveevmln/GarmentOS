@@ -61,6 +61,10 @@ export async function createProductionOrderFromSpecification(
     throw new DomainError(`Цех ${input.workshopId} не найден в этой компании`, "WORKSHOP_NOT_FOUND");
   }
 
+  if (workshop.status !== "active" || workshop.deletedAt) {
+    throw new DomainError("Цех недоступен для новой партии. Восстановите его из архива.", "WORKSHOP_UNAVAILABLE");
+  }
+
   const bomApproved = await deps.bomApproval.isBomApproved(input.companyId, input.bomId, input.productId);
   assertBomIsApproved(bomApproved, input.bomId);
 

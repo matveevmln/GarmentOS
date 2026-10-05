@@ -51,7 +51,7 @@ export interface WorkshopRepository {
   // Действующие цеха компании — нужен для авторезолва цеха в текстовом
   // производственном запросе, когда он явно не назван (Итерация 7): если
   // ровно один активный цех, выбирается автоматически.
-  listActiveByCompany(companyId: string): Promise<Workshop[]>;
+  listActiveByCompany(companyId: string, includeArchived?: boolean): Promise<Workshop[]>;
   // Атомарно резервирует следующий номер спецификации по договору этого
   // цеха и возвращает именно тот номер, который нужно использовать сейчас
   // (не значение счётчика после инкремента) — docs/DOCUMENT_ENGINE_ARCHITECTURE.md,

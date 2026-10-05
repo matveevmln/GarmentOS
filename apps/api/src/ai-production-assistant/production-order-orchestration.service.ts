@@ -304,12 +304,6 @@ export class ProductionOrderOrchestrationService {
       workshopCandidates.push(...workshops.map((w) => w.name));
       warnings.push(`Уточните цех — активны: ${workshopCandidates.join(", ")}`);
     }
-    if (workshopId) {
-      const workshop = workshops.find((w) => w.id === workshopId);
-      if (workshop && !workshop.contractNumber) {
-        warnings.push(`Для цеха "${workshop.name}" не указан действующий договор`);
-      }
-    }
 
     if (parsed.unitPrice === null) {
       warnings.push("Не указана цена пошива");
@@ -478,21 +472,13 @@ export class ProductionOrderOrchestrationService {
         throw new ProductionRequestOrchestrationError(`Цех ${draft.workshopId} не найден`, "WORKSHOP_NOT_FOUND");
       }
       if (!company) {
-        throw new ProductionRequestOrchestrationError(`Компания ${companyId} не найдена`, "COMPANY_NOT_FOUND");
-      }
-      // Основание генерации (owner, 2026-08-03 — «Паспорт партии», раздел 5):
-      // без номера договора спецификация физически не может быть выпущена
-      // ("Спецификация №N к договору № ___") — а раз он фиксируется в Snapshot
-      // именно сейчас и больше не меняется, проверить его нужно ДО перевода
-      // заказа в "placed", а не после: иначе при отказе заказ навсегда
-      // остаётся подтверждённым, но без снимка (assertCanConfirm разрешает
-      // подтверждение только из "draft" — повторно не подтвердить).
-      if (!workshop.contractNumber) {
         throw new ProductionRequestOrchestrationError(
-          `У цеха "${workshop.name}" не указан номер договора — заполните его в карточке цеха перед подтверждением заказа`,
-          "WORKSHOP_CONTRACT_NUMBER_MISSING",
+          `Компания ${companyId} не найдена`,
+          "COMPANY_NOT_FOUND",
         );
       }
+      // Договорные реквизиты необязательны для запуска партии (ADR 0004).
+      // Сохраняем отсутствие реквизита, не подставляем выдуманный номер.
 
       // computeSpecificationPricing тоже валидирует "основание генерации" —
       // бросает 404, если у модели нет утверждённого BOM — тоже до перевода
@@ -528,7 +514,7 @@ export class ProductionOrderOrchestrationService {
         materialsWithoutPriceHistory: pricing.materialsWithoutPriceHistory,
         paymentTerms: workshop.paymentTerms ?? formatDefaultPaymentTerms(Number(draft.plannedQuantity) * Number(draft.agreedUnitPrice)),
         deliveryMethod: workshop.deliveryMethod ?? "",
-        contractNumber: workshop.contractNumber,
+        contractNumber: workshop.contractNumber ?? "",
         contractDate: workshop.contractDate ?? "",
         contractorName: workshop.name,
         customerName: company.legalName ?? company.name,
