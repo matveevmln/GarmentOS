@@ -122,8 +122,14 @@ export function BatchOperationsPanel({
       await reload();
       onChanged();
     } catch (err) {
-      // Definite rejection is safe to edit; transport/5xx remains pending.
-      if (err instanceof ApiError && err.status >= 400 && err.status < 500) {
+      // Auth, missing endpoint and temporary refusals cannot prove that an earlier
+      // request was not applied. Preserve the UUID across those responses too.
+      if (
+        err instanceof ApiError &&
+        err.status >= 400 &&
+        err.status < 500 &&
+        ![401, 403, 404, 408, 429].includes(err.status)
+      ) {
         localStorage.removeItem(storageKey);
         setPending(null);
       }
