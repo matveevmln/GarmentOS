@@ -414,3 +414,41 @@ flowchart TD
 **Новый вопрос (не блокирует Итерацию 2)**: если один поставщик реально продаёт материалы нескольких категорий (например, ткань и фурнитуру одновременно), заводить ли его несколькими строками в `suppliers` или переходить на `supplier_categories` (многие-ко-многим)? Для MVP — несколько строк (проще); пересмотреть, если на практике это создаст путаницу в отчётах.
 
 **Риски Inbox (не блокируют Итерацию 3, см. `INBOX_ARCHITECTURE.md` раздел 8)**: стоимость AI-классификации на входящее сообщение (Cost-First, `docs/TECH_STACK.md`), точность сопоставления с существующей сущностью при низкой уверенности, выбор конкретного провайдера LLM/OCR/распознавания речи за `AIClassifier`-адаптером — решается в Итерации 3/9, не на уровне схемы.
+
+## Журналы операций партии (ADR 0005, 2026-10-10)
+
+Миграция 0035 добавляет две таблицы. Существующий `production_orders` остаётся источником партии.
+
+### batch_payments
+
+| Поле                | Тип                                    | Назначение                                       |
+| ------------------- | -------------------------------------- | ------------------------------------------------ |
+| id                  | uuid PK                                | UUID операции клиента, защита повторного запроса |
+| company_id          | uuid FK companies                      | Изоляция компании                                |
+| production_order_id | uuid FK production_orders              | Партия                                           |
+| transaction_id      | uuid FK transactions UNIQUE            | Существующая операция учёта денег                |
+| direction           | text CHECK payment/refund              | Оплата цеху / возврат                            |
+| currency            | text CHECK RUB                         | Явная валюта                                     |
+| amount              | numeric(14,2) CHECK > 0                | Сумма до копеек                                  |
+| note                | text                                   | Комментарий или причина исправления              |
+| reversal_of_id      | uuid nullable FK batch_payments UNIQUE | Один обратный факт для исходной записи           |
+| created_by          | uuid FK users                          | Автор                                            |
+| created_at          | timestamptz                            | Время                                            |
+
+Индекс `(company_id, production_order_id)`. Исходные записи сохраняются; исправление добавляет противоположную запись. Транзакция и аудит создаются атомарно. Нет каскадного удаления журнала.
+
+### receipt_corrections
+
+| Поле                | Тип                       | Назначение                                        |
+| ------------------- | ------------------------- | ------------------------------------------------- |
+| id                  | uuid PK                   | UUID поправки клиента                             |
+| company_id          | uuid FK companies         | Изоляция компании                                 |
+| production_order_id | uuid FK production_orders | Партия                                            |
+| warehouse_id        | uuid FK warehouses        | Место первоначальной приёмки, найденное из аудита |
+| reason              | text                      | Причина                                           |
+| before_variants     | jsonb                     | Прежние факты по SKU: productVariantId, quantity  |
+| after_variants      | jsonb                     | Новые факты по SKU                                |
+| created_by          | uuid FK users             | Автор                                             |
+| created_at          | timestamptz               | Время                                             |
+
+Индекс `(company_id, production_order_id)`. Остатки и `production_order_variants.received_quantity` меняются атомарно по разнице; знаковые `stock_movements` имеют `reference_type=production_order_receipt_correction`, `reference_id=id` поправки. Исходный приход остаётся. После ОТК/брака отдельная поправка запрещена; ниже резерва остаток не уменьшается. Точные правила и ограничения — ADR 0005.

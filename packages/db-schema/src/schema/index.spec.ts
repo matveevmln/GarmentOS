@@ -47,6 +47,8 @@ const EXPECTED_TABLES = [
   "transactions",
   "invoices",
   "audit_log",
+  "batch_payments",
+  "receipt_corrections",
   "notifications",
   "documents",
   "document_links",
@@ -71,7 +73,9 @@ const EXPECTED_TABLES = [
 
 function collectTables(): Record<string, unknown> {
   return Object.fromEntries(
-    Object.entries(schema).filter(([, value]) => typeof value === "object" && value !== null && "getSQL" in (value as object)),
+    Object.entries(schema).filter(
+      ([, value]) => typeof value === "object" && value !== null && "getSQL" in (value as object),
+    ),
   );
 }
 
@@ -142,9 +146,10 @@ describe("schema", () => {
       if (exempt.has(name)) continue;
 
       const columns = getTableColumns(table as Parameters<typeof getTableColumns>[0]);
-      expect(Object.keys(columns), `таблица "${key}" (${name}) должна содержать companyId`).toContain(
-        "companyId",
-      );
+      expect(
+        Object.keys(columns),
+        `таблица "${key}" (${name}) должна содержать companyId`,
+      ).toContain("companyId");
     }
   });
 });
