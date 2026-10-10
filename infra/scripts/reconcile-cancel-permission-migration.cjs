@@ -11,6 +11,10 @@ const journal = JSON.parse(readFileSync(resolve(folder, "meta/_journal.json"), "
 const target = journal.entries.find((e) => e.tag === "0034_seed_cancel_permission");
 const previous = journal.entries.find((e) => e.tag === "0033_seed_rollback_permission_and_presets");
 const hash = (entry) => createHash("sha256").update(readFileSync(resolve(folder, entry.tag + ".sql"))).digest("hex");
+// Drizzle хранит hash байтов: исторический Windows deploy использовал CRLF.
+// Допускаются только LF/CRLF одного исходного SQL, без trim или изменения текста.
+const previousSqlLf = readFileSync(resolve(folder, previous.tag + ".sql"), "utf8").replace(/\r\n/g, "\n");
+const previousHashes = new Set([hash(previous), ...[previousSqlLf, previousSqlLf.replace(/\n/g, "\r\n")].map((sql) => createHash("sha256").update(sql).digest("hex"))]);
 async function reconcile(tx) {
   const [exists] = await tx.unsafe("select to_regclass('drizzle.__drizzle_migrations') as table_name");
   if (!exists.table_name) return { reconciled: false, reason: "fresh_database" };
@@ -19,7 +23,10 @@ async function reconcile(tx) {
   if (last && Number(last.created_at) >= target.when) return { reconciled: false, reason: "already_recorded" };
   const permissions = await tx.unsafe("select id,module from permissions where code='contract_manufacturing.cancel'");
   if (!permissions.length) return { reconciled: false, reason: "normal_pending_migration" };
-  if (!last || Number(last.created_at) !== previous.when || last.hash !== hash(previous)) throw new Error("История до 0034 не совпадает; автоматическая сверка остановлена");
+  if (!last || Number(last.created_at) !== previous.when || !previousHashes.has(last.hash)) {
+    console.error("GARMENTOS_VERIFY " + JSON.stringify({ check: "cancel-seed-migration-history-mismatch", expected: { hashes: [...previousHashes], created_at: previous.when }, actual: last ?? null }));
+    throw new Error("История до 0034 не совпадает; автоматическая сверка остановлена");
+  }
   const [state] = await tx.unsafe(`select
     (select count(*) from roles where company_id is null and code in ('owner','director')) as roles,
     (select count(*) from roles r cross join permissions p where r.company_id is null and r.code in ('owner','director') and p.code='contract_manufacturing.cancel' and not exists (select 1 from role_permissions rp where rp.role_id=r.id and rp.permission_id=p.id)) as missing_grants`);
