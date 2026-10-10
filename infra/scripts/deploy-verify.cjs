@@ -3,6 +3,7 @@
 const { execFileSync } = require("node:child_process");
 const { resolve } = require("node:path");
 const root = resolve(__dirname, "../..");
+execFileSync(process.execPath, [resolve(__dirname, "reconcile-cancel-permission-migration.cjs")], { cwd: root, stdio: "inherit", timeout: 30000 });
 execFileSync("pnpm", ["--filter", "@garmentos/db-schema", "db:migrate"], {
   cwd: root,
   stdio: "inherit",

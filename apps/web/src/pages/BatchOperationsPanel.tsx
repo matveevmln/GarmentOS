@@ -122,8 +122,14 @@ export function BatchOperationsPanel({
       await reload();
       onChanged();
     } catch (err) {
-      // Definite rejection is safe to edit; transport/5xx remains pending.
-      if (err instanceof ApiError && err.status >= 400 && err.status < 500) {
+      // Auth, missing endpoint and temporary refusals cannot prove that an earlier
+      // request was not applied. Preserve the UUID across those responses too.
+      if (
+        err instanceof ApiError &&
+        err.status >= 400 &&
+        err.status < 500 &&
+        ![401, 403, 404, 408, 429].includes(err.status)
+      ) {
         localStorage.removeItem(storageKey);
         setPending(null);
       }
@@ -235,7 +241,8 @@ export function BatchOperationsPanel({
       ) : (
         <>
           <p className="mt-1 text-sm text-muted-foreground">
-            Согласовано {money(settlement.agreedAmount)}
+            {p.status === "draft" ? "Плановая сумма" : "Согласовано"}{" "}
+            {money(settlement.agreedAmount)}
           </p>
           <dl className="mt-3 grid grid-cols-2 gap-3">
             <div>
@@ -247,7 +254,11 @@ export function BatchOperationsPanel({
                 {p.status === "cancelled" ? "Расчёт при отмене" : "Осталось оплатить"}
               </dt>
               <dd className="num mt-1 text-xl font-semibold">
-                {settlement.outstanding === null ? "Не сверено" : money(settlement.outstanding)}
+                {settlement.outstanding === null
+                  ? p.status === "draft"
+                    ? "Не подтверждено"
+                    : "Не сверено"
+                  : money(settlement.outstanding)}
               </dd>
             </div>
           </dl>

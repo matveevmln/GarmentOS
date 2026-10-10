@@ -325,6 +325,28 @@ describe("Партия: приёмка, исправления и денежны
     ).toBe(false);
     await call("post", `/production-orders/${o.id}/receipt-correction`, correction(o)).expect(409);
   });
+  it("черновик показывает план, а не долг цеху, и не принимает оплату", async () => {
+    const o = (
+      await call("post", "/production-orders/place", {
+        requestId: crypto.randomUUID(),
+        mode: "draft",
+        productId,
+        workshopId,
+        plannedQuantity: 50,
+        agreedUnitPrice: 500,
+        variants: variantIds.map((id, i) => ({
+          productVariantId: id,
+          quantity: i === 0 ? 20 : 30,
+        })),
+      }).expect(201)
+    ).body as ProductionOrderResponseDto;
+    const s = (await call("get", `/production-orders/${o.id}/settlement`).expect(200))
+      .body as BatchSettlementDto;
+    expect(s.agreedAmount).toBe(25000);
+    expect(s.outstanding).toBeNull();
+    expect(s.canWrite).toBe(false);
+    await call("post", `/production-orders/${o.id}/payments`, payment()).expect(400);
+  });
   it("аванс и доплата учитываются с копейками, отдельно от этапа партии", async () => {
     const o = await createParty(false);
     const first = payment(12000.5);
@@ -412,15 +434,13 @@ describe("Партия: приёмка, исправления и денежны
   });
   it("историческое движение без валюты не превращается в подтверждённую оплату", async () => {
     const o = await createParty(false);
-    await db
-      .insert(transactions)
-      .values({
-        companyId,
-        type: "expense",
-        amount: "500",
-        referenceType: "production_order",
-        referenceId: o.id,
-      });
+    await db.insert(transactions).values({
+      companyId,
+      type: "expense",
+      amount: "500",
+      referenceType: "production_order",
+      referenceId: o.id,
+    });
     const s = (await call("get", `/production-orders/${o.id}/settlement`).expect(200))
       .body as BatchSettlementDto;
     expect(s.unclassifiedTransactions).toBe(1);
