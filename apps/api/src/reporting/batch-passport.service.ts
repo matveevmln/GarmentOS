@@ -207,6 +207,34 @@ export class BatchPassportService {
         timeline.push({ label: "Партия отменена", occurredAt: entry.occurredAt });
       else if (entry.action === "production_order.status_rolled_back")
         timeline.push({ label: "Последний этап исправлен", occurredAt: entry.occurredAt });
+      else if (entry.action === "production_order.receipt_corrected") {
+        const before = entry.beforeJson as { variants?: Array<{ quantity: number }> } | null;
+        const after = entry.afterJson as {
+          variants?: Array<{ quantity: number }>;
+          reason?: string;
+        } | null;
+        const sum = (rows?: Array<{ quantity: number }>) =>
+          rows?.reduce((n, r) => n + Number(r.quantity), 0);
+        timeline.push({
+          label: `Приёмка исправлена: ${sum(before?.variants)} → ${sum(after?.variants)} шт. · ${after?.reason ?? ""}`,
+          occurredAt: entry.occurredAt,
+        });
+      } else if (
+        ["production_order.payment_recorded", "production_order.payment_reversed"].includes(
+          entry.action,
+        )
+      ) {
+        const after = entry.afterJson as {
+          amount?: number;
+          currency?: string;
+          direction?: string;
+          note?: string;
+        } | null;
+        timeline.push({
+          label: `${entry.action.endsWith("reversed") ? "Запись платежа исправлена" : after?.direction === "refund" ? "Возврат от цеха записан" : "Оплата цеху записана"}: ${after?.amount ?? "—"} ${after?.currency ?? ""}${after?.note ? ` · ${after.note}` : ""}`,
+          occurredAt: entry.occurredAt,
+        });
+      }
     }
     timeline.sort((a, b) => a.occurredAt.getTime() - b.occurredAt.getTime());
 

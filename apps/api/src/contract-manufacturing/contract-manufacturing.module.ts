@@ -1,4 +1,6 @@
 import { IdentityModule } from "../identity/identity.module";
+import { BatchOperationsService } from "./batch-operations.service";
+import { BatchOperationsController } from "./batch-operations.controller";
 import { Module } from "@nestjs/common";
 import type { Database } from "@garmentos/db-schema";
 import {
@@ -17,9 +19,10 @@ import { ContractManufacturingService } from "./contract-manufacturing.service";
 
 @Module({
   imports: [WarehouseModule, CatalogModule, IdentityModule],
-  controllers: [WorkshopsController, ProductionOrdersController],
+  controllers: [WorkshopsController, ProductionOrdersController, BatchOperationsController],
   providers: [
     ContractManufacturingService,
+    BatchOperationsService,
     bomApprovalProvider,
     qcResultLookupProvider,
     {

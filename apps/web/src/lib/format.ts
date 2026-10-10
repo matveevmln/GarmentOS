@@ -18,7 +18,11 @@ const DEFAULT_CURRENCY = "сом";
 
 /** Денежная сумма. `decimals` по умолчанию 0 — как на дашборде; паспорт
  *  партии показывает копейки и передаёт 2 явно. */
-export function formatMoney(amount: number, currency: string = DEFAULT_CURRENCY, decimals = 0): string {
+export function formatMoney(
+  amount: number,
+  currency: string = DEFAULT_CURRENCY,
+  decimals = 0,
+): string {
   const num = new Intl.NumberFormat("ru-RU", {
     minimumFractionDigits: decimals,
     maximumFractionDigits: decimals,
@@ -46,6 +50,13 @@ export function formatDate(value: string | Date | null | undefined): string {
     month: "2-digit",
     year: "numeric",
   }).format(date);
+}
+
+export function formatDateTime(value: string | Date | null | undefined): string {
+  if (!value) return "—";
+  const date = typeof value === "string" ? new Date(value) : value;
+  if (Number.isNaN(date.getTime())) return "—";
+  return new Intl.DateTimeFormat("ru-RU", { dateStyle: "short", timeStyle: "short" }).format(date);
 }
 
 /** Единица измерения материала: ключ из справочника → русская подпись.

@@ -43,7 +43,7 @@ export const DialogContent = forwardRef<
       {...props}
     >
       {children}
-      <DialogPrimitive.Close className="absolute right-4 top-4 rounded-full p-1.5 text-muted-foreground hover:bg-secondary focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/30">
+      <DialogPrimitive.Close className="absolute right-2 top-2 grid h-11 w-11 place-items-center rounded-full text-muted-foreground hover:bg-secondary focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/30">
         <X className="h-4 w-4" />
         <span className="sr-only">Закрыть</span>
       </DialogPrimitive.Close>
@@ -53,14 +53,18 @@ export const DialogContent = forwardRef<
 DialogContent.displayName = "DialogContent";
 
 export function DialogHeader({ className, ...props }: HTMLAttributes<HTMLDivElement>) {
-  return <div className={cn("mb-4 flex flex-col gap-1.5", className)} {...props} />;
+  return <div className={cn("mb-4 flex flex-col gap-1.5 pr-8", className)} {...props} />;
 }
 
 export const DialogTitle = forwardRef<
   ElementRef<typeof DialogPrimitive.Title>,
   ComponentPropsWithoutRef<typeof DialogPrimitive.Title>
 >(({ className, ...props }, ref) => (
-  <DialogPrimitive.Title ref={ref} className={cn("text-base font-extrabold text-foreground", className)} {...props} />
+  <DialogPrimitive.Title
+    ref={ref}
+    className={cn("text-base font-extrabold text-foreground", className)}
+    {...props}
+  />
 ));
 DialogTitle.displayName = "DialogTitle";
 
@@ -68,7 +72,11 @@ export const DialogDescription = forwardRef<
   ElementRef<typeof DialogPrimitive.Description>,
   ComponentPropsWithoutRef<typeof DialogPrimitive.Description>
 >(({ className, ...props }, ref) => (
-  <DialogPrimitive.Description ref={ref} className={cn("text-[13px] text-muted-foreground", className)} {...props} />
+  <DialogPrimitive.Description
+    ref={ref}
+    className={cn("text-[13px] text-muted-foreground", className)}
+    {...props}
+  />
 ));
 DialogDescription.displayName = "DialogDescription";
 

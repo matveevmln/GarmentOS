@@ -1,4 +1,4 @@
-import { formatDate } from "../../lib/format";
+import { formatDateTime } from "../../lib/format";
 
 // Timeline — хронология событий по сущности (кто и когда что сделал).
 // Оформление перенесено из утверждённого прототипа дословно
@@ -19,9 +19,9 @@ export function Timeline({ items }: { items: TimelineItem[] }) {
       {items.map((it, i) => (
         <li key={`${it.title}-${i}`} className="relative pb-4 last:pb-0">
           <span className="absolute -left-[23px] top-1.5 h-1.5 w-1.5 rounded-full bg-muted-foreground/50" />
-          <div className="text-[13px]">{it.title}</div>
-          <div className="num mt-0.5 text-[11px] text-muted-foreground">
-            {[formatDate(it.date), it.by].filter(Boolean).join(" · ")}
+          <div className="text-sm">{it.title}</div>
+          <div className="num mt-0.5 text-xs text-muted-foreground">
+            {[formatDateTime(it.date), it.by].filter(Boolean).join(" · ")}
           </div>
         </li>
       ))}
