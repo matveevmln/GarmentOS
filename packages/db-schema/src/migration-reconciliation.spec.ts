@@ -1,4 +1,6 @@
 import { createRequire } from "node:module";
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import postgres from "postgres";
 import { afterAll, describe, expect, it } from "vitest";
@@ -53,6 +55,27 @@ describe("Сверка seed 0034 с журналом миграций", () => {
         "select created_at from drizzle.__drizzle_migrations order by created_at desc limit 1",
       );
       expect(Number(last.created_at)).toBe(1789646402681);
+    }));
+  it("принимает hash того же SQL с историческими Windows-переносами, не меняя прежнюю запись", async () =>
+    isolated(async (tx) => {
+      await tx.unsafe("delete from drizzle.__drizzle_migrations where created_at >= 1789732802681");
+      const source = readFileSync(
+        resolve(__dirname, "../drizzle/0033_seed_rollback_permission_and_presets.sql"),
+        "utf8",
+      );
+      const historicalHash = createHash("sha256")
+        .update(source.replace(/\r\n/g, "\n").replace(/\n/g, "\r\n"))
+        .digest("hex");
+      await tx.unsafe(
+        "update drizzle.__drizzle_migrations set hash=$1 where created_at=1789646402681",
+        [historicalHash],
+      );
+      expect((await reconcile(tx)).reconciled).toBe(true);
+      const [previous] = await tx.unsafe(
+        "select hash from drizzle.__drizzle_migrations where created_at=1789646402681",
+      );
+      expect(previous.hash).toBe(historicalHash);
+      expect((await reconcile(tx)).reconciled).toBe(false);
     }));
   it("не пропускает другую или повреждённую историю миграций", async () =>
     isolated(async (tx) => {
