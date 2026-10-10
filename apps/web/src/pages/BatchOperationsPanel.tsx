@@ -235,7 +235,8 @@ export function BatchOperationsPanel({
       ) : (
         <>
           <p className="mt-1 text-sm text-muted-foreground">
-            Согласовано {money(settlement.agreedAmount)}
+            {p.status === "draft" ? "Плановая сумма" : "Согласовано"}{" "}
+            {money(settlement.agreedAmount)}
           </p>
           <dl className="mt-3 grid grid-cols-2 gap-3">
             <div>
@@ -247,7 +248,11 @@ export function BatchOperationsPanel({
                 {p.status === "cancelled" ? "Расчёт при отмене" : "Осталось оплатить"}
               </dt>
               <dd className="num mt-1 text-xl font-semibold">
-                {settlement.outstanding === null ? "Не сверено" : money(settlement.outstanding)}
+                {settlement.outstanding === null
+                  ? p.status === "draft"
+                    ? "Не подтверждено"
+                    : "Не сверено"
+                  : money(settlement.outstanding)}
               </dd>
             </div>
           </dl>

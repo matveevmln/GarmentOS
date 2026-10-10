@@ -150,18 +150,16 @@ export class BatchOperationsService {
       const ordered = [...input.variants].sort((a, b) =>
         a.productVariantId.localeCompare(b.productVariantId),
       );
-      await this.db
-        .insert(receiptCorrections)
-        .values({
-          id: input.requestId,
-          companyId: user.companyId,
-          productionOrderId: id,
-          warehouseId: original.warehouseId,
-          reason: input.reason,
-          beforeVariants: input.expectedVariants,
-          afterVariants: input.variants,
-          createdBy: user.id,
-        });
+      await this.db.insert(receiptCorrections).values({
+        id: input.requestId,
+        companyId: user.companyId,
+        productionOrderId: id,
+        warehouseId: original.warehouseId,
+        reason: input.reason,
+        beforeVariants: input.expectedVariants,
+        afterVariants: input.variants,
+        createdBy: user.id,
+      });
       for (const row of ordered) {
         const delta = row.quantity - beforeById.get(row.productVariantId)!;
         if (delta === 0) continue;
@@ -212,16 +210,14 @@ export class BatchOperationsService {
               "Недостаточно свободного остатка: часть изделий уже отгружена или зарезервирована",
             );
         }
-        await this.db
-          .insert(stockMovements)
-          .values({
-            stockItemId: itemId,
-            type: "adjustment",
-            quantity: String(delta),
-            referenceType: "production_order_receipt_correction",
-            referenceId: input.requestId,
-            createdBy: user.id,
-          });
+        await this.db.insert(stockMovements).values({
+          stockItemId: itemId,
+          type: "adjustment",
+          quantity: String(delta),
+          referenceType: "production_order_receipt_correction",
+          referenceId: input.requestId,
+          createdBy: user.id,
+        });
         await this.db
           .update(productionOrderVariants)
           .set({ receivedQuantity: String(row.quantity) })
@@ -293,7 +289,7 @@ export class BatchOperationsService {
         ...computeBatchSettlement(
           agreedAmount,
           entries,
-          unclassifiedTransactions > 0 || order.status === "cancelled",
+          unclassifiedTransactions > 0 || ["draft", "cancelled"].includes(order.status),
         ),
         unclassifiedTransactions,
         canWrite:
@@ -424,20 +420,18 @@ export class BatchOperationsService {
         referenceId: id,
       })
       .returning();
-    await this.db
-      .insert(batchPayments)
-      .values({
-        id: input.requestId,
-        companyId: user.companyId,
-        productionOrderId: id,
-        transactionId: money.id,
-        direction: input.direction,
-        currency: input.currency,
-        amount: input.amount.toFixed(2),
-        note: input.note,
-        reversalOfId,
-        createdBy: user.id,
-      });
+    await this.db.insert(batchPayments).values({
+      id: input.requestId,
+      companyId: user.companyId,
+      productionOrderId: id,
+      transactionId: money.id,
+      direction: input.direction,
+      currency: input.currency,
+      amount: input.amount.toFixed(2),
+      note: input.note,
+      reversalOfId,
+      createdBy: user.id,
+    });
     await this.audit.recordForUser(user, {
       entityType: "production_order",
       entityId: id,
