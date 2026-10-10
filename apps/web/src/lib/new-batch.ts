@@ -4,8 +4,11 @@ import { useLocation, useNavigate } from "react-router-dom";
 export function useNewBatch() {
   const location = useLocation();
   const navigate = useNavigate();
-  return (productId?: string) =>
-    void navigate(`/new-batch${productId ? `?productId=${encodeURIComponent(productId)}` : ""}`, {
-      state: { batchBackground: location },
-    });
+  return (productId?: string, repeatOrderId?: string) =>
+    void navigate(
+      `/new-batch${repeatOrderId ? `?repeatOrderId=${encodeURIComponent(repeatOrderId)}` : productId ? `?productId=${encodeURIComponent(productId)}` : ""}`,
+      {
+        state: { batchBackground: location },
+      },
+    );
 }

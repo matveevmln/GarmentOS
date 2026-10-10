@@ -22,6 +22,7 @@ export {
   assertCanCancel,
 } from "./domain/production-order";
 export { DomainError } from "./domain/errors";
+export { validateReceiptCorrection } from "./domain/receipt-correction";
 
 export type {
   BomApprovalPort,

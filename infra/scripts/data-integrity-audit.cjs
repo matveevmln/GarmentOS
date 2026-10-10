@@ -31,10 +31,11 @@ const checks = {
     (select o.id,v.product_variant_id,sum(coalesce(v.received_quantity,v.quantity)) as expected
      from production_orders o join production_order_variants v on v.production_order_id=o.id
      where o.status in ('received','completed') group by o.id,v.product_variant_id) r
-    left join (select m.reference_id,s.product_variant_id,sum(m.quantity) as actual
+    left join (select coalesce(c.production_order_id,m.reference_id) as reference_id,s.product_variant_id,sum(m.quantity) as actual
      from stock_movements m join stock_items s on s.id=m.stock_item_id
-     where m.reference_type='production_order' and m.type='receipt'
-     group by m.reference_id,s.product_variant_id) m
+     left join receipt_corrections c on m.reference_type='production_order_receipt_correction' and c.id=m.reference_id
+     where (m.reference_type='production_order' and m.type='receipt') or (m.reference_type='production_order_receipt_correction' and c.id is not null and m.type='adjustment')
+     group by coalesce(c.production_order_id,m.reference_id),s.product_variant_id) m
     on m.reference_id=r.id and m.product_variant_id=r.product_variant_id
     where r.expected<>coalesce(m.actual,0)`,
   qc_totals: `select count(*) as count from production_order_qc_results

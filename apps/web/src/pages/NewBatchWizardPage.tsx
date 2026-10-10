@@ -12,6 +12,7 @@ import {
   type WorkshopResponseDto,
   type ProductionOrderResponseDto,
   type PreviewProductionOrderVariantsResponseDto,
+  type BatchPassportResponseDto,
 } from "@garmentos/shared-types";
 import { apiRequest, ApiError } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
@@ -47,6 +48,7 @@ const draftSchema = z.object({
   dueDate: z.string(),
   pending: placeProductionOrderSchema.nullable(),
   modelPending: quickProductSchema.nullable().default(null),
+  sourceOrderId: z.string().default(""),
 });
 type Draft = z.infer<typeof draftSchema>;
 const TITLES = ["Модель", "Количество", "Цена и срок", "Проверка"];
@@ -77,6 +79,7 @@ function fresh(productId = ""): Draft {
     dueDate: "",
     pending: null,
     modelPending: null,
+    sourceOrderId: "",
   };
 }
 
@@ -84,18 +87,31 @@ export function NewBatchWizardPage({ onClose }: { onClose?: () => void }) {
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const { user } = useAuth();
-  const key = `garmentos.batch-draft:${user?.companyId}:${user?.id}`;
+  const baseKey = `garmentos.batch-draft:${user?.companyId}:${user?.id}`;
+  const repeatOrderId = params.get("repeatOrderId") ?? "";
+  const repeatKey = repeatOrderId ? `${baseKey}:repeat:${repeatOrderId}` : baseKey;
   const requestedProductId = params.get("productId") ?? "";
   const [initial] = useState(() => {
     try {
-      const parsed = draftSchema.safeParse(JSON.parse(localStorage.getItem(key) ?? "null"));
+      const main = draftSchema.safeParse(JSON.parse(localStorage.getItem(baseKey) ?? "null"));
+      if (repeatOrderId && main.success && (main.data.pending || main.data.modelPending))
+        return { draft: main.data, restored: true, blockedRepeat: true };
+      const parsed = draftSchema.safeParse(JSON.parse(localStorage.getItem(repeatKey) ?? "null"));
       if (parsed.success) {
         // Не менять состав запроса, ответ на который ещё не подтверждён.
-        if (!requestedProductId || parsed.data.productId === requestedProductId || parsed.data.pending || parsed.data.modelPending)
+        if (
+          (!repeatOrderId || parsed.data.sourceOrderId === repeatOrderId) &&
+          (!requestedProductId ||
+            parsed.data.productId === requestedProductId ||
+            parsed.data.pending ||
+            parsed.data.modelPending)
+        )
           return { draft: parsed.data, restored: true };
       }
       if (requestedProductId) {
-        const modelDraft = draftSchema.safeParse(JSON.parse(localStorage.getItem(`${key}:model:${requestedProductId}`) ?? "null"));
+        const modelDraft = draftSchema.safeParse(
+          JSON.parse(localStorage.getItem(`${repeatKey}:model:${requestedProductId}`) ?? "null"),
+        );
         if (modelDraft.success && modelDraft.data.productId === requestedProductId)
           return { draft: modelDraft.data, restored: true };
       }
@@ -104,6 +120,8 @@ export function NewBatchWizardPage({ onClose }: { onClose?: () => void }) {
     }
     return { draft: fresh(requestedProductId), restored: false };
   });
+  const blockedRepeat = "blockedRepeat" in initial && initial.blockedRepeat;
+  const key = blockedRepeat ? baseKey : repeatKey;
   const [restored, setRestored] = useState(initial.restored);
   const [draft, setDraft] = useState<Draft>(initial.draft);
   const [products, setProducts] = useState<ProductResponseDto[]>([]);
@@ -126,9 +144,14 @@ export function NewBatchWizardPage({ onClose }: { onClose?: () => void }) {
       try {
         const previous = draftSchema.safeParse(JSON.parse(localStorage.getItem(key) ?? "null"));
         if (previous.success) previousDraft = previous.data;
-      } catch { /* Повреждённое значение можно заменить новым вводом. */ }
+      } catch {
+        /* Повреждённое значение можно заменить новым вводом. */
+      }
       if (previousDraft?.productId && previousDraft.productId !== draft.productId)
-        localStorage.setItem(`${key}:model:${previousDraft.productId}`, JSON.stringify(previousDraft));
+        localStorage.setItem(
+          `${key}:model:${previousDraft.productId}`,
+          JSON.stringify(previousDraft),
+        );
       if (draft.productId)
         localStorage.setItem(`${key}:model:${draft.productId}`, JSON.stringify(draft));
       localStorage.setItem(key, JSON.stringify(draft));
@@ -144,8 +167,61 @@ export function NewBatchWizardPage({ onClose }: { onClose?: () => void }) {
     void Promise.all([
       apiRequest<ProductResponseDto[]>("/products"),
       apiRequest<WorkshopResponseDto[]>("/workshops"),
+      repeatOrderId && !blockedRepeat
+        ? apiRequest<BatchPassportResponseDto>(`/production-orders/${repeatOrderId}/passport`)
+        : Promise.resolve(null),
     ])
-      .then(([models, shops]) => {
+      .then(([models, shops, source]) => {
+        if (source && !initial.draft.sourceOrderId) {
+          const model = models.find(
+            (m) => m.id === source.product.id && !m.deletedAt && m.status !== "discontinued",
+          );
+          if (!model)
+            throw new Error(
+              "Модель в архиве или недоступна. Восстановите её перед повторным пошивом.",
+            );
+          if (source.variants.some((r) => r.variantType === "rework"))
+            throw new Error(
+              "В этой партии есть переделка. Для повторного платного пошива создайте новую партию модели и проверьте количества и цену.",
+            );
+          const prices = new Set(
+            source.variants.map((r) => Number(r.unitPrice ?? source.agreedUnitPrice)),
+          );
+          if (prices.size > 1)
+            throw new Error(
+              "В этой партии разные цены по строкам. Создайте новую партию модели с согласованной ценой.",
+            );
+          const quantities: Record<string, number> = {};
+          const rows = source.variants.map((r) => {
+            quantities[r.color] = (quantities[r.color] ?? 0) + Number(r.quantity);
+            return {
+              productVariantId: r.productVariantId,
+              size: r.size,
+              color: r.color,
+              quantity: Number(r.quantity),
+            };
+          });
+          const active = shops.filter((s) => s.status === "active");
+          setDraft((prev) =>
+            prev.sourceOrderId
+              ? prev
+              : {
+                  ...fresh(source.product.id),
+                  sourceOrderId: source.id,
+                  name: source.product.name,
+                  workshopId:
+                    active.length === 1
+                      ? active[0].id
+                      : active.some((s) => s.id === source.workshop.id)
+                        ? source.workshop.id
+                        : "",
+                  quantities,
+                  rows,
+                  price: Number(source.variants[0]?.unitPrice ?? source.agreedUnitPrice),
+                  step: 1,
+                },
+          );
+        }
         setDraft((prev) => ({
           ...prev,
           name: prev.name || models.find((model) => model.id === prev.productId)?.name || "",
@@ -153,7 +229,11 @@ export function NewBatchWizardPage({ onClose }: { onClose?: () => void }) {
         setProducts(models.filter((model) => !model.deletedAt && model.status !== "discontinued"));
         const active = shops.filter((shop) => shop.status === "active");
         setWorkshops(active);
-        if (active.length === 1) setDraft((prev) => ({ ...prev, workshopId: prev.pending ? prev.workshopId : active[0].id }));
+        if (active.length === 1)
+          setDraft((prev) => ({
+            ...prev,
+            workshopId: prev.pending ? prev.workshopId : active[0].id,
+          }));
       })
       .catch((err) => setError(err instanceof Error ? err.message : "Не удалось загрузить данные"))
       .finally(() => setLoading(false));
@@ -432,16 +512,30 @@ export function NewBatchWizardPage({ onClose }: { onClose?: () => void }) {
       <p className="mb-3 text-sm text-muted-foreground">
         Шаг {draft.step + 1} из 4 · {TITLES[draft.step]}
       </p>
+      {draft.sourceOrderId && (
+        <p className="mb-3 rounded-lg bg-primary/5 p-3 text-sm">
+          Повтор партии: количество, размеры и прежняя цена перенесены. Проверьте условия; новый
+          срок укажите при необходимости.
+        </p>
+      )}
+      {blockedRepeat && (
+        <p role="alert" className="mb-3 text-sm text-warning">
+          Сначала подтвердите результат предыдущего сохранения. Повтор партии не заменяет
+          отправленный запрос.
+        </p>
+      )}
       {restored && (
         <p className="mb-3 text-sm text-muted-foreground">
           Восстановлено то, что вы заполняли на этом устройстве.
         </p>
       )}
-      {requestedProductId && requestedProductId !== draft.productId && (draft.pending || draft.modelPending) && (
-        <p role="alert" className="mb-3 text-sm text-warning">
-          Сначала подтвердите предыдущее сохранение. Затем можно создать партию выбранной модели.
-        </p>
-      )}
+      {requestedProductId &&
+        requestedProductId !== draft.productId &&
+        (draft.pending || draft.modelPending) && (
+          <p role="alert" className="mb-3 text-sm text-warning">
+            Сначала подтвердите предыдущее сохранение. Затем можно создать партию выбранной модели.
+          </p>
+        )}
       {storageError && (
         <p role="alert" className="mb-3 text-sm text-destructive">
           Браузер не сохраняет черновик. Оставьте эту страницу открытой до завершения.

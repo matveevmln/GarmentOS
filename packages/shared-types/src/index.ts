@@ -22,3 +22,4 @@ export * from "./specification";
 export * from "./audit";
 export * from "./preset";
 export * from "./fulfillment";
+export * from "./contract-manufacturing/batch-operations";

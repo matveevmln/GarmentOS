@@ -32,6 +32,7 @@ interface Props {
   onComplete: () => void;
   onCreateSpecification: () => void;
   onDownload: (() => void) | null;
+  operations?: ReactNode;
 }
 
 export function SellerBatchView({
@@ -49,6 +50,7 @@ export function SellerBatchView({
   onComplete,
   onCreateSpecification,
   onDownload,
+  operations,
 }: Props) {
   const navigate = useNavigate();
   const openNewBatch = useNewBatch();
@@ -143,8 +145,8 @@ export function SellerBatchView({
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent>
-              <DropdownMenuItem onSelect={() => openNewBatch(p.product.id)}>
-                Новая партия этой модели
+              <DropdownMenuItem onSelect={() => openNewBatch(p.product.id, p.id)}>
+                Повторить партию
               </DropdownMenuItem>
               {p.specification && (
                 <DropdownMenuItem
@@ -237,6 +239,7 @@ export function SellerBatchView({
           <p className="mt-1 text-sm text-muted-foreground">{copy[1]}</p>
         </div>
       </section>
+      {operations}
       <div className="seller-tabs" role="tablist" aria-label="Данные партии">
         {(
           [

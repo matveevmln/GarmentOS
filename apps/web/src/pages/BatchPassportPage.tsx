@@ -1,4 +1,5 @@
 import { useNewBatch } from "../lib/new-batch";
+import { BatchOperationsPanel } from "./BatchOperationsPanel";
 import { SellerBatchView } from "./SellerBatchView";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
@@ -1824,7 +1825,9 @@ export function BatchPassportPage() {
         <dl className="grid grid-cols-1 gap-y-2.5 text-[13px] sm:grid-cols-[180px_1fr]">
           <dt className="text-muted-foreground">Договор</dt>
           <dd className="num">
-            {snapshot.contractNumber} от {formatDate(snapshot.contractDate)}
+            {snapshot.contractNumber
+              ? `${snapshot.contractNumber}${snapshot.contractDate ? ` от ${formatDate(snapshot.contractDate)}` : ""}`
+              : "Не указан · не мешает пошиву"}
           </dd>
           <dt className="text-muted-foreground">Заказчик</dt>
           <dd>{snapshot.customerName}</dd>
@@ -1876,8 +1879,8 @@ export function BatchPassportPage() {
               ? { label: "Завершить партию", run: requestCompleteOrder, busy: isCompleting }
               : passport.status === "completed"
                 ? {
-                    label: "+ Новая партия этой модели",
-                    run: () => openNewBatch(passport.product.id),
+                    label: "Повторить партию",
+                    run: () => openNewBatch(passport.product.id, passport.id),
                     busy: false,
                   }
                 : null;
@@ -1887,6 +1890,17 @@ export function BatchPassportPage() {
         passport={passport}
         actions={actions}
         hasQuality={Boolean(qcResult)}
+        operations={
+          <BatchOperationsPanel
+            key={passport.id}
+            passport={passport}
+            onChanged={() => {
+              load();
+              loadQc();
+              loadDefects();
+            }}
+          />
+        }
         primary={primary}
         renderTab={renderTab}
         onDetails={() => setShowDetails(true)}
